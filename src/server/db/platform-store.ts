@@ -34,9 +34,7 @@ import { INVALID_SUPABASE_KEY_MESSAGE, isInvalidSupabaseKeyError } from "@/serve
 import { MemberAreaConflictError } from "@/server/member-area/errors";
 import { sanitizeProfileAvatarUrl } from "@/server/member-area/student-pages-model";
 import { getStudentProfileRecord } from "@/server/member-area/student-profile";
-import { getCurrentLicenseState } from "@/server/licensing/current-state";
-import { NO_DISABLED_FEATURES } from "@/server/licensing/features";
-import { disabledFeaturesOf } from "@/server/licensing/require-feature";
+import { getDisabledFeatures } from "@/server/licensing/guards";
 import { activityDeltaOf, type ActivityDelta } from "@/server/progress/activity-delta";
 import { recordStudentActivity } from "@/server/progress/student-activity";
 import { readPlatformSetting, updatePlatformSettingLatest, writePlatformSettingGuarded } from "@/server/member-area/settings-store";
@@ -2270,13 +2268,14 @@ function applyLessonProgress(database: PlatformDatabase, contentId: string, modu
 }
 
 export async function getAppShellData(user?: SessionUser) {
-  const [database, adminAccess, profile, license] = await Promise.all([
+  const [database, adminAccess, profile, disabledFeatures] = await Promise.all([
     readDatabaseForUser(user),
     user ? getAdminAccessForUser(user.id) : Promise.resolve(null),
     user ? getStudentProfileRecord(user) : Promise.resolve(null),
-    getCurrentLicenseState()
+    // Os modulos desligados na licenca (docs/32 §11.8). A leitura da licenca que falha esconde os modulos e nunca
+    // derruba a pagina do aluno (getDisabledFeatures).
+    getDisabledFeatures()
   ]);
-  const disabledFeatures = disabledFeaturesOf(license);
 
   return {
     branding: database.branding,
@@ -2284,7 +2283,7 @@ export async function getAppShellData(user?: SessionUser) {
     canUseAccessPreview: Boolean(adminAccess && catalogScope(adminAccess) === null),
     // Modulos desligados na licenca (docs/32 §11.8): o menu e a faixa "Ao vivo agora" escondem os pontos deles. No modo
     // "off", nenhum (a mesma lista vazia de sempre).
-    disabledFeatures: disabledFeatures.length === 0 ? NO_DISABLED_FEATURES : disabledFeatures,
+    disabledFeatures,
     // Nome e foto vem do perfil do aluno (profiles), que ele e a equipe editam. O id e o dono da memoria do
     // sino no navegador (outra conta no mesmo navegador nunca ve o numero nem a pagina da anterior).
     student: {

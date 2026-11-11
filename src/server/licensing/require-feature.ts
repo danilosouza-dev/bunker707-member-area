@@ -5,13 +5,24 @@
 // Quem pergunta: runAdminAction (src/server/actions/run-action.ts, a classe de toda Server Action do admin e o modulo
 // das dos Webinarios), as rotas e as paginas pelas guardas de src/server/licensing/guards.ts, o agendador
 // (src/server/jobs/run-tick.ts, as tarefas de um modulo) e os menus, que recebem a lista dos modulos desligados.
+//
+// A situacao `null` e a leitura que falhou no modo "enforce" (readCurrentLicenseState, current-state.ts): fecha. Nenhum
+// modulo liga, nenhuma chave interna liga, e so o dever legal passa, como na copia nunca ativada; a pagina continua
+// abrindo (revisao de 11/11/2026).
 
 import { KNOWN_FEATURES, type FeatureKey } from "./features";
 import { allowsActionClass, type ActionClass } from "./model";
 import type { LicenseState } from "./state";
 
-/** Modulo (feature) ligado: no modo "off", todos; no "enforce", so os que a licenca traz agora. */
-export function isFeatureEnabled(state: LicenseState, key: string): boolean {
+/** A situacao do pedido, ou null quando a leitura falhou (fecha). */
+export type LicenseStateOrUnread = LicenseState | null;
+
+/** Modulo (feature) ligado: no modo "off", todos; no "enforce", so os que a licenca traz agora; sem leitura, nenhum. */
+export function isFeatureEnabled(state: LicenseStateOrUnread, key: string): boolean {
+  if (state === null) {
+    return false;
+  }
+
   if (state.mode === "off") {
     return true;
   }
@@ -20,20 +31,24 @@ export function isFeatureEnabled(state: LicenseState, key: string): boolean {
 }
 
 /** Os modulos que esta versao conhece e que a licenca nao liga agora (os menus escondem). No modo "off", nenhum. */
-export function disabledFeaturesOf(state: LicenseState): FeatureKey[] {
+export function disabledFeaturesOf(state: LicenseStateOrUnread): FeatureKey[] {
   return KNOWN_FEATURES.filter((key) => !isFeatureEnabled(state, key));
 }
 
 /**
  * Chave interna da nossa propria licenca (as paginas de vendedor, como Minhas licencas). Nunca liga no modo
- * "off": so a licenca assinada da nossa escola traz essas chaves.
+ * "off" nem sem leitura: so a licenca assinada da nossa escola traz essas chaves.
  */
-export function isGrantEnabled(state: LicenseState, key: string): boolean {
-  return state.mode === "enforce" && state.evaluation.grants.includes(key);
+export function isGrantEnabled(state: LicenseStateOrUnread, key: string): boolean {
+  return state !== null && state.mode === "enforce" && state.evaluation.grants.includes(key);
 }
 
-/** A classe de acao passa no degrau de agora? No modo "off", sempre. */
-export function isActionClassAllowed(state: LicenseState, actionClass: ActionClass): boolean {
+/** A classe de acao passa no degrau de agora? No modo "off", sempre; sem leitura, so o dever legal. */
+export function isActionClassAllowed(state: LicenseStateOrUnread, actionClass: ActionClass): boolean {
+  if (state === null) {
+    return actionClass === "dever_legal";
+  }
+
   if (state.mode === "off") {
     return true;
   }
@@ -69,13 +84,13 @@ export class LicenseRestrictionError extends Error {
   }
 }
 
-export function requireFeature(state: LicenseState, key: string): void {
+export function requireFeature(state: LicenseStateOrUnread, key: string): void {
   if (!isFeatureEnabled(state, key)) {
     throw new LicenseRestrictionError("feature", key);
   }
 }
 
-export function requireActionClass(state: LicenseState, actionClass: ActionClass): void {
+export function requireActionClass(state: LicenseStateOrUnread, actionClass: ActionClass): void {
   if (!isActionClassAllowed(state, actionClass)) {
     throw new LicenseRestrictionError("action_class", actionClass);
   }
@@ -85,7 +100,7 @@ export function requireActionClass(state: LicenseState, actionClass: ActionClass
 export type LicenseCheck = { actionClass?: ActionClass; feature?: FeatureKey };
 
 /** Confere o modulo (404) e depois a classe (403); lanca LicenseRestrictionError. */
-export function requireLicensed(state: LicenseState, check: LicenseCheck): void {
+export function requireLicensed(state: LicenseStateOrUnread, check: LicenseCheck): void {
   if (check.feature !== undefined) {
     requireFeature(state, check.feature);
   }
@@ -96,7 +111,7 @@ export function requireLicensed(state: LicenseState, check: LicenseCheck): void 
 }
 
 /** A recusa de uma rota, ou null quando passa: 404 com o modulo desligado, 403 com a classe barrada. */
-export function licenseRefusalOf(state: LicenseState, check: LicenseCheck): { message: string; status: 403 | 404 } | null {
+export function licenseRefusalOf(state: LicenseStateOrUnread, check: LicenseCheck): { message: string; status: 403 | 404 } | null {
   if (check.feature !== undefined && !isFeatureEnabled(state, check.feature)) {
     return { message: LICENSE_REFUSAL_MESSAGES.feature, status: 404 };
   }

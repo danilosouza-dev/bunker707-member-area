@@ -34,6 +34,7 @@ registerHooks({
     if (modulo === "server/licensing/current-state") {
       return stub(`
         export async function getCurrentLicenseState() { return globalThis.__licencaClasses.situacao; }
+        export async function readCurrentLicenseState() { return globalThis.__licencaClasses.situacao; }
         export function forgetLicenseStateMemory() {}`);
     }
     if (modulo === "server/auth/permissions") {

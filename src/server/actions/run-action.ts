@@ -6,7 +6,7 @@ import type { ZodType } from "zod";
 import { actionOk, toActionError, type ActionResult } from "@/lib/action-result";
 import { requireRole, requireScope, type AdminAction, type ScopeTarget } from "@/server/auth/permissions";
 import type { AdminAccess, AdminRole } from "@/server/auth/roles";
-import { getCurrentLicenseState } from "@/server/licensing/current-state";
+import { readCurrentLicenseState } from "@/server/licensing/current-state";
 import type { FeatureKey } from "@/server/licensing/features";
 import type { ActionClass } from "@/server/licensing/model";
 import { requireActionClass, requireLicensed } from "@/server/licensing/require-feature";
@@ -42,8 +42,9 @@ export type AdminActionOptions<Input> = {
  * Esqueleto unico das Server Actions do admin:
  * 1. requireRole(action) (401/403 viram ActionFailure);
  * 2. a licenca (docs/32 §11.3 e §11.8): o modulo da acao (404) e a classe dela no degrau de agora (403). Uma leitura
- *    da situacao por pedido (getCurrentLicenseState); no modo "off" nada e lido e nada e barrado. A classe que depende
- *    da entrada e conferida logo depois de validar, ainda antes do handler;
+ *    da situacao por pedido (readCurrentLicenseState); no modo "off" nada e lido e nada e barrado; com a leitura que
+ *    falha, fecha: so o dever legal passa (a tela Licenca, despublicar, apagar). A classe que depende da entrada e
+ *    conferida logo depois de validar, ainda antes do handler;
  * 3. schema.parse(rawInput) (erros viram 400 com fieldErrors);
  * 4. requireScope(access, action, options.target(input)) quando a pessoa tem a acao so nos cursos dela;
  * 5. handler; qualquer erro vira ActionFailure via toActionError (nunca lanca para o cliente).
@@ -66,7 +67,7 @@ export async function runAdminAction<Input, Output>(
 ): Promise<ActionResult<Output>> {
   try {
     const { access, role, user } = await requireRole(action);
-    const license = await getCurrentLicenseState();
+    const license = await readCurrentLicenseState();
 
     requireLicensed(license, { actionClass: typeof actionClass === "function" ? undefined : actionClass, feature: options.feature });
 

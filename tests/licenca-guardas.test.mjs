@@ -40,6 +40,7 @@ registerHooks({
           globalThis.__licencaDoPedido.leituras += 1;
           return globalThis.__licencaDoPedido.situacao;
         }
+        export const readCurrentLicenseState = getCurrentLicenseState;
         export function forgetLicenseStateMemory() {}`);
     }
     if (modulo === "server/auth/guards") {

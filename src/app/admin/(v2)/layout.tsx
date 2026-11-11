@@ -18,7 +18,7 @@ import { isPendingMigrationError } from "@/server/db/pending-migration";
 import { checkLicenseNow } from "@/server/licensing/actions";
 import { isLicenseManager } from "@/server/licensing/admin-access";
 import { licenseBannerOf, type LicenseBannerModel } from "@/server/licensing/copy";
-import { getCurrentLicenseState } from "@/server/licensing/current-state";
+import { readCurrentLicenseState } from "@/server/licensing/current-state";
 import { getDisabledFeatures } from "@/server/licensing/guards";
 
 export const metadata: Metadata = {
@@ -68,19 +68,12 @@ export default async function AdminV2Layout({ children }: { children: ReactNode 
 
 /**
  * A faixa da Licenca (src/server/licensing/copy.ts, licenseBannerOf): a mesma situacao do pedido que o menu ja leu
- * (getCurrentLicenseState, uma leitura por pedido). No modo "off", nenhuma, sem ler nada. Sem leitura, nenhuma faixa:
- * a moldura nunca quebra por causa dela.
+ * (readCurrentLicenseState, uma leitura por pedido, que nunca lanca). No modo "off", nenhuma, sem ler nada. Sem
+ * leitura, nenhuma faixa (o motivo vai para o log uma vez): a moldura nunca quebra por causa dela.
  */
 async function readLicenseBanner(): Promise<LicenseBannerModel | null> {
-  try {
-    return licenseBannerOf(await getCurrentLicenseState(), { configuredHost: getConfiguredSiteOrigin() });
-  } catch (error) {
-    if (!isPendingMigrationError(error)) {
-      console.error("[admin] Faixa da Licença:", error instanceof Error ? error.message : error);
-    }
-
-    return null;
-  }
+  const state = await readCurrentLicenseState();
+  return state ? licenseBannerOf(state, { configuredHost: getConfiguredSiteOrigin() }) : null;
 }
 
 /**

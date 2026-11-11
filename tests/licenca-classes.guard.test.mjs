@@ -88,7 +88,8 @@ test("runAdminAction exige a classe e confere a licença antes de validar a entr
   assert.match(signature, /^\s*action: AdminAction,\s*actionClass: AdminActionClass<Input>,\s*schema: ZodType<Input>,/, "a classe é o segundo parâmetro, sem valor padrão");
 
   const role = code.indexOf("await requireRole(action)");
-  const license = code.indexOf("await getCurrentLicenseState()");
+  // A leitura que nunca lança: sem leitura, fecha (só o dever legal passa), em vez de derrubar a ação.
+  const license = code.indexOf("await readCurrentLicenseState()");
   const fixed = code.indexOf("requireLicensed(license,");
   const parse = code.indexOf("schema.parse(rawInput)");
   const resolved = code.indexOf("requireActionClass(license, actionClass(input))");

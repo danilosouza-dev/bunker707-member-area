@@ -37,6 +37,7 @@ registerHooks({
     if (modulo === "server/licensing/current-state") {
       return stub(`
         export async function getCurrentLicenseState() { return globalThis.__licencaTela.situacao; }
+        export async function readCurrentLicenseState() { return globalThis.__licencaTela.situacao; }
         export function forgetLicenseStateMemory() { globalThis.__licencaTela.esquecida += 1; }`);
     }
     if (modulo === "server/licensing/store-db") {

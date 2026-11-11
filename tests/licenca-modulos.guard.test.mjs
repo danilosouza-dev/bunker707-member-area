@@ -209,7 +209,10 @@ test("os componentes do núcleo só desenham as peças dos Webinários com o mó
   for (const file of shells) {
     assert.match(read(file), /<AppShell[^>]*disabledFeatures=\{shellData\.disabledFeatures\}/, `${file}: passa a lista ao AppShell`);
   }
-  assert.match(codeOf(read("src/server/db/platform-store.ts")), /disabledFeatures: disabledFeatures\.length === 0 \? NO_DISABLED_FEATURES : disabledFeatures/);
+  // A lista vem das guardas (a mesma lista vazia de sempre no modo off; todos os módulos com a leitura que falha).
+  const moldura = codeOf(read("src/server/db/platform-store.ts"));
+  assert.match(moldura, /const \[database, adminAccess, profile, disabledFeatures\] = await Promise\.all\(\[[\s\S]*?getDisabledFeatures\(\)\s*\]\);/);
+  assert.match(moldura, /^\s*disabledFeatures,$/m);
 });
 
 test("todo item de menu, busca, aba e Criar que leva aos Webinários diz o módulo", async () => {

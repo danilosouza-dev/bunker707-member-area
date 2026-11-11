@@ -6,7 +6,7 @@ import { jobRegistry } from "@/server/jobs/registry";
 import { runJobsTick } from "@/server/jobs/run-tick";
 import { authorizeJobsTickRequest } from "@/server/jobs/tick-auth";
 import { MAX_TICK_PAYLOAD_BYTES, parseTickMetadata, shouldReadTickBody } from "@/server/jobs/tick-metadata";
-import { getCurrentLicenseState } from "@/server/licensing/current-state";
+import { readCurrentLicenseState } from "@/server/licensing/current-state";
 import { licenseRouteRefusal } from "@/server/licensing/guards";
 import { isFeatureEnabled } from "@/server/licensing/require-feature";
 
@@ -71,7 +71,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const license = await getCurrentLicenseState();
+    // A leitura da licenca que falha nao para o tick: as tarefas dos modulos ficam de fora (fecha) e o resto roda.
+    const license = await readCurrentLicenseState();
     const result = await runJobsTick({
       isFeatureEnabled: (feature) => isFeatureEnabled(license, feature),
       jobs: jobRegistry,

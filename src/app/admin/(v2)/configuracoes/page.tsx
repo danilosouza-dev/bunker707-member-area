@@ -9,7 +9,7 @@ import { requirePageArea } from "@/server/auth/permissions";
 import { can, type AdminAccess } from "@/server/auth/roles";
 import { isLicenseManager } from "@/server/licensing/admin-access";
 import { licensingMode } from "@/server/licensing/build-config";
-import { getCurrentLicenseState } from "@/server/licensing/current-state";
+import { readCurrentLicenseState } from "@/server/licensing/current-state";
 import { licenseHubStatusOf } from "@/server/licensing/screen-view";
 import { summarizeSalesSetup } from "@/server/payments/model";
 import { getSalesProviderStatuses } from "@/server/payments/queries";
@@ -62,12 +62,8 @@ async function loadLicenseRow(access: AdminAccess): Promise<{ status: SettingsHu
     return null;
   }
 
-  try {
-    return { status: licenseHubStatusOf(await getCurrentLicenseState()) };
-  } catch (error) {
-    console.error("[admin/configuracoes] situacao da Licenca", error);
-    return { status: null };
-  }
+  const state = await readCurrentLicenseState();
+  return { status: state ? licenseHubStatusOf(state) : null };
 }
 
 export default async function AdminSettingsPage() {

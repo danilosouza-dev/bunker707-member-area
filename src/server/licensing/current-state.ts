@@ -16,12 +16,13 @@ import "server-only";
 
 import { cache } from "react";
 import { getConfiguredSiteOrigin } from "@/server/auth/site-origin";
+import { isPendingMigrationError } from "@/server/db/pending-migration";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import { licensingMode, trustedRoots } from "./build-config";
 import { refuseUnsafeNodeStart } from "./node-start";
 import type { LicenseState } from "./state";
 import { hasInstallationCredentials, loadLicenseState, type LicenseStateDb, type LicenseStateRecord } from "./store";
-import { licenseStateDbOf } from "./store-db";
+import { LICENSE_STATE_MIGRATION, licenseStateDbOf } from "./store-db";
 
 /** Quanto a linha lida vale na memoria do processo. A situacao fica no maximo isso atras da tabela. */
 export const LICENSE_ROW_MEMORY_MS = 60_000;
@@ -70,6 +71,34 @@ export const getCurrentLicenseState = cache((): Promise<LicenseState> => {
 });
 
 /**
+ * A leitura da licenca falhou (a migracao pendente, o banco com erro): o motivo no log, so a mensagem do banco (o
+ * adaptador nunca poe nela a linha nem o segredo, store-db.ts).
+ */
+function logLicenseReadFailure(where: string, error: unknown): void {
+  if (isPendingMigrationError(error)) {
+    console.info(`[licenca] ${where}: migracao ${LICENSE_STATE_MIGRATION} pendente; modulos escondidos e so o dever legal passa ate ela rodar.`);
+    return;
+  }
+
+  console.error(`[licenca] ${where}: a leitura da licenca falhou (${error instanceof Error ? error.message : "erro desconhecido"}); modulos escondidos e so o dever legal passa.`);
+}
+
+/**
+ * A situacao deste pedido sem derrubar o pedido quando a leitura falha: null, com o motivo no log (uma vez por pedido,
+ * cache do React). Quem recebe null fecha (require-feature.ts): os modulos somem e respondem 404, e so o dever legal
+ * passa; as paginas, a moldura do aluno, o admin e a tela Licenca continuam abrindo (revisao de 11/11/2026: antes, a
+ * leitura que falhava derrubava toda pagina do aluno e o admin inteiro). No modo "off" nunca falha: nao le nada.
+ */
+export const readCurrentLicenseState = cache(async (): Promise<LicenseState | null> => {
+  try {
+    return await getCurrentLicenseState();
+  } catch (error) {
+    logLicenseReadFailure("situacao do pedido", error);
+    return null;
+  }
+});
+
+/**
  * O que a tela Licenca mostra alem da situacao: o identificador da Instalacao, a ultima conferencia boa e a ultima
  * tentativa de conversa com o Emissor. Nunca o segredo nem a sequencia. A mesma linha da memoria do processo (as acoes
  * da tela a esquecem depois de gravar).
@@ -99,4 +128,14 @@ export const getLicenseOverview = cache(async (): Promise<LicenseOverview> => {
     lastCheckIn: record?.lastCheckIn ?? null,
     lastAttempt: { at: record?.checkInAttemptedAt ?? null, result: record?.checkInResult ?? null }
   };
+});
+
+/** A visao geral da tela Licenca sem derrubar a tela: null quando a leitura falha (a tela diz o que houve). */
+export const readLicenseOverview = cache(async (): Promise<LicenseOverview | null> => {
+  try {
+    return await getLicenseOverview();
+  } catch (error) {
+    logLicenseReadFailure("tela Licenca", error);
+    return null;
+  }
 });

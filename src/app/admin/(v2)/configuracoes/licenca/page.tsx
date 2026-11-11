@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
+import { ErrorBanner } from "@/components/admin/v2/error-banner";
 import { LicenseScreen } from "@/components/admin/v2/license/license-screen";
 import { AdminPage } from "@/components/admin/v2/page-container";
 import { PageHeader } from "@/components/admin/v2/page-header";
@@ -8,7 +9,7 @@ import { getConfiguredSiteOrigin } from "@/server/auth/site-origin";
 import { activateLicense, checkLicenseNow, deactivateLicense, uploadLicenseFile } from "@/server/licensing/actions";
 import { isLicenseManager } from "@/server/licensing/admin-access";
 import { licensingMode } from "@/server/licensing/build-config";
-import { getLicenseOverview } from "@/server/licensing/current-state";
+import { readLicenseOverview } from "@/server/licensing/current-state";
 import { parseLicenseScreenNotice } from "@/server/licensing/screen-result";
 import { licenseScreenView } from "@/server/licensing/screen-view";
 
@@ -39,7 +40,28 @@ export default async function LicenseSettingsPage({ searchParams }: PageProps) {
     redirect("/admin/configuracoes");
   }
 
-  const overview = await getLicenseOverview();
+  const header = (
+    <PageHeader
+      breadcrumb={BREADCRUMB}
+      description="A Licença desta área de membros: a situação, o que ela liga e a conferência com o Emissor de licenças."
+      title="Licença"
+    />
+  );
+  // A leitura que falha (a migracao pendente, o banco com erro) nao derruba a tela: ela diz o que houve.
+  const overview = await readLicenseOverview();
+
+  if (!overview) {
+    return (
+      <AdminPage className="gap-6">
+        {header}
+        <ErrorBanner title="Não foi possível ler a Licença agora">
+          Enquanto isso, os módulos ficam escondidos e só funciona o que a lei e a segurança pedem. Quem já é aluno continua com o acesso que tem.
+          Recarregue a página em alguns minutos; se continuar assim, fale com o suporte.
+        </ErrorBanner>
+      </AdminPage>
+    );
+  }
+
   const view = licenseScreenView({ ...overview, configuredHost: getConfiguredSiteOrigin(), version: process.env.APP_VERSION ?? null });
 
   if (!view) {
@@ -48,11 +70,7 @@ export default async function LicenseSettingsPage({ searchParams }: PageProps) {
 
   return (
     <AdminPage className="gap-6">
-      <PageHeader
-        breadcrumb={BREADCRUMB}
-        description="A Licença desta área de membros: a situação, o que ela liga e a conferência com o Emissor de licenças."
-        title="Licença"
-      />
+      {header}
       <LicenseScreen
         actions={{ activate: activateLicense, checkNow: checkLicenseNow, deactivate: deactivateLicense, uploadFile: uploadLicenseFile }}
         notice={parseLicenseScreenNotice(query)}
