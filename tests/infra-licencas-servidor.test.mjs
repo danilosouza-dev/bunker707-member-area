@@ -199,7 +199,7 @@ const r = (await import("node:child_process")).spawnSync(process.env.SHIM_DATE_R
   const backups = join(dir, "backups");
   const units = join(dir, "systemd");
   mkdirSync(units);
-  const run = (script, args = [], extra = {}) => {
+  const run = (script, args = [], extra = {}, entrada = undefined) => {
     const env = {
       ...process.env,
       PATH: `${shims}:${process.env.PATH}`,
@@ -216,7 +216,7 @@ const r = (await import("node:child_process")).spawnSync(process.env.SHIM_DATE_R
       ...extra
     };
     for (const name of ["BUNKER707_COMPOSE_FILE", "BUNKER707_COMPOSE_OVERRIDE", "SEM_BACKUP_ANTES", "COMPOSE_PROFILES"]) if (!(name in extra)) delete env[name];
-    const result = spawnSync("bash", [join(scriptsDir, script), ...args], { encoding: "utf8", env });
+    const result = spawnSync("bash", [join(scriptsDir, script), ...args], { encoding: "utf8", env, input: entrada });
     return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
   };
   const calls = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []);
@@ -567,4 +567,107 @@ test("smoke: banco e Emissor saudaveis e /health ok passam; backup velho vira av
   const doente = s.run("smoke.sh", [], { SHIM_SAUDE: '{"ok":false}' });
   assert.equal(doente.status, 1);
   assert.match(doente.stderr, /O Emissor nao respondeu/);
+});
+
+// A credencial da API interna da escola (credencial-interna.sh; etapa conectar-licencas, docs/20 §8C.9): so o resumo chega
+// aqui, pela entrada; a nova primeiro e as anteriores ate 4; o Emissor recriado e conferido, e sem saude o .env de antes volta.
+const COMPOSE_COM_INTERNO = [
+  "name: bunker-licensing",
+  "services:",
+  "  emissor:",
+  "    environment:",
+  "      INTERNO_CREDENCIAL_HASH: ${INTERNO_CREDENCIAL_HASH:-}",
+  "    ports:",
+  '      - "127.0.0.1:${INTERNO_PORTA_NO_HOST:-8082}:8082"',
+  ""
+].join("\n");
+const COM_EMAIL = "EMISSOR_PORTA_NO_HOST=8080\nEMISSOR_EMAIL_PRODUTOR='produtor@exemplo.com.br'\nEMISSOR_EMAIL_REMETENTE='Bunker Members <licencas@mail.bunker707.com.br>'\n";
+const h = (letra) => letra.repeat(64);
+function emissorComInterno({ env = COM_EMAIL, compose = COMPOSE_COM_INTERNO, resend } = {}) {
+  const s = servidor(resend === undefined ? {} : { resend });
+  writeFileSync(join(s.emissor, "compose.yaml"), compose);
+  writeFileSync(join(s.emissor, ".env"), env);
+  return s;
+}
+const hashNoEnv = (s) => readFileSync(join(s.emissor, ".env"), "utf8").match(/^INTERNO_CREDENCIAL_HASH=.*$/gm) ?? [];
+
+test("credencial-interna --conferir: o Emissor com a API interna e a conta de envio, sem mudar nada; recusa o Emissor sem a API interna, sem e-mail ou nao implantado", { skip }, () => {
+  const ok = emissorComInterno({ env: `${COM_EMAIL}INTERNO_CREDENCIAL_HASH='${h("a")},${h("b")}'\n` });
+  const antes = readFileSync(join(ok.emissor, ".env"), "utf8");
+  const r = ok.run("credencial-interna.sh", ["--conferir"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /Emissor com a API interna e a conta de envio; hoje aceita 2 credencial\(is\) da escola\./);
+  assert.equal(readFileSync(join(ok.emissor, ".env"), "utf8"), antes);
+  assert.deepEqual(ok.calls(), [], "nada no Docker");
+
+  const recusa = (s, mensagem) => {
+    const r = s.run("credencial-interna.sh", ["--conferir"]);
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, mensagem);
+    assert.equal(docker(s.calls(), "compose", "up"), -1);
+  };
+  recusa(emissorComInterno({ compose: "name: bunker-licensing\n" }), /O Emissor no ar nao tem a API interna .*leve o bunker-licensing com a API interna a main de la e rode deploy-licencas/);
+  recusa(emissorComInterno({ env: "EMISSOR_PORTA_NO_HOST=8080\nEMISSOR_EMAIL_PRODUTOR=\nEMISSOR_EMAIL_REMETENTE=\n" }), /A API interna precisa da conta de envio do Emissor/);
+  recusa(emissorComInterno({ resend: "" }), /A API interna precisa da conta de envio do Emissor .*sem LICENCAS_SEM_PAINEL=sim/);
+  recusa(servidor({ implantado: false }), /O Emissor ainda nao foi implantado neste servidor: rode deploy-licencas/);
+});
+
+test("credencial-interna: o resumo novo primeiro e os anteriores ate 4 (o mais velho sai), 0600, o Emissor recriado e conferido; --so-a-nova deixa so ele; resumo fora do formato nao muda nada", { skip }, () => {
+  // A primeira vez: o .env do deploy traz a linha vazia (do .env.example do Emissor).
+  const primeira = emissorComInterno({ env: `${COM_EMAIL}INTERNO_CREDENCIAL_HASH=\nINTERNO_PORTA_NO_HOST=8082\n` });
+  const r1 = primeira.run("credencial-interna.sh", [], {}, `${h("1")}\n`);
+  assert.equal(r1.status, 0, r1.stdout + r1.stderr);
+  assert.deepEqual(hashNoEnv(primeira), [`INTERNO_CREDENCIAL_HASH='${h("1")}'`]);
+  assert.match(readFileSync(join(primeira.emissor, ".env"), "utf8"), /^INTERNO_PORTA_NO_HOST=8082$/m, "o resto do .env fica");
+  assert.equal(statSync(join(primeira.emissor, ".env")).mode & 0o777, 0o600);
+  assert.equal(existsSync(join(primeira.emissor, ".env.antes-da-credencial")), false, "a copia de antes sai quando da certo");
+  const calls = primeira.calls();
+  assert.ok(docker(calls, "compose", "up -d --no-build --no-deps --force-recreate emissor") >= 0, "so o Emissor e recriado (nem o banco, nem o migrar)");
+  assert.ok(calls.some((c) => c.tool === "curl" && c.args.includes("http://127.0.0.1:8080/health")), "o /health conferido");
+  assert.match(r1.stdout, /a credencial nova \(11111111\.\.\.\), so ela/);
+  assert.doesNotMatch(r1.stdout + r1.stderr, new RegExp(h("1")), "o resumo inteiro nunca no registro");
+
+  // A troca (rodar de novo): a nova primeiro, as anteriores atras, a mesma nunca duas vezes, no maximo 4.
+  const troca = emissorComInterno({ env: `${COM_EMAIL}INTERNO_CREDENCIAL_HASH='${h("a")},${h("b")},${h("c")},${h("d")}'\n` });
+  const r2 = troca.run("credencial-interna.sh", [], {}, `${h("E")}\n`);
+  assert.equal(r2.status, 0, r2.stderr);
+  assert.deepEqual(hashNoEnv(troca), [`INTERNO_CREDENCIAL_HASH='${h("e")},${h("a")},${h("b")},${h("c")}'`], "a nova (em minusculas) e as tres mais novas");
+  assert.match(r2.stdout, /a credencial nova \(eeeeeeee\.\.\.\) e 3 anterior\(es\)/);
+  assert.match(r2.stdout, /deixam de valer: 1 credencial\(is\) anterior\(es\) \(dddddddd\.\.\.\)/);
+
+  const repetida = emissorComInterno({ env: `${COM_EMAIL}INTERNO_CREDENCIAL_HASH='${h("a")}, nao-e-resumo ,${h("a")}'\nINTERNO_CREDENCIAL_HASH='${h("f")}'\n` });
+  const r3 = repetida.run("credencial-interna.sh", [], {}, `${h("b")}\n`);
+  assert.equal(r3.status, 0, r3.stderr);
+  assert.deepEqual(hashNoEnv(repetida), [`INTERNO_CREDENCIAL_HASH='${h("b")},${h("a")}'`], "uma linha so; o valor fora do formato sai (o Emissor nao subiria com ele)");
+  assert.match(r3.stderr, /1 valor\(es\) fora do formato de um resumo sairam de INTERNO_CREDENCIAL_HASH/);
+
+  // REVOGAR_ANTERIORES=sim no conectar-licencas: so a nova.
+  const revoga = emissorComInterno({ env: `${COM_EMAIL}INTERNO_CREDENCIAL_HASH='${h("a")},${h("b")}'\n` });
+  const r4 = revoga.run("credencial-interna.sh", ["--so-a-nova"], {}, `${h("a")}\n`);
+  assert.equal(r4.status, 0, r4.stderr);
+  assert.deepEqual(hashNoEnv(revoga), [`INTERNO_CREDENCIAL_HASH='${h("a")}'`]);
+  assert.match(r4.stdout, /deixam de valer: 1 credencial\(is\) anterior\(es\) \(bbbbbbbb\.\.\.\)/);
+
+  // Sem um resumo pela entrada (vazio, a credencial em si, outra coisa): nada muda e nada e recriado.
+  for (const entrada of ["", "bki_AAAAAAAAAAbbbbbbbbbb-_0123456789xyzXYZ0123k\n", `${h("a")}0\n`]) {
+    const s = emissorComInterno({ env: `${COM_EMAIL}INTERNO_CREDENCIAL_HASH='${h("a")}'\n` });
+    const antes = readFileSync(join(s.emissor, ".env"), "utf8");
+    const r = s.run("credencial-interna.sh", [], {}, entrada);
+    assert.equal(r.status, 1, JSON.stringify(entrada));
+    assert.match(r.stderr, /O resumo da credencial nova \(64 caracteres hexadecimais\) nao chegou pela entrada\. Nada mudou\./);
+    assert.equal(readFileSync(join(s.emissor, ".env"), "utf8"), antes);
+    assert.equal(docker(s.calls(), "compose", "up"), -1);
+  }
+});
+
+test("credencial-interna: o Emissor que nao volta saudavel com o .env novo volta com o de antes, e a etapa para", { skip }, () => {
+  const s = emissorComInterno({ env: `${COM_EMAIL}INTERNO_CREDENCIAL_HASH='${h("a")}'\n` });
+  const antes = readFileSync(join(s.emissor, ".env"), "utf8");
+  const r = s.run("credencial-interna.sh", [], { SHIM_SAUDE: '{"ok":false}', SAUDE_TENTATIVAS: "1" }, `${h("b")}\n`);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /O Emissor nao voltou saudavel com o \.env novo: o \.env de antes volta\./);
+  assert.match(r.stderr, /A credencial nova nao entrou no Emissor .*o \.env de antes voltou\. Nada mudou na escola\./);
+  assert.equal(readFileSync(join(s.emissor, ".env"), "utf8"), antes, "o .env de antes, inteiro");
+  const recriado = s.calls().filter((c) => c.tool === "docker" && c.args.join(" ").includes("up -d --no-build --no-deps --force-recreate emissor"));
+  assert.equal(recriado.length, 2, "recriado com o novo e de novo com o de antes");
 });

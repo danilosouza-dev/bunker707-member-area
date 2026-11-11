@@ -18,6 +18,11 @@
 #                                            vez, a conta do produtor no Painel (LICENCAS_TAG escolhe a versao; padrao
 #                                            main). O Painel entra com e-mail e senha, sem lista de IPs nem Cloudflare
 #                                            Access (D40); LICENCAS_SEM_PAINEL=sim sobe o Emissor sem ele
+#   bash infra/cloud/licencas.sh conectar    conectar-licencas: a nossa escola ligada a API interna do Emissor
+#                                            (CONFIRMAR=conectar): a credencial nova sorteada aqui, so o resumo no Emissor,
+#                                            a credencial so no .env do app da escola, o Caddy do endereco interno so para
+#                                            o IPv4 da escola e a conferencia de dentro do app; rodar de novo troca a
+#                                            credencial (REVOGAR_ANTERIORES=sim deixa so a nova)
 #   bash infra/cloud/licencas.sh backup      backup-licencas: um backup agora, com restic check
 #   bash infra/cloud/licencas.sh restaurar   restaurar-licencas: troca o banco pelo de um backup (CONFIRMAR=restaurar;
 #                                            SNAPSHOT=<id>, padrao o mais novo com dados)
@@ -32,7 +37,7 @@
 
 . "$(dirname -- "$0")/lib.sh"
 acao="${1:-}"
-case "$acao" in plan|dns|cerimonia|segredos|deploy|backup|restaurar|ensaio|status) ;; *) die "uso: licencas.sh plan|dns|cerimonia|segredos|deploy|backup|restaurar|ensaio|status" ;; esac
+case "$acao" in plan|dns|cerimonia|segredos|deploy|conectar|backup|restaurar|ensaio|status) ;; *) die "uso: licencas.sh plan|dns|cerimonia|segredos|deploy|conectar|backup|restaurar|ensaio|status" ;; esac
 case "$acao" in plan|status) ;; *) licencas_so_da_main ;; esac
 
 # O que vai ao servidor de licencas: so a infra dele e o que ela usa, nunca o codigo do produto.
@@ -562,6 +567,139 @@ deploy() {
     fi
     echo "Falta, se ainda nao foi feito: ensaio-licencas (o ensaio de restauracao) e o monitor externo (docs/20 §8C); e, com a escola"
     echo "no ar (restaurar e deploy-membros), conectar-licencas com CONFIRMAR=conectar: a API interna em https://$LICENCAS_INTERNO_DOMAIN (docs/20 §8C.9)."
+}
+
+# ====== conectar-licencas ===============================================================================
+# A nossa escola (a producao, MEMBROS_NAME) ligada a API interna do Emissor (docs/api-interna.md do bunker-licensing;
+# docs/32 §2.4, §11.2 e §11.10; docs/20 §8C.9), sem ninguem colar segredo em lugar nenhum. CONFIRMAR=conectar; so da main;
+# com a escola no ar (restaurar e deploy-membros antes). Rodar de novo e trocar a credencial (a rotacao):
+#   1. o DNS dos tres nomes, como o dns-licencas deixa;
+#   2. antes de mudar qualquer coisa: o Emissor com a API interna e a conta de envio (credencial-interna.sh --conferir) e o
+#      compose da escola levando EMISSOR_INTERNO_URL e EMISSOR_INTERNO_CREDENCIAL ao app (o deploy-membros da main);
+#   3. a credencial nova, sorteada aqui no formato do Emissor (bki_ e 256 bits; credencial-interna.mjs), e o resumo dela,
+#      em arquivos 0600 do runner apagados com shred no fim; nunca impressa (e mascarada no log do Actions);
+#   4. no servidor do Emissor, so o RESUMO, pela entrada do SSH (INTERNO_CREDENCIAL_HASH: a nova primeiro e as anteriores,
+#      ate 4, para a escola nunca ficar sem acesso no meio da troca), o Emissor recriado; e o Caddy do endereco interno
+#      aberto so para o IPv4 de agora do servidor da escola (o restaurar traz IP novo);
+#   5. no servidor da escola, a credencial e o endereco no .env do app, pela entrada do SSH e como o secrets-membros grava
+#      (env_aplicar_kv: 0600, dono deploy), e o app recriado, com o smoke;
+#   6. de dentro do app da escola, GET /interno/v1/planos com a credencial nova responde 200 (conferir-interno.mjs).
+#   REVOGAR_ANTERIORES=sim: depois do 200, o Emissor fica so com a nova (as anteriores param de valer: uma vazou, ou a
+#   troca acabou) e a conferencia roda de novo.
+# escola_alvo: define escola_ip e escola (deploy@ do servidor da nossa escola), ou para (guardada: restaurar antes).
+escola_alvo() {
+    if ! server_exists "$MEMBROS_NAME"; then
+        [ -z "$(latest_snapshot membros)" ] || die "A nossa escola ($MEMBROS_NAME) esta guardada em snapshot: rode restaurar (PAPEIS=membros) e deploy-membros da main antes do conectar-licencas (docs/20 §4A.7 e §9F)."
+        die "O servidor da nossa escola ($MEMBROS_NAME) nao existe: nao ha onde ligar a API interna."
+    fi
+    escola_ip=$(server_ip4 "$MEMBROS_NAME"); escola="$DEPLOY_USER@$escola_ip"
+}
+# conferir_da_escola: GET /interno/v1/planos de dentro do app da escola, com algumas tentativas enquanto o certificado do
+# endereco novo sai e o app acaba de subir; o X-Pedido de cada tentativa vai para a auditoria do Emissor. Deixa em
+# `conferido` a ultima resposta ("<codigo> <detalhe>"). Para na certa (200) e nas que tentar de novo so pioraria: 401 (cada
+# credencial errada conta para o bloqueio do IP da escola no Emissor) e 429.
+conferir_da_escola() {
+    local i n="${CONFERIR_TENTATIVAS:-12}" pedido resposta=""
+    for ((i = 1; i <= n; i++)); do
+        pedido="conectar-licencas-$(date -u +%Y%m%dT%H%M%SZ)-$i"
+        resposta=$(rsh "$escola" "cd '$REMOTE_DIR' && docker compose -f infra/compose/docker-compose.yml exec -T app node - '$pedido'" < "$CLOUD_DIR/conferir-interno.mjs" | tail -n1 | tr -cd 'A-Za-z0-9_.= -') || resposta="000 ssh"
+        resposta="${resposta:-000 sem_resposta}"
+        echo "  GET https://$LICENCAS_INTERNO_DOMAIN/interno/v1/planos de dentro do app da escola: $resposta"
+        case "${resposta%% *}" in 200|401|429) break ;; esac
+        [ "$i" = "$n" ] || sleep "${CONFERIR_ESPERA:-10}"
+    done
+    conferido="$resposta"
+}
+# conectar_diagnostico "<codigo> <detalhe>": 200 segue; o resto para, com o que fazer.
+conectar_diagnostico() {
+    case "${1%% *}" in
+        200) return 0 ;;
+        401) die "O Emissor recusou a credencial nova (401): o resumo dela nao esta no Emissor no ar (veja o passo 4). Rode de novo, que a credencial e trocada outra vez." ;;
+        403) die "O Caddy do Emissor recusou o pedido (403): ele nao saiu do IPv4 $escola_ip do servidor da escola. Confira LICENCAS_INTERNO_IPS no infra/licencas/.env do Emissor (status-licencas com SSH=1) e rode de novo." ;;
+        429) die "O Emissor respondeu limite de pedidos (429): espere 10 minutos e rode de novo." ;;
+        502|503|504) die "O Caddy do Emissor nao chegou na API interna (${1%% *}): o Emissor no ar tem a API interna? Veja o registro dele (exec-licencas com COMANDO='cd emissor && docker compose logs --tail 100 emissor')." ;;
+        000)
+            case "$1" in *sem_configuracao*) die "O app da escola nao recebeu EMISSOR_INTERNO_URL e EMISSOR_INTERNO_CREDENCIAL: o compose dela no ar leva as duas? Rode deploy-membros da main e de novo o conectar-licencas." ;; esac
+            die "Sem resposta de https://$LICENCAS_INTERNO_DOMAIN de dentro do app da escola (${1#* }): DNS, o certificado do Let's Encrypt (o endereco novo pode levar alguns minutos na primeira vez) ou a rede. Rode de novo daqui a pouco." ;;
+        *) die "Resposta inesperada da API interna de dentro do app da escola: $1." ;;
+    esac
+}
+conectar() {
+    need HCLOUD_TOKEN CLOUDFLARE_API_TOKEN
+    [ "${CONFIRMAR:-}" = conectar ] || die "conectar-licencas troca a credencial da API interna no Emissor e na nossa escola e recria o Emissor e o app da escola. Confirme com CONFIRMAR=conectar nas opcoes (REVOGAR_ANTERIORES=sim deixa so a nova; docs/20 §8C.9)."
+    case "${REVOGAR_ANTERIORES:-}" in ""|sim) ;; *) die "REVOGAR_ANTERIORES so aceita sim (veio ${REVOGAR_ANTERIORES})." ;; esac
+    local c escola escola_ip conferido="" ips
+    install_hcloud; deploy_key
+    licencas_alvo
+    escola_alvo
+    ips="$escola_ip/32"
+    CONECTAR_DIR="$WORK_DIR/conectar"; c="$CONECTAR_DIR"
+    # A pasta da credencial no runner (0700): global, porque a limpeza roda no trap de saida.
+    limpar_conectar() {
+        if [ -n "${CONECTAR_DIR:-}" ] && [ -d "$CONECTAR_DIR" ]; then
+            find "$CONECTAR_DIR" -type f -exec shred -u {} + 2>/dev/null || true
+            rm -rf "$CONECTAR_DIR"
+        fi
+    }
+    # O trap do fw_open_ssh (fecha a 22), mais a limpeza da credencial; armado de novo depois de cada fw_open_ssh.
+    armar_trap() { trap 'rc=$?; set +e; limpar_conectar; fw_close_all || rc=1; exit $rc' EXIT; }
+    armar_trap
+
+    log "1/6 DNS dos tres nomes do Emissor (dns-licencas)"
+    licencas_dns_confere
+    echo "  $LICENCAS_INTERNO_DOMAIN -> $ip, registro A sem proxy."
+
+    log "2/6 Antes de mudar qualquer coisa: o Emissor ($LICENCAS_NAME) e a escola ($MEMBROS_NAME, $escola_ip)"
+    fw_open_ssh "$LICENCAS_NAME"; armar_trap; wait_ssh "$target"
+    # shellcheck disable=SC2086
+    sync_repo "$target" $LICENCAS_ARQUIVOS
+    remote "bash infra/licencas/scripts/credencial-interna.sh --conferir"
+    fw_open_ssh "$MEMBROS_NAME"; armar_trap; wait_ssh "$escola"
+    rsh "$escola" "grep -q 'EMISSOR_INTERNO_CREDENCIAL' '$REMOTE_DIR/infra/compose/docker-compose.yml' && test -f '$REMOTE_DIR/infra/compose/.env'" \
+        || die "O compose da escola no ar ainda nao leva EMISSOR_INTERNO_URL e EMISSOR_INTERNO_CREDENCIAL ao app: rode deploy-membros da main antes do conectar-licencas. Nada mudou."
+    echo "  a escola no ar leva a API interna ao app (commit $(rsh "$escola" "cut -c1-7 '$REMOTE_DIR/.deployed-commit' 2>/dev/null" || true))."
+
+    log "3/6 A credencial nova, sorteada aqui no formato do Emissor (nunca impressa)"
+    rm -rf "$c"; (umask 077; mkdir -p "$c")
+    (umask 077; node "$CLOUD_DIR/credencial-interna.mjs" --credencial "$c/credencial" --resumo "$c/resumo") \
+        || die "Nao consegui sortear a credencial (infra/cloud/credencial-interna.mjs). Nada mudou."
+    grep -qE '^bki_[A-Za-z0-9_-]{43}$' "$c/credencial" && grep -qE '^[0-9a-f]{64}$' "$c/resumo" || die "A credencial sorteada saiu fora do formato do Emissor. Nada mudou."
+    mask "$(cat "$c/credencial")"
+    echo "  resumo $(cut -c1-8 "$c/resumo")...: a credencial so vai para a escola; o resumo, so para o Emissor."
+
+    log "4/6 Emissor: so o resumo em INTERNO_CREDENCIAL_HASH (a nova e as anteriores, ate 4) e o Emissor recriado"
+    remote "bash infra/licencas/scripts/credencial-interna.sh" < "$c/resumo"
+    log "4/6 Emissor: o Caddy de $LICENCAS_INTERNO_DOMAIN so para o servidor da escola"
+    borda_interno "$ips"
+    borda
+
+    log "5/6 Escola: EMISSOR_INTERNO_URL e EMISSOR_INTERNO_CREDENCIAL no .env do app (como o secrets-membros grava) e o app recriado"
+    { printf 'EMISSOR_INTERNO_URL=https://%s\n' "$LICENCAS_INTERNO_DOMAIN"; printf 'EMISSOR_INTERNO_CREDENCIAL='; cat "$c/credencial"; printf '\n'; } \
+        | rsh "$escola" "umask 077 && cat > /tmp/conectar-licencas.kv"
+    env_aplicar_kv "$escola" "$REMOTE_DIR/infra/compose/.env" /tmp/conectar-licencas.kv
+    rsh "$escola" "stat -c '  %n %U %a' '$REMOTE_DIR/infra/compose/.env'"
+    membros_recria "$escola"
+
+    log "6/6 De dentro do app da escola, com a credencial nova"
+    conferir_da_escola
+    conectar_diagnostico "$conferido"
+    if [ "${REVOGAR_ANTERIORES:-}" = sim ]; then
+        log "REVOGAR_ANTERIORES=sim: o Emissor fica so com a credencial nova"
+        remote "bash infra/licencas/scripts/credencial-interna.sh --so-a-nova" < "$c/resumo"
+        conferir_da_escola
+        conectar_diagnostico "$conferido"
+    fi
+    fw_close_all
+    limpar_conectar
+    echo
+    echo "A nossa escola fala com o Emissor: https://$LICENCAS_INTERNO_DOMAIN, so do IPv4 $escola_ip do servidor dela, com a credencial nova (${conferido#* } no mapa de produtos)."
+    if [ "${REVOGAR_ANTERIORES:-}" = sim ]; then
+        echo "O Emissor aceita so a credencial nova: as anteriores pararam de valer."
+    else
+        echo "O Emissor aceita a nova e as anteriores (ate 4): para deixar so a nova (uma vazou), rode de novo com REVOGAR_ANTERIORES=sim."
+    fi
+    echo "Proximo (docs/20 §9F): o produtor mapeia o produto no Painel (Planos) e marca o produto como Bunker Members no admin da escola."
+    echo "Depois de cada restaurar da escola (o IP muda), rode o conectar-licencas de novo."
 }
 
 # ====== backup-licencas, restaurar-licencas, ensaio-licencas ===========================================

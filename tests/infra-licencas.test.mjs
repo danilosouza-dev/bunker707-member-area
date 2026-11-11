@@ -200,7 +200,7 @@ test("as etapas de licencas que mudam alguma coisa so rodam da main: a trava do 
   const run = (etapa, ref) => spawnSync("bash", ["-e", "-c", step[2]], { encoding: "utf8", env: { ...process.env, ETAPA: etapa, GITHUB_REF: ref } });
   const runSource = readFileSync(join(cloudDir, "run.sh"), "utf8");
   const etapas = [...runSource.matchAll(/^\s+([a-z-]+-licencas)\)/gm)].map((m) => m[1]);
-  assert.deepEqual(etapas.sort(), ["backup-licencas", "cerimonia-licencas", "deploy-licencas", "dns-licencas", "ensaio-licencas", "exec-licencas", "plan-licencas", "provision-licencas", "restaurar-licencas", "secrets-licencas", "status-licencas"]);
+  assert.deepEqual(etapas.sort(), ["backup-licencas", "cerimonia-licencas", "conectar-licencas", "deploy-licencas", "dns-licencas", "ensaio-licencas", "exec-licencas", "plan-licencas", "provision-licencas", "restaurar-licencas", "secrets-licencas", "status-licencas"]);
   for (const etapa of etapas) {
     assert.equal(run(etapa, "refs/heads/main").status, 0, `${etapa} na main`);
     const dev = run(etapa, "refs/heads/dev");
@@ -217,8 +217,8 @@ test("as etapas de licencas que mudam alguma coisa so rodam da main: a trava do 
 
   // A segunda trava, no proprio script, para quem chamar de outro lugar no Actions.
   const conta = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas() });
-  for (const [script, args] of [["licencas.sh", ["dns"]], ["licencas.sh", ["deploy"]], ["licencas.sh", ["segredos"]], ["licencas.sh", ["cerimonia"]], ["licencas.sh", ["restaurar"]], ["provision.sh", ["licencas"]], ["run.sh", ["exec-licencas"]]]) {
-    const recusa = conta.runScript(script, { GITHUB_ACTIONS: "true", GITHUB_REF: "refs/heads/dev", CONFIRMADO: "sim", CONFIRMAR: "restaurar", COMANDO: "true" }, args);
+  for (const [script, args, confirmar] of [["licencas.sh", ["dns"]], ["licencas.sh", ["deploy"]], ["licencas.sh", ["segredos"]], ["licencas.sh", ["cerimonia"]], ["licencas.sh", ["restaurar"]], ["licencas.sh", ["conectar"], "conectar"], ["provision.sh", ["licencas"]], ["run.sh", ["exec-licencas"]]]) {
+    const recusa = conta.runScript(script, { GITHUB_ACTIONS: "true", GITHUB_REF: "refs/heads/dev", CONFIRMADO: "sim", CONFIRMAR: confirmar ?? "restaurar", COMANDO: "true" }, args);
     assert.equal(recusa.status, 1, `${script} ${args}`);
     assert.match(recusa.stderr, /As etapas que mudam o servidor de licencas so rodam da main \(recebido: refs\/heads\/dev\)/, `${script} ${args}`);
   }

@@ -15,6 +15,8 @@
 #   restaurar-licencas, ensaio-licencas, status-licencas, exec-licencas (servidor do Emissor de licencas, docs/20 §8C;
 #   o que muda alguma coisa so da main; criar com CONFIRMADO=sim, a cerimonia com CONFIRMAR=cerimonia, restaurar com
 #   CONFIRMAR=restaurar)
+#   conectar-licencas (a nossa escola ligada a API interna do Emissor, docs/20 §8C.9: so da main, CONFIRMAR=conectar;
+#   rodar de novo troca a credencial, REVOGAR_ANTERIORES=sim deixa so a nova)
 #   teste-plano, teste-criar, teste-dns, teste-instalar, teste-apagar (o ensaio de comprador real no servidor bunker707-teste,
 #   docs/20 §9E; tudo so da main; criar com CONFIRMADO=sim, apagar com CONFIRMAR=apagar; a Chave de ativacao no payload)
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
@@ -72,6 +74,7 @@ case "$etapa" in
     cerimonia-licencas) bash "$here/licencas.sh" cerimonia ;;
     secrets-licencas) bash "$here/licencas.sh" segredos ;;
     deploy-licencas) bash "$here/licencas.sh" deploy ;;
+    conectar-licencas) bash "$here/licencas.sh" conectar ;;
     backup-licencas) bash "$here/licencas.sh" backup ;;
     restaurar-licencas) bash "$here/licencas.sh" restaurar ;;
     ensaio-licencas) bash "$here/licencas.sh" ensaio ;;
@@ -100,5 +103,5 @@ case "$etapa" in
         need HCLOUD_TOKEN; install_hcloud
         FW_OPENED=$(sort -u "$WORK_DIR/fw-abertos" | tr '\n' ' ')
         fw_close_all ;;
-    *) echo "etapa desconhecida: '$etapa'" >&2; sed -n 2,19p "$0"; exit 2 ;;
+    *) echo "etapa desconhecida: '$etapa'" >&2; sed -n 2,21p "$0"; exit 2 ;;
 esac

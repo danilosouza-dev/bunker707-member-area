@@ -5,7 +5,8 @@
 // o teste escolher em SSH_SHIM_REPLIES; o docker do runner (o GHCR e a imagem do Emissor, que roda a cerimonia com o
 // duble do codigo das chaves) e o sftp do Storage Box (uma pasta). Tudo vai para um log so, na ordem em que aconteceu.
 // Usado por tests/infra-guardar-producao.test.mjs, tests/infra-gravador-falha.test.mjs, tests/infra-licencas.test.mjs,
-// tests/infra-licencas-cerimonia.test.mjs e tests/infra-teste.test.mjs.
+// tests/infra-licencas-cerimonia.test.mjs, tests/infra-licencas-conectar.test.mjs, tests/infra-deploy-migracoes.test.mjs e
+// tests/infra-teste.test.mjs.
 
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -154,7 +155,9 @@ for (let i = 0; i < args.length; i += 1) {
 const command = rest.join(" ");
 let stdin = "";
 if (!control && command !== "true") { try { stdin = fs.readFileSync(0, "utf8"); } catch {} }
-fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify({ tool: "ssh", target, command, control, stdin: stdin.slice(0, 80) }) + "\n");
+// A entrada inteira so dos comandos que o teste pede (SSH_SHIM_STDIN_COMPLETO, trechos separados por |); o resto, 80 caracteres.
+const completo = (process.env.SSH_SHIM_STDIN_COMPLETO || "").split("|").filter(Boolean).some((t) => command.includes(t));
+fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify({ tool: "ssh", target, command, control, stdin: completo ? stdin : stdin.slice(0, 80) }) + "\n");
 if (control) process.exit(0);
 const flagOn = (name) => Boolean(process.env[name]);
 // Respostas escolhidas pelo teste: [{ contem, saida, codigo }], a primeira cujo trecho aparece no comando.

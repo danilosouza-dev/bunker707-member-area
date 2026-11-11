@@ -56,6 +56,7 @@ on:
           - cerimonia-licencas
           - secrets-licencas
           - deploy-licencas
+          - conectar-licencas
           - backup-licencas
           - restaurar-licencas
           - ensaio-licencas
@@ -67,7 +68,7 @@ on:
           - teste-instalar
           - teste-apagar
       opcoes:
-        description: "CHAVE=VALOR separados por espaco (ex.: MEMBROS_TYPE=cx33 PRODUCER_IP=203.0.113.10 SKIP_MARKETING=1; guardar/voltar: CONFIRMAR=apagar PAPEIS=meet; webinarios: CONFIRMADO=sim SESSAO=<id> SEM_LIVE_2H=sim FORCAR=1; licencas: CONFIRMADO=sim LICENCAS_PRECO_MAX=4.50 LICENCAS_TAG=sha-1a2b3c4 LICENCAS_SEM_PAINEL=sim LICENCAS_EMISSOR_KIDS_ANTERIORES=<kid> CONFIRMAR=restaurar SNAPSHOT=<id>; cerimonia: CONFIRMAR=cerimonia ROTACIONAR=emissao; ensaio: CONFIRMADO=sim TESTE_PRECO_MAX=4.50 PACOTE_VERSAO=1.0.0 CONFIRMAR=apagar)"
+        description: "CHAVE=VALOR separados por espaco (ex.: MEMBROS_TYPE=cx33 PRODUCER_IP=203.0.113.10 SKIP_MARKETING=1; guardar/voltar: CONFIRMAR=apagar PAPEIS=meet; webinarios: CONFIRMADO=sim SESSAO=<id> SEM_LIVE_2H=sim FORCAR=1; licencas: CONFIRMADO=sim LICENCAS_PRECO_MAX=4.50 LICENCAS_TAG=sha-1a2b3c4 LICENCAS_SEM_PAINEL=sim LICENCAS_EMISSOR_KIDS_ANTERIORES=<kid> CONFIRMAR=restaurar SNAPSHOT=<id>; cerimonia: CONFIRMAR=cerimonia ROTACIONAR=emissao; conectar-licencas: CONFIRMAR=conectar REVOGAR_ANTERIORES=sim; ensaio: CONFIRMADO=sim TESTE_PRECO_MAX=4.50 PACOTE_VERSAO=1.0.0 CONFIRMAR=apagar)"
         type: string
         required: false
         default: ""
@@ -143,8 +144,8 @@ jobs:
           case "$ETAPA:$GITHUB_REF" in *:refs/heads/main|deploy-meet:refs/heads/dev) ;; *) echo "::error::$ETAPA so roda na main$([ "$ETAPA" = deploy-meet ] && printf ' ou na dev') (recebido: $GITHUB_REF). Fluxo: tarefa -> dev (teste na Vercel) -> main -> servidor."; exit 1 ;; esac
 
       # Servidor do Emissor de licencas (docs/32 D39; docs/20 §8C): toda etapa que muda alguma coisa nele (criar, DNS,
-      # a cerimonia das chaves, segredos, deploy, backup, restaurar, ensaio, exec) so roda da main. plan-licencas e
-      # status-licencas so leem.
+      # a cerimonia das chaves, segredos, deploy, a credencial da API interna da escola, backup, restaurar, ensaio, exec)
+      # so roda da main. plan-licencas e status-licencas so leem.
       - name: Licencas so da main
         if: endsWith(inputs.etapa, '-licencas')
         run: |
@@ -166,7 +167,7 @@ jobs:
         run: |
           [ -n "$HCLOUD_TOKEN" ] || { echo "::error::Segredo HCLOUD_TOKEN ausente (Settings > Secrets and variables > Actions)."; exit 1; }
           case "$ETAPA" in provision|provision-meet|snapshot|restaurar) [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::Segredo CLOUDFLARE_API_TOKEN ausente."; exit 1; } ;; esac
-          case "$ETAPA" in dns-licencas|deploy-licencas) [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::Segredo CLOUDFLARE_API_TOKEN ausente (o DNS do Emissor e conferido no deploy)."; exit 1; } ;; esac
+          case "$ETAPA" in dns-licencas|deploy-licencas|conectar-licencas) [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::Segredo CLOUDFLARE_API_TOKEN ausente (o DNS do Emissor e conferido no deploy e no conectar)."; exit 1; } ;; esac
           case "$ETAPA" in teste-dns|teste-apagar) [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::Segredo CLOUDFLARE_API_TOKEN ausente (o DNS da escola do ensaio)."; exit 1; } ;; esac
           case "$ETAPA" in jibri-up|jibri-down) [ -n "$JIBRI_SECRETS" ] || { echo "::error::Segredo JIBRI_SECRETS ausente (linhas CHAVE=VALOR do gravador, docs/20 secao 8B.3)."; exit 1; } ;; esac
           # As raizes publicas: infra/licencas/raizes.json, que a cerimonia-licencas imprime (docs/32 D41); o segredo
