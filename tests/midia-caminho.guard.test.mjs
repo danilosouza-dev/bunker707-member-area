@@ -235,8 +235,9 @@ test("a conversao dos dados (supabase/dados) nunca e aplicada sozinha e so cria 
   assert.match(read(".dockerignore"), /^supabase$/m, "fora da imagem");
 
   // O psql le o arquivo inteiro: nada de transacao solta (cada comando e uma), DISCARD (apagaria pg_temp) nem barra
-  // invertida fora de texto (comando do psql).
-  assert.doesNotMatch(outside, /\\/);
+  // invertida em lugar nenhum (fora de texto, o psql leria como comando dele; dentro, depende de
+  // standard_conforming_strings).
+  assert.doesNotMatch(script, /\\/);
   for (const command of outside.split(";").map((part) => part.trim().toLowerCase())) {
     assert.doesNotMatch(command, /^(?:begin|commit|rollback|abort|start\s+transaction|discard)\b/, command.slice(0, 60));
   }

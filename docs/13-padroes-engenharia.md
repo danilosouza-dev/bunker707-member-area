@@ -77,6 +77,7 @@ O CI roda dois jobs em toda PR e push para `dev` e `main`: Verify (`npm run veri
 - Chaves de provedores de IA pertencem ao Vault/servidor; respostas administrativas podem expor apenas metadados e os ultimos quatro caracteres.
 - Importacao de transcricao deve ser idempotente por checksum, versionada e feita no cadastro/revisao da aula, nunca novamente a cada pergunta do aluno.
 - Binarios e Data URLs nao pertencem a colunas de dominio nem ao HTML; persistir assets no Storage apropriado e guardar somente a referencia.
+- Arquivo do nosso Storage: o banco guarda o caminho publico (`/storage/v1/object/public/<bucket>/<caminho>`), nunca o endereco inteiro, e o app so ve o endereco inteiro, montado com o endereco do Supabase configurado (docs/32 §11.5). Quem troca nas duas pontas e o transporte dos clientes do servidor (`createStoragePathsFetch`, `src/server/db/storage-paths.ts`): cliente novo do Supabase passa por ele (guarda `tests/midia-caminho.guard.test.mjs`); filtro com endereco na URL do pedido (`.eq("image", url)`) nao e convertido, entao compare por id ou pelo caminho; coluna nova com check `https://` aceita tambem o caminho (como a `202611120001`); e coluna nova com endereco de arquivo entra na conversao dos dados antigos (`supabase/dados/202611120001_midia_pelo_caminho.sql`).
 
 ## Limites arquiteturais
 

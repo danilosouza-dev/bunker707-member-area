@@ -1207,7 +1207,7 @@ Reordenar aceita a estrutura que ja existe ate o limite da importacao de playlis
 
 ### Imagens do produto
 
-Thumbnail do card (WebP 2:3, ate 720×1080; imagem menor sai no tamanho dela, sem ampliar) e imagem de topo (WebP 1920×720) sao recortadas no navegador; o servidor confere a medida no cabecalho do WebP, envia ao Storage (`content-assets`, caminho `content/{id}/{cover|hero}`) e grava so a URL publica (thumbnail em `content_items.image`, topo em `content_page_settings.settings.hero`). A capa propria dos modulos usa a mesma medida. Data URL nunca chega ao banco.
+Thumbnail do card (WebP 2:3, ate 720×1080; imagem menor sai no tamanho dela, sem ampliar) e imagem de topo (WebP 1920×720) sao recortadas no navegador; o servidor confere a medida no cabecalho do WebP, envia ao Storage (`content-assets`, caminho `content/{id}/{cover|hero}`) e grava so o caminho publico do arquivo, `/storage/v1/object/public/content-assets/...` (thumbnail em `content_items.image`, topo em `content_page_settings.settings.hero`); a leitura devolve a URL publica montada com o endereco do Supabase configurado (docs/32 §11.5, `src/server/db/storage-paths.ts`). Endereco antigo inteiro continua valendo na leitura. A capa propria dos modulos usa a mesma medida. Data URL nunca chega ao banco.
 
 ### Edicao concorrente
 

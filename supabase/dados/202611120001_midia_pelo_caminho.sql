@@ -27,7 +27,9 @@
 -- parametros em `set` antes dele:
 --   bunker.midia_modo     'previa' (o padrao: so le), 'converter' ou 'reverter';
 --   bunker.midia_origens  a origem do Storage desta instalacao como o app a ve (o NEXT_PUBLIC_SUPABASE_URL, sem barra no
---                         fim); mais de uma, separadas por virgula. A previa sem ela lista as origens que existem;
+--                         fim); mais de uma, separadas por virgula (a Instalacao que mudou de endereco antes desta
+--                         conversao poe a antiga tambem: o arquivo restaurado aqui volta a valer). A previa sem ela lista
+--                         as origens que existem;
 --   bunker.midia_base     so no 'reverter': o NEXT_PUBLIC_SUPABASE_URL que volta na frente do caminho;
 --   bunker.midia_lote     linhas por coluna em cada rodada (padrao 5000). Cada rodada e uma transacao: rode de novo ate o
 --                         resultado dar 0 em a_converter (no 'reverter', 0 em caminhos).
@@ -111,8 +113,8 @@ as $$
   end
 $$;
 
--- As partes de um endereco inteiro do Storage: {base, rota, bucket, nome, query}. null = nao e um, ou tem %, espaco,
--- aspas, barra invertida ou fragmento.
+-- As partes de um endereco inteiro do Storage: {base, (caminho da base), rota, (tipo), bucket, nome, query}. null = nao
+-- e um, ou tem %, espaco, aspas ou fragmento. Sem barra invertida no padrao: vale com qualquer standard_conforming_strings.
 create or replace function pg_temp.bk_midia_partes(p_valor text)
 returns text[]
 language sql
@@ -120,7 +122,7 @@ immutable
 as $$
   select regexp_match(
     p_valor,
-    '^(https?://[^/?#[:space:]"\\]+(/[^?#[:space:]"\\]*?)?)(/storage/v1/(object|render/image)/public/)([^/?#[:space:]"\\%]+)/([^?#[:space:]"\\%]+)([?][^#[:space:]"\\]*)?$'
+    '^(https?://[^/?#[:space:]"]+(/[^?#[:space:]"]*?)?)(/storage/v1/(object|render/image)/public/)([^/?#[:space:]"%]+)/([^?#[:space:]"%]+)([?][^#[:space:]"]*)?$'
   )
 $$;
 
