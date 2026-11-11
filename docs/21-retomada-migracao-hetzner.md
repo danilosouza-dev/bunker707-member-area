@@ -891,8 +891,12 @@ basta a promocao `dev` -> `main` que levar este codigo passar pelo `deploy-membr
 A "Na tela" (a mensagem e a enquete fixadas, o banner e o QR Code na frente da turma; `docs/30` §2.4 e §4.2,
 `docs/31` §12) tem uma migração só, que vem **depois** da `202611100001` (§9.12) e não muda as de antes (a guarda
 `tests/webinarios-v7.guard.test.mjs` prende o hash acumulado das 65 anteriores e o do arquivo novo). Na mesma migração
-entra o banco do adendo do mesmo dia: a Simulação e o roteiro na Live ao vivo (R7 e R8) e a foto dos personagens do
-roteiro (R9).
+entra o banco do adendo do mesmo dia: a Simulação e o roteiro na Live ao vivo (R7 e R8) e a foto de quem comenta nos
+comentários do roteiro (R9; `docs/30` D74). O app de R7 a R9 foi construído em 11/11/2026 em cima desta mesma migração:
+nenhuma migração nova. O que o adendo usa daqui: o check `webinar_sessions_simulation_live_v7` (a sessão `live` grava as
+regras simuladas, a decisão com a frase da live e o resumo congelado no **Encerrar live**; o selo "Ao vivo", nunca), as
+duas colunas `persona_avatar_path` (o item do roteiro e a cópia na mensagem `scripted`) e a `webinar_open_session` que
+não solta o roteiro da live ao abrir (o tick de minuto solta os itens dela desde o `started_at`).
 
 | Ordem | Arquivo | O que faz | Seções | Nome em `schema_migrations` |
 |---|---|---|---|---|
@@ -928,14 +932,24 @@ select conname, convalidated from pg_constraint where conname in ('webinar_sessi
   'webinar_chat_messages_persona_avatar_v7') order by 1; -- 3 linhas (sem a _v4), convalidated = true
 select table_name from information_schema.columns where table_schema = 'public'
   and column_name = 'persona_avatar_path' order by 1; -- webinar_chat_messages, webinar_chat_script_items
+-- E a troca da webinar_open_session (R8 e R9; fora do cabeçalho da migração, que a guarda prende pelo hash):
+select position('kind <> ''live''' in pg_get_functiondef('public.webinar_open_session(uuid, timestamptz)'::regprocedure)) > 0,
+       position('persona_avatar_path' in pg_get_functiondef('public.webinar_open_session(uuid, timestamptz)'::regprocedure)) > 0;
+  -- true, true (a live fora do roteiro ao abrir; a foto de quem comenta vai na mensagem)
 ```
 
 Estado em 10/11/2026: escrita e aplicada no Supabase **local** (`supabase migration up --local`), com as consultas
 acima conferidas, e a integração `tests/integration/webinarios-na-tela.test.mjs` roda contra ela. Em 11/11/2026 a
 integração cresceu para os caminhos do app (14 testes: as ações de salvar, mostrar, tirar e excluir, a imagem no bucket,
 Fixar ao enviar, a enquete fixada, a rota `screen-events` com a `webinar_screen_report`, a moderação na Live gravada) e o
-ponta a ponta da Na tela rodou contra o mesmo banco local (`docs/30` §10.2). **Na nuvem de teste, pendente**: **antes
-do merge na `dev`, o produtor aplica a `202611100002` na nuvem de teste** (o arquivo inteiro, como acima), roda as sete
+ponta a ponta da Na tela rodou contra o mesmo banco local (`docs/30` §10.2). Ainda em 11/11/2026, com o app de R7 a R9,
+a integração chegou a 17 testes (o 15, a Simulação da live decidida na espera com a frase da live e a janela pela rota;
+o 16, o tick que solta o item vencido da live com a foto e o **Enviar agora**; o 17, o **Encerrar live**, o tick do
+resumo e o relatório da live com o bloco Simulação à parte), todos os `tests/integration/webinarios*.test.mjs` passaram
+um arquivo por vez contra o banco local, e o ponta a ponta novo `produtor-solta-comentario-na-live` rodou no Chromium com
+os de webinário de antes. Os testes 5 a 7 já conferem, no banco local, o check novo, os checks da foto e a troca da
+`webinar_open_session`. **Na nuvem de teste, pendente**: **antes
+do merge na `dev`, o produtor aplica a `202611100002` na nuvem de teste** (o arquivo inteiro, como acima), roda as oito
 consultas de conferência e confere a linha `202611100002` em `supabase_migrations.schema_migrations`. Quem escreveu
 esta parte não tocou na nuvem de teste: a aplicação fica com o produtor, como na §9.12. Quando aplicar, atualizar este parágrafo com a data e quem aplicou. Se o arquivo mudar depois disso, ele não roda de
 novo na nuvem de teste: a mudança vira uma migração nova, e a guarda (o hash) avisa.
