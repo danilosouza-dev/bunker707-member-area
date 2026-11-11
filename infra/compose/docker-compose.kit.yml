@@ -259,7 +259,7 @@ services:
     # So o otimizador de imagens do next/image ainda busca pelo endereco publico (as capas publicas do Storage, como o
     # navegador): o nome leva ao proprio servidor (o Caddy), sem passar pelo DNS. O resto vai pela rede interna.
     extra_hosts:
-      - "${SUPABASE_PUBLIC_HOST}:host-gateway"
+      - "${SUPABASE_PUBLIC_HOST:?falta SUPABASE_PUBLIC_HOST, o host do endereco publico do Supabase}:host-gateway"
     environment:
       NEXT_PUBLIC_SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY}

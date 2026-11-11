@@ -141,7 +141,7 @@ test("o app fala com o Supabase pela rede interna; o endereco publico fica para 
   // tests/infra-compose-env.guard.test.mjs, que confere os dois composes).
   const producao = ambiente(servicos(producaoFonte).app);
   assert.deepEqual(Object.keys(app).filter((k) => k !== "SUPABASE_INTERNAL_URL").sort(), Object.keys(producao).sort());
-  assert.match(kit.app, /^ {4}extra_hosts:\n {6}- "\$\{SUPABASE_PUBLIC_HOST\}:host-gateway"$/m, "so o otimizador do next/image usa o nome publico");
+  assert.match(kit.app, /^ {4}extra_hosts:\n {6}- "\$\{SUPABASE_PUBLIC_HOST:\?falta SUPABASE_PUBLIC_HOST, o host do endereco publico do Supabase\}:host-gateway"$/m, "so o otimizador do next/image usa o nome publico");
   assert.match(kit.app, /^ {4}depends_on:\n {6}api-gw:\n {8}condition: service_healthy$/m);
 });
 
