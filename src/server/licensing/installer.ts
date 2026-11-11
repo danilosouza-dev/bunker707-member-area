@@ -4,9 +4,12 @@
 // a ativacao, as mesmas operacoes da tela Licenca, operations.ts). Puro, sem "server-only" e sem "@/": a rota entrega as
 // dependencias e os testes carregam direto.
 //
-// - So pedido de dentro do servidor: o pedido que traz um cabecalho de proxy (o Caddy sempre poe X-Forwarded-For; a
-//   Vercel tambem) responde como rota que nao existe, antes do token. E so com o token do tick (JOBS_TICK_TOKEN), que so
-//   o servidor tem: no arquivo de segredos e no ambiente do container.
+// - So pedido de dentro do container do app: o Host e o 127.0.0.1 (ou localhost) da porta do app, o X-Forwarded-For,
+//   se veio, e um endereco de loopback so, o X-Forwarded-Host, se veio, e o proprio Host, e nenhum cabecalho de IP de
+//   cliente. O servidor do Next poe os X-Forwarded-* que faltam em todo pedido (base-server), entao a falta deles nao
+//   prova nada; o que prova e o Host: o Caddy repassa sempre o nome publico da escola, e a Vercel o da publicacao. O que
+//   nao passa responde como rota que nao existe, antes do token. E so com o token do tick (JOBS_TICK_TOKEN), que so o
+//   servidor tem: no arquivo de segredos e no ambiente do container.
 // - So no modo "enforce" a ativacao existe; o "estado" diz o modo nos dois (o instalador pula a ativacao no "off").
 // - A Chave de ativacao so passa por aqui: nunca volta na resposta, nunca vai para o log, e a auditoria leva so o codigo
 //   do resultado (como a tela). A resposta nunca traz a licenca, o segredo nem a sequencia da Instalacao.
@@ -42,8 +45,12 @@ export type InstallerOverview = {
 
 export type InstallerAnswer = { status: number; body: Record<string, unknown> };
 
-/** Os cabecalhos que um proxy poe: um pedido com eles veio de fora do servidor. */
-const PROXY_HEADERS = ["x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-real-ip", "forwarded", "cf-connecting-ip"] as const;
+/** Os nomes do proprio container (o pedido do no-app.mjs vai a http://127.0.0.1:3000). */
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
+/** O endereco de quem pediu, como o Next o escreve no X-Forwarded-For que falta. */
+const LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+/** Cabecalhos que so um proxy (o Caddy, a Cloudflare, a Vercel) poe: o Next nao os inventa. */
+const CLIENT_IP_HEADERS = ["x-real-ip", "forwarded", "cf-connecting-ip", "x-vercel-forwarded-for"] as const;
 
 const MAX_KEY_LENGTH = 80;
 
@@ -51,11 +58,33 @@ function notFound(): InstallerAnswer {
   return { status: 404, body: { ok: false, codigo: "nao_encontrado" } };
 }
 
-function cameThroughProxy(headers: InstallerLicenseDeps["headers"]): boolean {
-  return PROXY_HEADERS.some((name) => {
-    const value = headers.get(name);
-    return typeof value === "string" && value.length > 0;
-  });
+/** O nome do Host, sem a porta ("127.0.0.1:3000" -> "127.0.0.1"; "[::1]:3000" -> "[::1]"). */
+function hostnameOf(value: string | null): string | null {
+  const match = /^(\[[0-9a-f:.]+\]|[^:\s]+)(?::\d{1,5})?$/i.exec((value ?? "").trim());
+  return match ? match[1].toLowerCase() : null;
+}
+
+/** O pedido nasceu dentro do container do app (e nao passou pelo Caddy nem por outro proxy)? */
+export function cameFromInsideTheContainer(headers: InstallerLicenseDeps["headers"]): boolean {
+  const host = headers.get("host");
+  const hostname = hostnameOf(host);
+
+  if (!hostname || !LOOPBACK_HOSTNAMES.has(hostname)) {
+    return false;
+  }
+
+  if (CLIENT_IP_HEADERS.some((name) => (headers.get(name) ?? "").length > 0)) {
+    return false;
+  }
+
+  const forwardedFor = headers.get("x-forwarded-for");
+
+  if (forwardedFor !== null && !LOOPBACK_ADDRESSES.has(forwardedFor.trim())) {
+    return false;
+  }
+
+  const forwardedHost = headers.get("x-forwarded-host");
+  return forwardedHost === null || forwardedHost.trim().toLowerCase() === (host ?? "").trim().toLowerCase();
 }
 
 /** A Chave como a tela aceita: sem espacos, so letras, numeros e hifen, ate 80 caracteres. */
@@ -101,7 +130,7 @@ function stateBody(overview: InstallerOverview): Record<string, unknown> {
 }
 
 export async function handleInstallerLicenseRequest(deps: InstallerLicenseDeps): Promise<InstallerAnswer> {
-  if (cameThroughProxy(deps.headers)) {
+  if (!cameFromInsideTheContainer(deps.headers)) {
     return notFound();
   }
 

@@ -24,6 +24,7 @@ const emissao = novaChaveDeEmissao(raiz);
 const RAIZES = [raiz.confiavel];
 const HOST = "alunos.escola.test";
 const TOKEN = "7".repeat(64);
+const DE_DENTRO = { host: "127.0.0.1:3000", "x-forwarded-host": "127.0.0.1:3000", "x-forwarded-port": "3000", "x-forwarded-proto": "http", "x-forwarded-for": "127.0.0.1" };
 const AGORA = new Date("2026-11-11T12:00:00.000Z");
 let emissor;
 let cliente;
@@ -58,7 +59,8 @@ function rota({ modo = "enforce", cabecalhos = {}, corpo = { acao: "estado" }, b
       if (corpo instanceof Error) throw corpo;
       return corpo;
     },
-    headers: new Headers({ authorization: `Bearer ${TOKEN}`, ...cabecalhos }),
+    // O pedido do no-app.mjs, como o servidor do Next o entrega a rota: ele poe os X-Forwarded-* que faltam.
+    headers: new Headers({ ...DE_DENTRO, authorization: `Bearer ${TOKEN}`, ...cabecalhos }),
     overview: async () => ({
       state: computeLicenseState({ mode: modo, roots: RAIZES, snapshot: store.snapshotOf(banco.linha ?? store.EMPTY_LICENSE_RECORD), systemNow: new Date(relogio + 60_000), configuredHost: `https://${HOST}` }),
       hasInstallationCredentials: store.hasInstallationCredentials(banco.linha),
@@ -75,18 +77,41 @@ function rota({ modo = "enforce", cabecalhos = {}, corpo = { acao: "estado" }, b
   return { deps, registro, banco };
 }
 
-test("so de dentro do servidor: o pedido que passou por um proxy responde 404 antes do token, e o token do tick e obrigatorio", async () => {
-  for (const cabecalho of ["x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-real-ip", "forwarded", "cf-connecting-ip"]) {
-    const { deps, registro } = rota({ cabecalhos: { [cabecalho]: "203.0.113.9" }, corpo: { acao: "ativar", chave: emissor.novaLicenca().chave } });
-    assert.deepEqual(await handleInstallerLicenseRequest(deps), { status: 404, body: { ok: false, codigo: "nao_encontrado" } }, cabecalho);
-    assert.deepEqual(registro.ativacoes, [], cabecalho);
+test("so de dentro do container do app: o pedido pelo Caddy, pela Vercel ou com IP de cliente responde 404 antes do token", async () => {
+  const deFora = [
+    // Pelo Caddy: o nome publico da escola e o IP do aluno.
+    { host: "alunos.escola.test", "x-forwarded-host": "alunos.escola.test", "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https" },
+    // O Host forjado nao basta: o IP de quem pediu, o nome repassado ou um cabecalho de cliente denunciam.
+    { "x-forwarded-for": "127.0.0.1, 203.0.113.9" },
+    { "x-forwarded-for": "203.0.113.9" },
+    { "x-forwarded-host": "alunos.escola.test" },
+    { "x-real-ip": "203.0.113.9" },
+    { forwarded: "for=203.0.113.9" },
+    { "cf-connecting-ip": "203.0.113.9" },
+    { "x-vercel-forwarded-for": "203.0.113.9" },
+    // Outro container da rede pelo nome do servico.
+    { host: "app:3000", "x-forwarded-host": "app:3000", "x-forwarded-for": "172.18.0.5" },
+    { host: "" }
+  ];
+  for (const cabecalhos of deFora) {
+    const { deps, registro } = rota({ cabecalhos, corpo: { acao: "ativar", chave: emissor.novaLicenca().chave } });
+    assert.deepEqual(await handleInstallerLicenseRequest(deps), { status: 404, body: { ok: false, codigo: "nao_encontrado" } }, JSON.stringify(cabecalhos));
+    assert.deepEqual(registro.ativacoes, [], JSON.stringify(cabecalhos));
   }
+  // De dentro: o 127.0.0.1, o localhost e o ::1, com ou sem os X-Forwarded-* que o Next poe.
+  for (const cabecalhos of [{}, { host: "localhost:3000", "x-forwarded-host": "localhost:3000" }, { host: "[::1]:3000", "x-forwarded-host": "[::1]:3000", "x-forwarded-for": "::1" }, { "x-forwarded-for": "::ffff:127.0.0.1" }]) {
+    const { deps } = rota({ cabecalhos });
+    assert.equal((await handleInstallerLicenseRequest(deps)).status, 200, JSON.stringify(cabecalhos));
+  }
+  const semNada = rota();
+  semNada.deps.headers = new Headers({ host: "127.0.0.1:3000", authorization: `Bearer ${TOKEN}` });
+  assert.equal((await handleInstallerLicenseRequest(semNada.deps)).status, 200, "sem os X-Forwarded-* tambem e de dentro");
   const semToken = rota({ token: null });
   assert.equal((await handleInstallerLicenseRequest(semToken.deps)).status, 503);
   const errado = rota({ cabecalhos: { authorization: `Bearer ${"8".repeat(64)}` } });
   assert.deepEqual(await handleInstallerLicenseRequest(errado.deps), { status: 401, body: { ok: false, codigo: "nao_autorizado" } });
   const sem = rota();
-  sem.deps.headers = new Headers();
+  sem.deps.headers = new Headers(DE_DENTRO);
   assert.equal((await handleInstallerLicenseRequest(sem.deps)).status, 401);
   assert.equal((await handleInstallerLicenseRequest(rota({ corpo: new Error("grande demais") }).deps)).status, 400);
   assert.deepEqual(await handleInstallerLicenseRequest(rota({ corpo: { acao: "desativar" } }).deps), { status: 400, body: { ok: false, codigo: "pedido_invalido" } });

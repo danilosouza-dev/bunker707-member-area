@@ -13,10 +13,11 @@ import { activateWithKey } from "@/server/licensing/operations";
 import { licenseStateDbOf } from "@/server/licensing/store-db";
 
 // A Licenca pelo terminal do servidor (docs/32 §2.1 e §3.2; docs/20 §9D): o `membros licenca` e o instalador do kit
-// chamam esta rota de dentro do container do app (infra/kit/no-app.mjs), com o token do tick. Pedido que passou por um
-// proxy (o Caddy, a Vercel) responde 404: ela nao existe para quem esta fora do servidor. A regra mora em
-// src/server/licensing/installer.ts; a ativacao e a mesma da tela Licenca (operations.ts). Dever legal: o caminho para
-// sair de qualquer degrau, inclusive da Instalacao nunca ativada.
+// chamam esta rota de dentro do container do app (infra/kit/no-app.mjs, em http://127.0.0.1:3000), com o token do tick.
+// Pedido que chega por outro nome (o Caddy repassa o nome publico da escola; a Vercel, o da publicacao) responde 404:
+// ela nao existe para quem esta fora do servidor. A regra mora em src/server/licensing/installer.ts; a ativacao e a
+// mesma da tela Licenca (operations.ts). Dever legal: o caminho para sair de qualquer degrau, inclusive da Instalacao
+// nunca ativada.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
