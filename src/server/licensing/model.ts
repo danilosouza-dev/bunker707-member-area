@@ -45,6 +45,12 @@ export const LOCAL_ANOMALY_LIMITED_AFTER_MS = 7 * DAY_MS;
 export const LOCAL_ANOMALY_FROZEN_AFTER_MS = 30 * DAY_MS;
 /** Relogio: com conferencia nas ultimas 48 h, vale a hora do Emissor; diferenca maior que isso e erro. */
 export const CLOCK_TRUST_WINDOW_MS = 48 * 60 * 60 * 1000;
+/**
+ * Piso da hora confiavel: ela nunca fica mais que isto atras do relogio do servidor. Segura o UPDATE periodico no banco
+ * (ultima hora vista apagada e a hora local da ultima conferencia trocada por agora), que sem o piso segurava todo prazo.
+ * O preco: um relogio de servidor adiantado mais que isto adianta os prazos no que passa de 48 h (docs/32 §11.3, Relogio).
+ */
+export const TRUSTED_CLOCK_MAX_LAG_MS = 48 * 60 * 60 * 1000;
 
 /**
  * Limites do que uma licenca pode prometer, conferidos junto com a assinatura. Seguram o estrago de uma

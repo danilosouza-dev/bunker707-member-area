@@ -27,6 +27,7 @@ import {
   LOCAL_ANOMALY_LIMITED_AFTER_MS,
   NO_CONTACT_NOTICE_AFTER_MS,
   NO_RESTRICTIONS,
+  TRUSTED_CLOCK_MAX_LAG_MS,
   degreeRank,
   maxDegree,
   type LicenseDegree,
@@ -136,6 +137,11 @@ export type TrustedClock = {
  *   adiantado de forma constante continua certo; um relogio que pula para a frente nao adianta o prazo.
  * - Sem conferencia (ou relogio voltado para antes dela): o relogio.
  * - Nos tres casos, nunca menos que a ultima hora vista: relogio parado ou atrasado nao segura um prazo.
+ * - E nunca mais de 48 h atras do relogio do servidor (TRUSTED_CLOCK_MAX_LAG_MS): a ultima hora vista e a ultima
+ *   conferencia moram no banco, e um UPDATE periodico que as apagava (last_seen_at = null, last_check_in_local_at =
+ *   now()) segurava todo prazo com o Emissor bloqueado. O relogio do servidor e a unica referencia que o banco nao
+ *   mexe. O preco: o relogio adiantado mais que 48 h adianta os prazos no que passa disso (a faixa de relogio errado
+ *   avisa).
  */
 export function resolveTrustedNow(input: TrustedClockInput): TrustedClock {
   const systemMs = validMs(input.systemNow);
@@ -166,6 +172,11 @@ export function resolveTrustedNow(input: TrustedClockInput): TrustedClock {
   if (lastSeenMs !== null && (nowMs === null || lastSeenMs > nowMs)) {
     nowMs = lastSeenMs;
     source = "ultima_hora_vista";
+  }
+
+  if (systemMs !== null && nowMs !== null && nowMs < systemMs - TRUSTED_CLOCK_MAX_LAG_MS) {
+    nowMs = systemMs - TRUSTED_CLOCK_MAX_LAG_MS;
+    source = "relogio";
   }
 
   const clockSkewMs = checkIn ? checkIn.localMs - checkIn.emissorMs : null;

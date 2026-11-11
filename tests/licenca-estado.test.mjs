@@ -96,23 +96,29 @@ test("licença de outra raiz (um emissor pirata com a chave trocada) não liga n
   assert.equal(situacao.evaluation.degree, "nao_ativada");
 });
 
-test("relógio do servidor adiantado com conferência recente: vale a hora do Emissor e a anual não vence antes da hora", () => {
-  const validade = "2027-11-10T23:59:59.000Z";
+test("relógio do servidor adiantado até 48 h com conferência recente: vale a hora do Emissor e a anual não vence antes da hora", () => {
+  const validade = "2027-11-10T23:59:59-03:00";
   const licenca = licencaBase({
-    issuedAt: "2027-05-31T23:00:00.000Z",
-    expiresAt: "2027-08-29T23:00:00.000Z",
+    issuedAt: "2027-11-25T23:00:00.000Z",
+    expiresAt: "2027-12-25T23:00:00.000Z",
     plan: { kind: "annual", validUntil: validade, steps: passosDaAnual(validade) }
   });
-  const horaDoEmissor = new Date("2027-06-01T00:00:00.000Z");
-  const relogioErrado = new Date("2029-01-01T00:00:00.000Z");
-  const situacao = estado(
-    { token: assinarLicenca(emissao, licenca), everActivated: true, lastCheckIn: { emissorTime: horaDoEmissor, localTime: relogioErrado }, lastSeenAt: horaDoEmissor },
-    { agora: new Date(relogioErrado.getTime() + 60_000) }
-  );
+  // Na carência (o Admin limitado começa em 26/11 à meia-noite de Brasília) e com o relógio 40 horas adiantado.
+  const horaDoEmissor = new Date("2027-11-26T00:00:00.000Z");
+  const relogioErrado = new Date(horaDoEmissor.getTime() + 40 * 60 * 60_000);
+  const linha = { token: assinarLicenca(emissao, licenca), everActivated: true, lastCheckIn: { emissorTime: horaDoEmissor, localTime: relogioErrado }, lastSeenAt: horaDoEmissor };
+  const situacao = estado(linha, { agora: new Date(relogioErrado.getTime() + 60_000) });
 
   assert.equal(situacao.clock.source, "emissor");
-  assert.equal(situacao.clock.clockWrong, true);
-  assert.equal(situacao.evaluation.degree, "ok");
+  assert.equal(situacao.clock.clockWrong, false);
+  assert.equal(situacao.evaluation.degree, "aviso", "ainda na carência pela hora do Emissor");
+
+  // Adiantado mais de 48 h, o piso da hora confiável cobra o que passa disso (docs/32 §11.3): aqui, 4 dias adiantado
+  // vira Admin limitado dois dias antes da hora, com a faixa de relógio errado.
+  const muitoErrado = new Date(horaDoEmissor.getTime() + 4 * 24 * 60 * 60_000);
+  const cobrada = estado({ ...linha, lastCheckIn: { emissorTime: horaDoEmissor, localTime: muitoErrado } }, { agora: new Date(muitoErrado.getTime() + 60_000) });
+  assert.equal(cobrada.clock.clockWrong, true);
+  assert.equal(cobrada.evaluation.degree, "admin_limitado");
 });
 
 test("licença antiga devolvida ao banco (de antes de uma desativação) não vale: a mais nova já aceita manda", () => {

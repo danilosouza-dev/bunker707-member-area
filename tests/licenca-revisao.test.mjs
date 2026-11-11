@@ -112,3 +112,54 @@ test("relógio do nosso Emissor que pula para a frente: a conferência seguinte,
   );
   assert.deepEqual(repetida.outcome, { accepted: false, result: "nonce_diferente" });
 });
+
+// ---- clock-rewind.mjs: um UPDATE periódico na linha segura os prazos -----------------------------------
+
+/**
+ * O Emissor bloqueado, o agendador rodando (uma rodada por hora, para o teste ser rápido) e, a cada `editarACadaDias`,
+ * o UPDATE `last_seen_at = null, last_check_in_local_at = now()`. Devolve a situação nos dias pedidos.
+ */
+function simularUpdatePeriodico(editarACadaDias, dias) {
+  const T0 = Date.parse("2026-11-10T12:00:00.000Z");
+  let linha = instalacaoEmDia(T0);
+  const situacoes = new Map();
+  const ultimaHora = Math.max(...dias) * 24;
+
+  for (let hora = 1; hora <= ultimaHora; hora += 1) {
+    const agora = T0 + hora * HORA;
+
+    if (editarACadaDias > 0 && hora % (editarACadaDias * 24) === 0) {
+      linha = { ...linha, lastSeenAt: null, lastCheckIn: { emissorTime: linha.lastCheckIn.emissorTime, localTime: new Date(agora) } };
+    }
+
+    const plano = store.planLicenseTick(linha, { roots: RAIZES, configuredHost: ENDERECO, systemNow: new Date(agora) });
+    linha = { ...linha, ...plano.patch };
+
+    if (plano.checkIn.due) {
+      linha = { ...linha, checkInResult: "sem_resposta" };
+    }
+
+    if (dias.includes(hora / 24)) {
+      situacoes.set(hora / 24, situacao(linha, agora));
+    }
+  }
+
+  return { T0, situacoes };
+}
+
+test("UPDATE semanal na linha com o Emissor bloqueado não segura os prazos: a hora confiável nunca fica mais de 48 h atrás do relógio (revisão: clock-rewind)", () => {
+  const { T0, situacoes } = simularUpdatePeriodico(6, [10, 33, 61, 63]);
+
+  // Sem contato: Aviso no 8º dia; o arquivo vence no dia 30 (Admin limitado) e a escola congela 30 dias depois. Antes da
+  // correção, o UPDATE a cada 6 dias deixava a escola "em dia" no dia 61, só com a faixa de relógio errado. Agora o UPDATE
+  // segura cada passo por no máximo 48 h.
+  for (const [dia, esperado] of [[10, "aviso"], [33, "admin_limitado"], [61, "admin_limitado"], [63, "escola_congelada"]]) {
+    const vista = situacoes.get(dia);
+    assert.equal(vista.evaluation.degree, esperado, `dia ${dia}`);
+    assert.ok(vista.clock.now.getTime() >= T0 + dia * DIA - 48 * HORA, `dia ${dia}: a hora confiável fica no máximo 48 h atrás do relógio`);
+  }
+
+  // Sem o UPDATE, a mesma escada no relógio do servidor: o piso só tira o que o UPDATE ganhava além de 48 h.
+  const controle = simularUpdatePeriodico(0, [8, 31, 61]).situacoes;
+  assert.deepEqual([8, 31, 61].map((dia) => controle.get(dia).evaluation.degree), ["aviso", "admin_limitado", "escola_congelada"]);
+});

@@ -508,19 +508,35 @@ test("faixa: dias até o próximo passo, arredondados para cima, nunca negativos
 
 // ---- Relógio -----------------------------------------------------------------------------------------------
 
-test("com conferência recente, vale a hora do Emissor mesmo com o relógio do servidor errado", () => {
+test("com conferência recente, vale a hora do Emissor com o relógio do servidor adiantado até 48 h", () => {
   const emissor = new Date("2026-11-10T12:00:00.000Z");
-  const local = new Date("2029-01-01T00:00:00.000Z");
+  const local = new Date(emissor.getTime() + 40 * HORA);
   const relogio = resolveTrustedNow({ systemNow: new Date(local.getTime() + HORA), lastSeenAt: emissor, lastCheckIn: { emissorTime: emissor, localTime: local } });
 
   assert.equal(relogio.source, "emissor");
   assert.equal(relogio.now.toISOString(), "2026-11-10T13:00:00.000Z");
+  assert.equal(relogio.clockWrong, false);
+});
+
+test("o piso da hora confiável: nunca mais de 48 h atrás do relógio do servidor, e o preço é o relógio adiantado mais que isso", () => {
+  const emissor = new Date("2026-11-10T12:00:00.000Z");
+  const local = new Date("2029-01-01T00:00:00.000Z");
+  const relogio = resolveTrustedNow({ systemNow: new Date(local.getTime() + HORA), lastSeenAt: emissor, lastCheckIn: { emissorTime: emissor, localTime: local } });
+
+  // O banco (a última hora vista e a última conferência) não segura mais a hora: o relógio do servidor é o piso. O preço
+  // fica dito no docs/32 §11.3: o relógio adiantado anos adianta os prazos no que passa de 48 h, com a faixa avisando.
+  assert.equal(relogio.source, "relogio");
+  assert.equal(relogio.now.toISOString(), "2028-12-30T01:00:00.000Z");
   assert.equal(relogio.clockWrong, true, "a diferença de mais de 48 h vira aviso de relógio errado");
+
+  // O relógio atrasado não tem piso nenhum a pagar: vale a última hora vista, como antes.
+  const atrasado = resolveTrustedNow({ systemNow: new Date("2026-11-01T00:00:00.000Z"), lastSeenAt: emissor, lastCheckIn: { emissorTime: emissor, localTime: emissor } });
+  assert.equal(atrasado.now.toISOString(), emissor.toISOString());
 });
 
 test("relógio adiantado de forma constante e Emissor fora do ar por 3 dias: a hora continua certa, sem pular para o futuro", () => {
   const emissor = new Date("2027-06-01T00:00:00.000Z");
-  const local = new Date("2029-06-01T00:00:00.000Z");
+  const local = new Date(emissor.getTime() + 30 * HORA);
   const relogio = resolveTrustedNow({ systemNow: new Date(local.getTime() + 3 * DIA), lastSeenAt: emissor, lastCheckIn: { emissorTime: emissor, localTime: local } });
 
   assert.equal(relogio.now.toISOString(), "2027-06-04T00:00:00.000Z");

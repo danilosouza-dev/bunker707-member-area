@@ -262,7 +262,9 @@ export function licenseBannerOf(state: LicenseState, options: { configuredHost: 
       degree: "ok",
       tone: "warning",
       title: "O relógio deste servidor está errado",
-      lines: ["A hora do servidor está mais de 48 horas diferente da hora do Emissor de licenças. Acerte o relógio (NTP). Nada foi limitado por isso."],
+      lines: [
+        "A hora do servidor está mais de 48 horas diferente da hora do Emissor de licenças. Acerte o relógio (NTP). Nada foi limitado por isso, mas um relógio adiantado mais de 48 horas adianta os prazos da Licença."
+      ],
       renewUrl,
       needsActivation: false
     };
@@ -295,7 +297,7 @@ export function licenseBannerOf(state: LicenseState, options: { configuredHost: 
   }
 
   if (state.clock.clockWrong) {
-    lines.push("A hora deste servidor também está mais de 48 horas diferente da hora do Emissor: acerte o relógio (NTP).");
+    lines.push("A hora deste servidor também está mais de 48 horas diferente da hora do Emissor: acerte o relógio (NTP). Adiantado mais de 48 horas, ele adianta os prazos da Licença.");
   }
 
   const titles: Record<Exclude<LicenseDegree, "ok">, string> = {

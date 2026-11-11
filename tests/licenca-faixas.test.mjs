@@ -181,7 +181,7 @@ test("modo de observação do lote fundador: avisa o degrau calculado e diz que 
   assert.ok(modelo.lines.some((linha) => linha.startsWith("Modo de observação até 01/01/2027") && linha.includes("nada foi limitado") && linha.endsWith("estaria em Escola congelada.")));
 });
 
-test("relógio do servidor errado: faixa própria, nunca um degrau", () => {
+test("relógio do servidor errado: faixa própria; até 48 h adiantado, nunca um degrau, e a faixa diz o preço de passar disso", () => {
   const agora = "2026-11-11T12:00:00.000Z";
   const estado = situacao({}, { agora, snapshot: { lastCheckIn: { emissorTime: new Date("2026-11-08T12:00:00.000Z"), localTime: new Date("2026-11-11T11:00:00.000Z") } } });
   const modelo = faixa(estado);
@@ -189,6 +189,7 @@ test("relógio do servidor errado: faixa própria, nunca um degrau", () => {
   assert.equal(estado.evaluation.degree, "ok");
   assert.equal(modelo.title, "O relógio deste servidor está errado");
   assert.match(modelo.lines[0], /Nada foi limitado/);
+  assert.match(modelo.lines[0], /adiantado mais de 48 horas adianta os prazos/);
 });
 
 test("quem não é dono nem administrador lê a faixa e não recebe os botões; nenhuma faixa promete bloquear a escola", () => {
