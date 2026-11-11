@@ -182,7 +182,8 @@ export type QuestionReplyRefusal = "full" | "not_answered" | "not_owner";
  * (QUESTION_REPLY_LIMITS.perQuestion): e uma conversa curta, nao um segundo chat.
  */
 export function questionReplyRefusal(input: { question: Pick<WebinarQuestion, "status" | "userId">; replies: number; staff: boolean; userId: string }): QuestionReplyRefusal | null {
-  if (!input.staff && input.question.userId !== input.userId) {
+  // A pergunta simulada (D77) nao tem aluno: so a equipe escreve no fio dela.
+  if (!input.staff && (!input.question.userId || input.question.userId !== input.userId)) {
     return "not_owner";
   }
   if (input.question.status !== "answered") {
@@ -214,7 +215,25 @@ export type StudentQuestion = {
   voted: boolean;
 };
 
-/** A pergunta para o aluno: a dispensada so o autor ve (docs/30 §1.3). */
+/**
+ * A pergunta ja apareceu na sala (11/11/2026, D77): a da turma sempre; a simulada so a partir da hora dela (created_at),
+ * como o chat. Na Live gravada o item Pergunta solto na abertura (webinar_open_session) nasce com a hora marcada mais o
+ * minuto do item, e so entra na aba (e no console) quando essa hora chega; o "Enviar agora", o "Soltar agora" e o tick
+ * da live gravam com a hora de agora.
+ */
+export function questionVisibleAt(question: Pick<WebinarQuestion, "createdAt" | "simulated">, nowMs: number): boolean {
+  if (!question.simulated) {
+    return true;
+  }
+  const at = Date.parse(question.createdAt);
+  return !Number.isFinite(at) || at <= nowMs;
+}
+
+/**
+ * A pergunta para o aluno: a dispensada so o autor ve (docs/30 §1.3). A simulada (D77) chega como a de um aluno, com o
+ * nome e a foto da pessoa: nunca `mine`, e o aluno nunca responde no fio dela (questionReplyRefusal: nenhum aluno e o
+ * dono); a dispensada some para todos.
+ */
 export function toStudentQuestion(
   question: WebinarQuestion,
   viewerUserId: string | null,

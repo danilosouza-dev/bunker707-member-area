@@ -6,7 +6,8 @@
 // dona do seu arquivo e nenhuma edita este); entram aqui em WEBINAR_COPY.paineis, .exportar, .oferta, .simulacao,
 // .seguimento, .assistente, .vertical, .jit e .traducao, e a guarda le tudo junto. A sala do aluno V2 (docs/31 §1)
 // entra do mesmo jeito em WEBINAR_COPY.salaV2, e o console V2 de quem apresenta (docs/31 V2-13 a V2-15) em .consoleV2.
-// A "Na tela" (docs/31 §12: fixadas, banner e QR Code) entra em WEBINAR_COPY.naTela.
+// A "Na tela" (docs/31 §12: fixadas, banner e QR Code) entra em WEBINAR_COPY.naTela, e as pessoas que comentam com a
+// pergunta simulada (docs/31 §13.1) em WEBINAR_COPY.pessoas.
 
 import { ASSISTENTE_COPY } from "./webinar-copy-v4/assistente";
 import { CONSOLE_V2_COPY } from "./webinar-copy-v4/console-v2";
@@ -15,6 +16,7 @@ import { JIT_COPY } from "./webinar-copy-v4/jit";
 import { NA_TELA_COPY } from "./webinar-copy-v4/na-tela";
 import { OFERTA_COPY } from "./webinar-copy-v4/oferta";
 import { PAINEIS_COPY } from "./webinar-copy-v4/paineis";
+import { PESSOAS_COPY } from "./webinar-copy-v4/pessoas";
 import { SALA_V2_COPY } from "./webinar-copy-v4/sala-v2";
 import { SEGUIMENTO_COPY } from "./webinar-copy-v4/seguimento";
 import { SIMULACAO_COPY } from "./webinar-copy-v4/simulacao";
@@ -674,7 +676,9 @@ export const WEBINAR_COPY = {
   /* O console V2 de quem apresenta (docs/31 V2-13 a V2-15): src/lib/webinar-copy-v4/console-v2.ts. */
   consoleV2: CONSOLE_V2_COPY,
   /* A "Na tela" (docs/31 §12): src/lib/webinar-copy-v4/na-tela.ts. */
-  naTela: NA_TELA_COPY
+  naTela: NA_TELA_COPY,
+  /* As pessoas que comentam e a pergunta simulada (docs/31 §13.1): src/lib/webinar-copy-v4/pessoas.ts. */
+  pessoas: PESSOAS_COPY
 } as const;
 
 export type WebinarCopy = typeof WEBINAR_COPY;

@@ -267,6 +267,16 @@ export function messageHasLinks(message: Pick<ChatMessage, "role" | "source">): 
 }
 
 /**
+ * A mensagem do roteiro de Tipo Pergunta (11/11/2026, docs/30 D77): o registro de que o item Pergunta entrou na sessao
+ * (a chave unica do roteiro, o "Já entrou" do console e o bloco Simulacao do relatorio), ligado a pergunta simulada que
+ * ele abre na aba Perguntas. Nunca aparece no chat, nem da turma nem do console: a pergunta aparece so na aba, como a
+ * pergunta de um aluno.
+ */
+export function isScriptedQuestionMessage(message: Pick<ChatMessage, "kind" | "source">): boolean {
+  return message.source === "scripted" && message.kind === "question";
+}
+
+/**
  * O que o aluno recebe de uma mensagem (docs/30 §5.1): `scripted` vai com o papel da persona (ja gravado em
  * `role`), a origem fica so no banco; `ai` continua `ai` (selo Assistente); as pendentes so do proprio autor. A hora
  * em que foi gravada (`sentAt`) so na sessao `live` (docs/31 V2-9): na gravada e no Replay, a linha mestre diria a

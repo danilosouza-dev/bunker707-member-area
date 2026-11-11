@@ -9,6 +9,8 @@
 // gatilhos da live e o porque de "Quando o apresentador diz" faltar nela), o "Novo comentário" do console com "Quem
 // comenta" (Nome, Foto (opcional), Aparece como, Comentário), a foto de quem comenta com a linha do consentimento, os
 // avisos e os erros. Nunca a palavra "personagem" na tela (o teste confere): o nome interno `persona` fica no codigo.
+// Em 11/11/2026 saem a caixa "Usar esta foto em todos os comentários de {nome}" e o aviso dela (a lista "Pessoas que
+// comentam" faz a pessoa ser a unidade; as frases novas estao em src/lib/webinar-copy-v4/pessoas.ts).
 //
 // Ja existiam e continuam onde estao: "Fixar" e "Desafixar" de cada linha do chat (WEBINAR_ADMIN_COPY.console), os itens
 // de silenciar, remover e banir e o bloco "Removidos, silenciados e banidos" (WEBINAR_COPY.consoleAoVivo), e as frases
@@ -257,7 +259,6 @@ export const NA_TELA_COPY = {
     enviandoFoto: "Enviando a foto…",
     fotoDica: "JPG, PNG ou WebP. Fica com até 512 px.",
     fotoConsentimento: "Use imagem gerada ou com autorização. Nunca a foto de uma pessoa real sem o consentimento dela.",
-    usarEmTodos: (nome: string) => `Usar esta foto em todos os comentários de ${nome}`,
     apareceComo: "Aparece como",
     papeis: { student: "Aluno", team: "Equipe" },
     comentario: "Comentário",
@@ -267,8 +268,7 @@ export const NA_TELA_COPY = {
     voltar: "Voltar",
     avisos: {
       enviado: "Comentário no chat em até 5 s.",
-      guardado: "Guardado no roteiro, pelo botão da equipe.",
-      fotoEmTodos: (nome: string, total: number) => (total === 1 ? `A foto foi para 1 comentário de ${nome}.` : `A foto foi para ${total} comentários de ${nome}.`)
+      guardado: "Guardado no roteiro, pelo botão da equipe."
     },
     erros: {
       nome: "Dê um nome a quem comenta (até 60 caracteres).",

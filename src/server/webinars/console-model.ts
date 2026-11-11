@@ -24,6 +24,7 @@ import {
 } from "./model";
 import type { ConsolePresence } from "./console-presence-model";
 import type { LiveConsolePerson, LiveConsoleSnapshot } from "./live-console-model";
+import type { PersonaList } from "./persona-model";
 import type { ScreenDisplay, ScreenItem } from "./screen-model";
 import type { ScreenStats } from "./screen-rows";
 import { sessionOffsetMs, simulatedPhase, simulationAckSentence } from "./room-model";
@@ -531,6 +532,12 @@ export type ConsoleSnapshot = {
    */
   presence?: ConsolePresence | null;
   presentNow: number;
+  /**
+   * As pessoas que comentam do webinario (11/11/2026, D75): a mesma lista do card Roteiro do editor, que o Roteiro do
+   * console cria, edita, remove e escolhe. So com o roteiro e nunca no Replay; ausente ou `available` falso (o banco sem
+   * a 202611110001), o "Novo comentário" segue com o Nome digitado.
+   */
+  personas?: PersonaList;
   questions: WebinarQuestion[];
   /**
    * A parte simulada do contador agora (adendo de 10/11/2026, R7), so para a equipe ver separada do real ("· +300

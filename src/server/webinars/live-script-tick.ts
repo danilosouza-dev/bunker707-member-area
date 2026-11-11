@@ -11,7 +11,8 @@ import "server-only";
 // e o "Soltar agora" ao mesmo tempo nunca repetem. Uma consulta de sessoes por tick (as live no ar com started_at nas
 // ultimas 24 h); por sessao, o roteiro, o que ja entrou e as fotos. Uma falha numa sessao vira log e o lote segue; o fim
 // do orcamento do tick (signal) para. Banco sem as tabelas do roteiro: registra e devolve zeros. Quem chama e o job das
-// sessoes (src/server/jobs/webinar-sessions-job.ts).
+// sessoes (src/server/jobs/webinar-sessions-job.ts). Desde 11/11/2026 (D77): o item Pergunta solto aqui abre tambem a
+// pergunta simulada na aba Perguntas, ligada a mensagem (persona-writes.openScriptedQuestion, que nunca lanca).
 
 import { isPendingMigrationError } from "../db/pending-migration";
 import { scriptItemFromRow } from "./chat-rows";
@@ -20,6 +21,7 @@ import { assertNoDbError, isMissingWebinarSchema, WEBINARS_MIGRATION, type Webin
 import { CHAT_LIMITS } from "./model";
 import { liveScriptDue } from "./persona-model";
 import { readScriptPersonaAvatars } from "./persona-store";
+import { openScriptedQuestion } from "./persona-writes";
 import { sessionOffsetMs } from "./room-model";
 import { SESSION_COLUMNS, sessionFromRow, type SessionRow } from "./rows";
 
@@ -90,6 +92,10 @@ async function releaseSession(db: WebinarsDb, row: SessionRow, now: Date): Promi
     });
     if (inserted) {
       released += 1;
+      // O item Pergunta (11/11/2026, D77) abre a pergunta simulada na aba Perguntas, ligada a mensagem que entrou.
+      if (item.kind === "question") {
+        await openScriptedQuestion(db, { avatarPath: avatar, message: inserted, personaId: avatars.personaIds.get(item.id) ?? null });
+      }
     } else {
       skipped += 1;
     }

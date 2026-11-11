@@ -21,7 +21,8 @@ import {
   type ScriptItemDraft
 } from "./model";
 import { NA_TELA_COPY } from "../../lib/webinar-copy-v4/na-tela";
-import { PERSONA_AVATAR_LIMITS, PERSONA_AVATAR_PATH_PATTERN } from "./persona-model";
+import { PESSOAS_COPY as PESSOAS } from "../../lib/webinar-copy-v4/pessoas";
+import { PERSONA_AVATAR_LIMITS, PERSONA_AVATAR_PATH_PATTERN, personaCleanName, personaNameFits } from "./persona-model";
 
 export const CHAT_MESSAGES = {
   answer: "A resposta pode ter até 1.000 caracteres.",
@@ -192,10 +193,16 @@ export const scriptItemDraftSchema: z.ZodType<ScriptItemDraft> = z
     phraseDelayMs: z.number().int().min(CHAT_LIMITS.phraseDelayMinMs).max(CHAT_LIMITS.phraseDelayMaxMs).default(0),
     // R9: a foto de quem comenta, so o caminho da nossa pasta; ausente, a do item fica como esta.
     personaAvatarPath: personaAvatarPathSchema.nullable().optional(),
+    // 11/11/2026 (D75): a pessoa da lista; com ela, o servidor grava a copia dela no item.
+    personaId: uuidSchema.nullable().optional(),
     status: z.enum(SCRIPT_STATUSES).default("draft"),
     triggerKind: z.enum(SCRIPT_TRIGGERS, { error: CHAT_MESSAGES.invalid })
   })
   .superRefine((item, context) => {
+    // A Pergunta (D77) entra na aba Perguntas: o texto cabe na pergunta do aluno.
+    if (item.kind === "question" && Array.from(item.body).length > CHAT_LIMITS.question) {
+      context.addIssue({ code: "custom", message: PESSOAS.erros.pergunta, path: ["body"] });
+    }
     if (item.triggerKind === "at_offset" && item.offsetMs == null) {
       context.addIssue({ code: "custom", message: CHAT_MESSAGES.offset, path: ["offsetMs"] });
     }
@@ -238,18 +245,49 @@ export const fireScriptItemSchema = z.object({ itemId: uuidSchema, sessionId: se
 
 /**
  * O "Novo comentário" do console (adendo de 10/11/2026, R8 e R9): quem comenta (Nome, Foto (opcional), Aparece como) e
- * o Comentário, para "Enviar agora" (sendScriptedComment) ou "Guardar na lista" (saveScriptComment). `applyToName`: o
- * "Usar esta foto em todos os comentários de {nome}", ligado por padrao (so vale com a foto).
+ * o Comentário, para "Enviar agora" (sendScriptedComment) ou "Guardar na lista" (saveScriptComment). O `applyToName` de
+ * 10/11/2026 (o "Usar esta foto em todos os comentários de {nome}") saiu em 11/11/2026: a pagina antiga que ainda manda
+ * a chave e atendida, e a chave e ignorada (a pessoa da lista e a unidade, D75). Desde 11/11/2026 (D75 a D78):
+ * `personaId`, a pessoa da lista (o servidor usa o nome, o papel e a foto dela; o Nome, a Foto e o Aparece como que
+ * vierem junto ficam de fora); sem ela, a pessoa nova (Nome, Foto, Aparece como), que entra na lista ao enviar ou
+ * guardar; e `kind`, o Tipo: "message" (o comentario no chat) ou "question" (a pergunta simulada na aba Perguntas, ate
+ * 500 caracteres, como a pergunta do aluno).
  */
-export const scriptCommentSchema = z.object({
-  applyToName: z.boolean().default(true),
-  body: z.string({ error: COMENTARIOS.erros.comentario }).trim().min(1, COMENTARIOS.erros.comentario).max(CHAT_LIMITS.body, COMENTARIOS.erros.comentario),
-  personaAvatarPath: personaAvatarPathSchema.nullable().default(null),
-  personaName: z.string({ error: COMENTARIOS.erros.nome }).trim().min(1, COMENTARIOS.erros.nome).max(CHAT_LIMITS.personaName, COMENTARIOS.erros.nome),
-  personaRole: z.enum(PERSONA_ROLES).default("student"),
-  sessionId: sessionIdSchema
-});
+export const scriptCommentSchema = z
+  .object({
+    body: z.string({ error: COMENTARIOS.erros.comentario }).trim().min(1, COMENTARIOS.erros.comentario).max(CHAT_LIMITS.body, COMENTARIOS.erros.comentario),
+    kind: z.enum(["message", "question"]).default("message"),
+    personaAvatarPath: personaAvatarPathSchema.nullable().default(null),
+    personaId: uuidSchema.nullable().default(null),
+    personaName: z.string({ error: COMENTARIOS.erros.nome }).trim().min(1, COMENTARIOS.erros.nome).max(CHAT_LIMITS.personaName, COMENTARIOS.erros.nome),
+    personaRole: z.enum(PERSONA_ROLES).default("student"),
+    sessionId: sessionIdSchema
+  })
+  .superRefine((input, context) => {
+    if (input.kind === "question" && Array.from(input.body).length > CHAT_LIMITS.question) {
+      context.addIssue({ code: "custom", message: PESSOAS.erros.pergunta, path: ["body"] });
+    }
+  });
 export type ScriptCommentInput = z.input<typeof scriptCommentSchema>;
+
+/**
+ * Uma pessoa da lista "Pessoas que comentam" (11/11/2026, D75): o Nome (1 a 60, sem espacos sobrando), a Foto (so o
+ * caminho da nossa pasta) e o Aparece como; com `id`, a edicao. O nome repetido no webinario e conferido no servidor.
+ */
+export const savePersonaSchema = z.object({
+  avatarPath: personaAvatarPathSchema.nullable().default(null),
+  id: uuidSchema.nullable().default(null),
+  name: z
+    .string({ error: PESSOAS.erros.nome })
+    .refine((value) => personaNameFits(value), PESSOAS.erros.nome)
+    .transform((value) => personaCleanName(value)),
+  role: z.enum(PERSONA_ROLES).default("student"),
+  webinarId: uuidSchema
+});
+export type SavePersonaInput = z.input<typeof savePersonaSchema>;
+
+/** Remover uma pessoa da lista (os comentarios do roteiro dela ficam com a copia). */
+export const deletePersonaSchema = z.object({ id: uuidSchema });
 
 /**
  * A foto de quem comenta como o navegador manda (data URL WebP ja reduzido a 512 px e ate 100 KB): o teto do texto e o

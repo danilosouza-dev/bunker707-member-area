@@ -328,7 +328,8 @@ export type QuestionRow = {
   status: string;
   updated_at: string;
   upvotes: number;
-  user_id: string;
+  /** Nulo so na pergunta simulada (source 'scripted', 202611110001; o check do banco liga as duas coisas). */
+  user_id: string | null;
 };
 
 export function questionFromRow(row: QuestionRow): WebinarQuestion {
@@ -345,9 +346,11 @@ export function questionFromRow(row: QuestionRow): WebinarQuestion {
     messageId: row.message_id,
     offsetMs: row.offset_ms,
     sessionId: row.session_id,
+    // A pergunta simulada e a unica sem aluno (o check webinar_questions_author_v8): nenhuma coluna nova na leitura.
+    simulated: !row.user_id,
     status: oneOf<QuestionStatus>(QUESTION_STATUSES, row.status, "open"),
     upvotes: row.upvotes ?? 0,
-    userId: row.user_id
+    userId: row.user_id || null
   };
 }
 

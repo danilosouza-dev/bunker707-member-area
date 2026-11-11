@@ -749,6 +749,11 @@ export type ScriptItem = {
    * a 202611100002 (lida a parte, persona-store.ts).
    */
   personaAvatarPath?: string | null;
+  /**
+   * A pessoa da lista do webinario (11/11/2026, D75; webinar_personas): a fonte do nome, do papel e da foto, que o item
+   * guarda como copia. Nula sem pessoa (saiu da lista, ou o banco sem a 202611110001; lida a parte, persona-store.ts).
+   */
+  personaId?: string | null;
   personaName: string;
   personaRole: PersonaRole;
   phrase: string | null;
@@ -770,6 +775,8 @@ export type ScriptItemDraft = {
   offsetMs: number | null;
   /** A foto de quem comenta (R9); ausente, a do item fica como esta. */
   personaAvatarPath?: string | null;
+  /** A pessoa da lista (D75): com ela, o servidor grava a copia dela (nome, papel e foto); nula ou ausente, a copia enviada. */
+  personaId?: string | null;
   personaName: string;
   personaRole: PersonaRole;
   phrase: string | null;
@@ -846,9 +853,16 @@ export type WebinarQuestion = {
   messageId: string | null;
   offsetMs: number;
   sessionId: string;
+  /**
+   * A pergunta simulada (11/11/2026, D77; source 'scripted' na 202611110001): feita por uma pessoa da lista, sem aluno
+   * (`userId` nulo), com o nome e a foto da pessoa; fica fora de todo numero e so a equipe responde no fio. O selo
+   * "Simulada" aparece so no console. Lida pelo user_id nulo (so a simulada tem), sem coluna nova nas listas de sempre.
+   */
+  simulated: boolean;
   status: QuestionStatus;
   upvotes: number;
-  userId: string;
+  /** Quem perguntou; nulo so na pergunta simulada. */
+  userId: string | null;
 };
 
 export type ChatConsent = {

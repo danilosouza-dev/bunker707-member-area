@@ -299,6 +299,8 @@ export type ScriptItemUpsert = {
   resolved_transcript_id?: string | null;
   /** A foto de quem comenta (R9): so com a 202611100002; sem a coluna no banco, a chave fica de fora. */
   persona_avatar_path?: string | null;
+  /** A pessoa da lista (11/11/2026, D75): so com a 202611110001; sem a coluna no banco, a chave fica de fora. */
+  persona_id?: string | null;
   status: string;
   trigger_kind: string;
   webinar_id: string;
@@ -541,6 +543,36 @@ export type QuestionInsert = { anonymous: boolean; body: string; display_name: s
 export async function insertQuestionRow(db: WebinarsDb, row: QuestionInsert): Promise<QuestionRow> {
   const { data, error } = await db.from("webinar_questions").insert(row).select(QUESTION_COLUMNS).single();
   assertNoDbError(error, "Webinarios: gravar pergunta");
+  return data as QuestionRow;
+}
+
+/**
+ * A pergunta simulada (11/11/2026, docs/30 D77; a 202611110001): a pergunta de uma pessoa da lista, sem aluno (user_id
+ * nulo, source 'scripted'), com a copia do nome (display_name), do papel e da foto da pessoa. `message_id`: a mensagem
+ * do item Pergunta do roteiro que a abriu (o "Soltar agora" e o tick da live); nula no "Enviar agora". A mesma mensagem
+ * abre uma pergunta so (o indice unico parcial): a segunda volta nula. Banco sem a migracao: PendingMigrationError.
+ */
+export type ScriptedQuestionInsert = {
+  body: string;
+  display_name: string;
+  message_id: string | null;
+  offset_ms: number;
+  persona_avatar_path: string | null;
+  persona_id: string | null;
+  persona_role: "student" | "team";
+  session_id: string;
+};
+
+export async function insertScriptedQuestionRow(db: WebinarsDb, row: ScriptedQuestionInsert): Promise<QuestionRow | null> {
+  const { data, error } = await db
+    .from("webinar_questions")
+    .insert({ ...row, anonymous: false, source: "scripted", user_id: null })
+    .select(QUESTION_COLUMNS)
+    .single();
+  if (isUniqueViolation(error)) {
+    return null;
+  }
+  assertNoDbError(error, "Webinarios: gravar pergunta simulada");
   return data as QuestionRow;
 }
 

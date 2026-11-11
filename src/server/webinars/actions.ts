@@ -33,6 +33,7 @@ import { newRoomName } from "./jitsi-token";
 import { ensureSessionRoomName } from "./live-store";
 import { WEBINAR_LIMITS, toTime, webinarHasStudentData, webinarSituation, webinarSlug, type JitSettings, type WebinarDraft, type WebinarKind, type WebinarSituation, type WebinarStatus } from "./model";
 import { copyOfferToWebinar } from "./offer-store";
+import { copyPersonasToWebinar } from "./persona-store";
 import { queueWebinarCancelledNotices, queueWebinarRescheduledNotices } from "./notify";
 import { baseRecordingOf, draftSessionsOf } from "./queries";
 import { accessModeOfRow, sessionFromRow, webinarFromRow, webinarRowPatch, type PresenterRow, type RecordingRow, type SessionRow, type WebinarRow } from "./rows";
@@ -608,7 +609,8 @@ export async function cancelWebinar(input: { expectedUpdatedAt?: string; id: str
  * (docs/30 §2.3). Os apresentadores e o video base da Live gravada vao junto; nenhuma sessao (a sala e o gravador
  * nascem quando a copia for publicada). Fase 4: a Oferta (em rascunho, copyOfferToWebinar), o Assistente (desligado,
  * com as perguntas e respostas, copyAssistantToWebinar) e o "Comeca quando voce entra" (desligado; a Simulacao das
- * sessoes que nascem vai sem a decisao, que e de quem liga na copia, D10).
+ * sessoes que nascem vai sem a decisao, que e de quem liga na copia, D10). Desde 11/11/2026 (D75), a lista de pessoas
+ * que comentam, com as fotos (copyPersonasToWebinar).
  */
 export async function duplicateWebinar(input: { expectedUpdatedAt?: string; id: string }): Promise<ActionResult<{ id: string; updatedAt: string }>> {
   return runAdminAction("messaging.write", webinarIdSchema, input, async ({ input: data, user }) => {
@@ -627,6 +629,9 @@ export async function duplicateWebinar(input: { expectedUpdatedAt?: string; id: 
     const copy = { fromWebinarId: bundle.row.id, toWebinarId: created.id, userId: user.id };
     const offer = await copyPart("a oferta", () => copyOfferToWebinar(db, copy), null);
     const assistantItems = await copyPart("o assistente", () => copyAssistantToWebinar(db, copy), 0);
+    // A lista de pessoas que comentam (11/11/2026, D75), com as mesmas fotos. O roteiro nao e copiado hoje (docs/30
+    // §2.10, item 10): quando for, cada item copiado liga a pessoa copiada pelo mapa que copyPersonasToWebinar devolve.
+    const personas = await copyPart("as pessoas que comentam", async () => (await copyPersonasToWebinar(db, copy)).size, 0);
     const jit = await copyPart(
       "o comeca quando voce entra",
       async () => {
@@ -646,7 +651,7 @@ export async function duplicateWebinar(input: { expectedUpdatedAt?: string; id: 
       actorId: user.id,
       entityId: created.id,
       entityType: "webinar",
-      metadata: { assistant_items: assistantItems, jit_copied: jit, kind: created.kind, offer_copied: offer !== null, presenters: draft.presenters.length, source_id: bundle.row.id }
+      metadata: { assistant_items: assistantItems, jit_copied: jit, kind: created.kind, offer_copied: offer !== null, personas, presenters: draft.presenters.length, source_id: bundle.row.id }
     });
     revalidateWebinars();
 

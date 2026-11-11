@@ -44,6 +44,9 @@ export function DialogTitle({ children }) { return createElement("h2", null, chi
 export function DialogDescription({ children }) { return createElement("p", { "data-dialog-description": "" }, children); }
 export function DialogTrigger({ children }) { return children; }
 export function DialogClose({ children }) { return children; }`,
+  // As pessoas que comentam (11/11/2026, D75): a lista do Roteiro grava pela propria Server Action.
+  "@/server/webinars/persona-actions": `${fail}
+export const savePersona = fail; export const deletePersona = fail;`,
   "@/server/webinars/script-actions": `${fail}
 export const saveScriptItems = fail; export const importScriptCsv = fail; export const exportScriptCsv = fail; export const exportSessionChatCsv = fail; export const saveTranscript = fail; export const resolveScriptPhrases = fail; export const fireScriptItem = fail; export const sendScriptedComment = fail; export const saveScriptComment = fail; export const uploadPersonaPhoto = fail;`,
   "@/server/webinars/simulation-actions": `${fail}
@@ -345,8 +348,8 @@ test("R8 e R9 Roteiro na Live ao vivo: 'Num minuto da live' e 'Pelo botão da eq
   assert.match(text, /JPG, PNG ou WebP\. Fica com até 512 px\./);
   assert.equal(count(markup, /data-persona-photo-consent=""/g), 2);
   assert.match(text, /Use imagem gerada ou com autorização\. Nunca a foto de uma pessoa real sem o consentimento dela\./);
-  assert.match(markup, /<input[^>]*data-persona-photo-all=""[^>]*type="checkbox" checked=""\/>Usar esta foto em todos os comentários de Bia C\./, "ligada por padrao");
-  assert.equal(count(markup, /data-persona-photo-all=""/g), 1, "so com a foto e o nome");
+  // A caixa "Usar esta foto em todos os comentários de {nome}" saiu em 11/11/2026 (D75): a foto e da pessoa da lista.
+  assert.doesNotMatch(markup, /data-persona-photo-all|Usar esta foto em todos/);
   assert.doesNotMatch(text, /personagem/i);
 
   // A gravada continua com as tres opcoes e a transcricao; a foto tambem.
@@ -381,7 +384,8 @@ test("R8 e R9 console: o Roteiro da live com 'Aos 12 minutos da live', a foto de
   assert.match(lista, /<ol[^>]*data-console-script=""/, "com item, a lista");
   assert.doesNotMatch(html(createElement(ConsoleScript, { ...props, onComment: undefined })), /data-console-script-new/, "sem a acao, sem o botao");
 
-  const form = html(createElement(ConsoleScript, { ...props, initialComment: { applyToName: true, body: "Que aula!", personaAvatarPath: FOTO, personaName: "Bia C.", personaRole: "team" } }));
+  // Sem a lista no retrato (o banco sem a 202611110001), o Nome digitado como antes.
+  const form = html(createElement(ConsoleScript, { ...props, initialComment: { body: "Que aula!", kind: "message", personaAvatarPath: FOTO, personaId: null, personaName: "Bia C.", personaRole: "team" } }));
   const formText = textOf(form);
   assert.match(form, /data-console-script-comment=""/);
   assert.doesNotMatch(form, /data-console-script=""/, "o formulario no lugar da lista");
@@ -391,17 +395,17 @@ test("R8 e R9 console: o Roteiro da live com 'Aos 12 minutos da live', a foto de
   assert.match(form, /<legend[^>]*>Quem comenta<\/legend>/);
   assert.match(form, /value="Bia C\."/);
   assert.match(formText, /Use imagem gerada ou com autorização\. Nunca a foto de uma pessoa real sem o consentimento dela\./);
-  assert.match(form, /<input[^>]*data-persona-photo-all=""[^>]*checked=""/);
-  assert.match(formText, /Usar esta foto em todos os comentários de Bia C\./);
+  // A caixa "Usar esta foto em todos" saiu em 11/11/2026 (D75); o Tipo (Comentário ou Pergunta) entrou (D77).
+  assert.doesNotMatch(form, /data-persona-photo-all|Usar esta foto em todos/);
   assert.match(form, /<input[^>]*type="radio"[^>]*checked=""[^>]*value="team"\/>/, "Aparece como Equipe");
+  assert.match(form, /<input[^>]*type="radio"[^>]*checked=""[^>]*value="message"\/>/, "Tipo Comentário");
   assert.doesNotMatch(formText, /personagem/i);
-  const semSessao = html(createElement(ConsoleScript, { ...props, canAct: false, initialComment: { applyToName: true, body: "", personaAvatarPath: null, personaName: "", personaRole: "student" } }));
+  const semSessao = html(createElement(ConsoleScript, { ...props, canAct: false, initialComment: { body: "", kind: "message", personaAvatarPath: null, personaId: null, personaName: "", personaRole: "student" } }));
   assert.doesNotMatch(semSessao, /data-console-script-send/, "sessao encerrada: so Guardar na lista");
   assert.match(semSessao, /data-console-script-save=""/);
-  assert.doesNotMatch(semSessao, /data-persona-photo-all/, "sem foto, sem a caixa");
 
-  assert.deepEqual(scriptCommentErrors({ applyToName: true, body: " ", personaAvatarPath: null, personaName: "", personaRole: "student" }), { body: "Escreva o comentário (até 1.000 caracteres).", personaName: "Dê um nome a quem comenta (até 60 caracteres)." });
-  assert.deepEqual(scriptCommentInput({ applyToName: false, body: "  Oi  ", personaAvatarPath: FOTO, personaName: " Bia C. ", personaRole: "team" }), { applyToName: false, body: "Oi", personaAvatarPath: FOTO, personaName: "Bia C.", personaRole: "team" });
+  assert.deepEqual(scriptCommentErrors({ body: " ", kind: "message", personaAvatarPath: null, personaId: null, personaName: "", personaRole: "student" }), { body: "Escreva o comentário (até 1.000 caracteres).", personaName: "Dê um nome a quem comenta (até 60 caracteres)." });
+  assert.deepEqual(scriptCommentInput({ body: "  Oi  ", kind: "question", personaAvatarPath: FOTO, personaId: null, personaName: " Bia C. ", personaRole: "team" }), { body: "Oi", kind: "question", personaAvatarPath: FOTO, personaId: null, personaName: "Bia C.", personaRole: "team" });
 });
 
 test("achados 1, 3 e 4 (revisao de 11/11/2026): o minuto da live digitado em minutos (como no card Simulação); o Salvar manda os ids carregados e so a foto que mudou; nada sai enquanto a foto sobe", async () => {
@@ -442,7 +446,7 @@ test("achados 1, 3 e 4 (revisao de 11/11/2026): o minuto da live digitado em min
   const subindo = html(createElement(ScriptCard, { disabled: false, hasRecording: true, initialItems: items, initialTranscript: null, initialUploading: ["a"], sessions: [session()], webinarId: WEBINAR }));
   assert.match(subindo, /<button(?=[^>]*data-persona-photo-send="")(?=[^>]*\sdisabled="")[^>]*>[\s\S]*?Enviando a foto…/, "a linha com a foto subindo");
   assert.match(subindo.match(/<button[^>]*data-script-save=""[^>]*>/)?.[0] ?? "", /\sdisabled=""/);
-  const estado = { applyToName: true, body: "Que aula!", personaAvatarPath: null, personaName: "Bia C.", personaRole: "student" };
+  const estado = { body: "Que aula!", kind: "message", personaAvatarPath: null, personaId: null, personaName: "Bia C.", personaRole: "student" };
   const props = { busy: false, canSend: true, initialState: estado, onBack() {}, onSubmit: async () => null, onUpload: async () => ({ error: "x", ok: false, status: 500 }) };
   const livre = html(createElement(ConsoleScriptComment, props));
   assert.doesNotMatch(livre.match(/<button[^>]*data-console-script-send=""[^>]*>/)?.[0] ?? "", /disabled=""/, "sem foto subindo, o Enviar agora vale");

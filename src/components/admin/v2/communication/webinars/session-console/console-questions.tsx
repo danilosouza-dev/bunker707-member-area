@@ -29,9 +29,12 @@ import { CHAT_LIMITS, QUESTION_REPLY_LIMITS, type QuestionReply, type QuestionSt
 // escreveu por ultimo, a pergunta leva o selo "Nova resposta do aluno", sobe para o
 // topo do quadro e conta no numero da aba, ate a equipe responder no fio ou pelo campo de cima. O campo de responder e
 // a lixeira de uma resposta ficam ocupados ate o retrato novo chegar (whileSettling), o envio fecha so o campo da
-// pergunta enviada (replyDraftAfterSent), e o campo que sai com o foco nele devolve o foco ao Responder.
+// pergunta enviada (replyDraftAfterSent), e o campo que sai com o foco nele devolve o foco ao Responder. A pergunta
+// simulada (11/11/2026, docs/30 D77: a de uma pessoa da lista, sem aluno) aparece como as outras, com a foto ou as
+// iniciais da pessoa e o selo "Simulada" (so aqui, nunca na sala); a equipe responde, e o fio dela e so da equipe.
 
 const copy = WEBINAR_ADMIN_COPY.console.questions;
+const PESSOAS = WEBINAR_COPY.pessoas;
 
 type ConsoleQuestionsProps = {
   busyKey: string | null;
@@ -167,6 +170,13 @@ export function ConsoleQuestions({ busyKey, canAct, currentUserAvatarUrl = null,
               <div className="flex min-w-0 flex-1 flex-col">
                 <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs leading-[18px]">
                   <span className="truncate font-medium text-room-fg">{name}</span>
+                  {/* A pergunta simulada (D77): o selo so aqui, nunca na sala; o texto completo no title e no leitor de tela. */}
+                  {question.simulated ? (
+                    <span data-console-question-simulated="" title={PESSOAS.simuladaDica}>
+                      <Chip tone="warning">{PESSOAS.simulada}</Chip>
+                      <span className="sr-only"> {PESSOAS.simuladaDica}</span>
+                    </span>
+                  ) : null}
                   <span className="tabular-nums text-room-fg-subtle">{copy.votes(question.upvotes)}</span>
                   <Chip tone={STATUS_TONE[question.status]}>{question.answeredLive && question.status === "answered" ? copy.answerLive : copy.statuses[question.status]}</Chip>
                   {mark?.answerSource === "ai" ? <Chip>{WEBINAR_COPY.assistente.console.respondidaPeloAssistente}</Chip> : null}

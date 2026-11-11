@@ -81,6 +81,8 @@ import {
 import { sessionDurationMs } from "@/server/webinars/room-model";
 import { archiveScreenItem, hideScreenItem, saveScreenItem, showScreenItem, uploadScreenImage } from "@/server/webinars/screen-actions";
 import { screenStageKinds } from "@/server/webinars/screen-model";
+import { deletePersona, savePersona } from "@/server/webinars/persona-actions";
+import type { PersonaDraft, WebinarPersona } from "@/server/webinars/persona-model";
 import { fireScriptItem, saveScriptComment, sendScriptedComment, uploadPersonaPhoto } from "@/server/webinars/script-actions";
 import { EmptyState } from "../../../empty-state";
 import { ErrorBanner } from "../../../error-banner";
@@ -172,6 +174,7 @@ const liveCopy = WEBINAR_COPY.consoleAoVivo;
 const naTelaCopy = WEBINAR_COPY.naTela.console;
 const comentariosCopy = WEBINAR_COPY.naTela.comentarios;
 const novaEnqueteCopy = WEBINAR_ADMIN_COPY.console.polls.create;
+const pessoasCopy = WEBINAR_COPY.pessoas;
 
 type Failure = { message: string; status: number };
 
@@ -204,6 +207,8 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   const [reading, setReading] = useState(false);
   const readsRef = useRef(0);
   const [confirming, setConfirming] = useState<"end" | "open" | null>(null);
+  // A ultima pessoa usada no Novo comentário do Roteiro (D78): o proximo abre com ela, enquanto a pagina estiver aberta.
+  const [lastPersonaId, setLastPersonaId] = useState<string | null>(null);
   const [confirmingLiveEnd, setConfirmingLiveEnd] = useState(false);
   const [banTarget, setBanTarget] = useState<BanTarget | null>(null);
   const [banReason, setBanReason] = useState("");
@@ -673,7 +678,9 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   /**
    * O "Novo comentário" do Roteiro (R8 e R9): "Enviar agora" solta o comentario no chat da sessao (sendScriptedComment) e
    * "Guardar na lista" vira um item "Pelo botão da equipe" (saveScriptComment). Devolve o resultado para o formulario
-   * mostrar os erros por campo (nulo: outra acao em andamento); no sucesso, o aviso e o retrato de novo.
+   * mostrar os erros por campo (nulo: outra acao em andamento); no sucesso, o aviso e o retrato de novo. Desde
+   * 11/11/2026 (D76 a D78): a pessoa da lista ou a nova (que entra na lista), o Tipo (a Pergunta vai para a aba
+   * Perguntas) e a ultima pessoa usada, lembrada enquanto a pagina estiver aberta (`lastPersonaId`).
    */
   async function submitComment(input: ScriptCommentFormInput, mode: "save" | "send") {
     if (!sessionId || busyKey) {
@@ -685,9 +692,51 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     const result = mode === "send" ? await sendScriptedComment(payload) : await saveScriptComment(payload);
     setBusyKey(null);
     if (result.ok) {
-      adminToast.success(mode === "send" ? comentariosCopy.avisos.enviado : comentariosCopy.avisos.guardado);
-      if (result.data.photoApplied > 0 && input.personaAvatarPath) {
-        adminToast.info(comentariosCopy.avisos.fotoEmTodos(input.personaName, result.data.photoApplied));
+      const question = input.kind === "question";
+      adminToast.success(mode === "send" ? (question ? pessoasCopy.avisos.perguntaEnviada : comentariosCopy.avisos.enviado) : question ? pessoasCopy.avisos.perguntaGuardada : comentariosCopy.avisos.guardado);
+      if (result.data.created && result.data.persona) {
+        adminToast.info(pessoasCopy.avisos.criada(result.data.persona.name));
+      }
+      if (result.data.persona) {
+        setLastPersonaId(result.data.persona.id);
+      }
+      await refresh();
+    }
+    return result;
+  }
+
+  /** Criar ou editar uma pessoa da lista (persona-actions.savePersona): o aviso e o retrato de novo. */
+  async function submitPersona(draft: PersonaDraft) {
+    if (busyKey) {
+      return null;
+    }
+    setBusyKey("script:persona");
+    setFailure(null);
+    const result = await savePersona({ avatarPath: draft.avatarPath, id: draft.id ?? null, name: draft.name, role: draft.role, webinarId: webinar.id });
+    setBusyKey(null);
+    if (result.ok) {
+      adminToast.success(result.data.created ? pessoasCopy.avisos.criada(result.data.persona.name) : pessoasCopy.avisos.salva);
+      if (result.data.items > 0) {
+        adminToast.info(pessoasCopy.avisos.copias(result.data.items));
+      }
+      await refresh();
+    }
+    return result;
+  }
+
+  /** Remover uma pessoa da lista (persona-actions.deletePersona): o resultado volta para a confirmacao. */
+  async function removePersona(persona: WebinarPersona) {
+    if (busyKey) {
+      return null;
+    }
+    setBusyKey("script:persona");
+    setFailure(null);
+    const result = await deletePersona({ id: persona.id });
+    setBusyKey(null);
+    if (result.ok) {
+      adminToast.success(pessoasCopy.avisos.removida(persona.name));
+      if (lastPersonaId === persona.id) {
+        setLastPersonaId(null);
       }
       await refresh();
     }
@@ -1123,16 +1172,21 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                       webinarSlug={webinar.slug}
                     />
                   ) : null,
-                // O Roteiro na gravada e, desde o adendo de 10/11/2026 (R8), na sessao da Live ao vivo, com o "Novo comentário".
+                // O Roteiro na gravada e, desde o adendo de 10/11/2026 (R8), na sessao da Live ao vivo, com o "Novo comentário"
+                // e, desde 11/11/2026 (D75 a D78), a lista "Pessoas que comentam" (a mesma do editor) e a ultima pessoa usada.
                 roteiro:
                   webinar.kind === "simulated" || session.kind === "live" ? (
                     <ConsoleScript
                       busyKey={busyKey}
                       canAct={canAct}
+                      lastPersonaId={lastPersonaId}
                       live={session.kind === "live"}
                       onComment={submitComment}
+                      onDeletePersona={removePersona}
                       onFire={(itemId: string) => void run(`fire:${itemId}`, () => fireScriptItem({ itemId, sessionId: session.id }))}
+                      onSavePersona={submitPersona}
                       onUpload={(image: string) => uploadPersonaPhoto({ image })}
+                      personas={snapshot.personas}
                       queue={queue}
                     />
                   ) : null

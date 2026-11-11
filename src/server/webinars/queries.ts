@@ -53,7 +53,8 @@ import {
   type WebinarStatus,
   type WebinarTranscriptFormat
 } from "./model";
-import { readScriptPersonaAvatars, withPersonaAvatars } from "./persona-store";
+import type { PersonaList } from "./persona-model";
+import { listPersonas, readScriptPersonaAvatars, withPersonaAvatars } from "./persona-store";
 import { sessionFromRow, webinarFromRow, type RecordingRow, type SessionRow, type WebinarRow } from "./rows";
 import { countRegistrationsByWebinar, fetchWebinarRow, listPresenterRows, listRecordingRows, listSessionRows, listWebinarRows, webinarDataAuthors } from "./store";
 
@@ -349,6 +350,8 @@ export type WebinarEditorData = {
   replaySession: WebinarScreenSession | null;
   runningSessionId: string | null;
   scriptItems: ScriptItem[];
+  /** As pessoas que comentam do webinario (11/11/2026, D75; banco sem a 202611110001: `available` falso e vazia). */
+  personas: PersonaList;
   /** As sessoes como vao para a tela: `roomName` sempre nulo (webinarScreenSession). */
   sessions: WebinarScreenSession[];
   situation: WebinarSituation;
@@ -402,13 +405,14 @@ export async function getWebinarEditorData(id: string, now = Date.now()): Promis
   const jitData = simulated ? await loadJitEditorData(db, row.id, now) : null;
   const jit = jitData?.settings ?? defaultJitSettings();
   // O roteiro nos dois tipos (adendo de 10/11/2026, R8), com a foto de quem comenta de cada item (R9; banco sem a
-  // 202611100002: sem foto); a transcricao so na gravada.
-  const [scriptRows, avatars, transcriptRow, pollRows, deciderNames] = await Promise.all([
+  // 202611100002: sem foto); a transcricao so na gravada. A lista de pessoas que comentam (11/11/2026, D75) vem junto.
+  const [scriptRows, avatars, transcriptRow, pollRows, deciderNames, personas] = await Promise.all([
     listScriptItemRows(db, row.id),
     readScriptPersonaAvatars(db, row.id),
     simulated && recording ? fetchTranscriptRow(db, recording.id) : Promise.resolve(null),
     listPollRows(db, { sessionId: null, webinarId: row.id }),
-    loadCreatorNames(db, [...sessions.map((session) => session.simulationDecidedBy), jit.simulation?.decidedBy ?? null])
+    loadCreatorNames(db, [...sessions.map((session) => session.simulationDecidedBy), jit.simulation?.decidedBy ?? null]),
+    listPersonas(db, row.id)
   ]);
 
   return {
@@ -428,6 +432,7 @@ export async function getWebinarEditorData(id: string, now = Date.now()): Promis
     registeredCount: registered.get(row.id) ?? 0,
     replaySession: sessions.find((session) => session.kind === "replay" && session.status !== "cancelled") ?? null,
     runningSessionId: runningSessionOf(sessions)?.id ?? null,
+    personas,
     scriptItems: withPersonaAvatars(scriptRows.map(scriptItemFromRow), avatars),
     sessions,
     situation: webinarSituation(webinar, sessions, now),

@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { fetchProfile } from "../students/store";
 import { loadAuthorPhotos, roomPhotoUrl } from "./author-photos";
 import { personaAvatarUrl } from "./persona-model";
-import { loadScriptedMessageAvatars } from "./persona-store";
+import { loadScriptedMessageAvatars, loadScriptedQuestionAvatars } from "./persona-store";
 import {
   fetchChatWindow,
   fetchConsentRow,
@@ -53,6 +53,7 @@ import {
   bunnyEmbedUrl,
   canJoinSimulated,
   displayNameFor,
+  isScriptedQuestionMessage,
   isValidChatWindow,
   parseBunnyEmbed,
   presenceBucket,
@@ -67,6 +68,7 @@ import {
   countReactions,
   nextChatCursor,
   pollResultCounts,
+  questionVisibleAt,
   studentPollOf,
   toStudentQuestion,
   toStudentReply,
@@ -297,8 +299,12 @@ export async function scriptedAvatarUrls(db: WebinarsDb, messages: readonly Pick
   return urls;
 }
 
-/** As mensagens do aluno com as fotos: uma leitura (com a memoria de 60 s) para todos os autores da pagina. */
-async function studentMessagesWithPhotos(db: WebinarsDb, messages: readonly ChatMessage[], viewerUserId: string, sessionKind: WebinarSession["kind"], nowMs: number): Promise<StudentChatMessage[]> {
+/**
+ * As mensagens do aluno com as fotos: uma leitura (com a memoria de 60 s) para todos os autores da pagina. A mensagem do
+ * item Pergunta do roteiro (D77, isScriptedQuestionMessage) nunca chega a sala: a pergunta aparece so na aba Perguntas.
+ */
+async function studentMessagesWithPhotos(db: WebinarsDb, all: readonly ChatMessage[], viewerUserId: string, sessionKind: WebinarSession["kind"], nowMs: number): Promise<StudentChatMessage[]> {
+  const messages = all.filter((message) => !isScriptedQuestionMessage(message));
   const [photos, personas] = await Promise.all([
     loadAuthorPhotos(
       db,
@@ -373,7 +379,7 @@ export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userI
   ]);
   const ban = liveBanState({ nowMs: now, sessionBans: bans.sessionBans, userBan: bans.userBan });
   const join = roomJoinFor(context, now, { ...options, ban, practiceSession: webinar.roomSettings.practiceSession });
-  const pinned = pinnedRow && pinnedRow.approved ? (await studentMessagesWithPhotos(db, [chatMessageFromRow(pinnedRow)], userId, session.kind, now))[0] : null;
+  const pinned = pinnedRow && pinnedRow.approved ? ((await studentMessagesWithPhotos(db, [chatMessageFromRow(pinnedRow)], userId, session.kind, now))[0] ?? null) : null;
 
   return {
     live: live ? liveRoomInfoOf(session, liveRoomConfigured(process.env), webinar.roomSettings) : null,
@@ -490,9 +496,51 @@ export async function readRecentChat(
  * Perguntas, enquetes e reacoes
  * ---------------------------------------------------------------------------------------------- */
 
-/** A foto de quem perguntou, pela regra do aluno (nunca na Anonima nem no nome "Aluno {n}"; legado: linhas de antes de 10/11/2026). */
-export function questionPhotoUrl(question: Pick<WebinarQuestion, "anonymous" | "displayName" | "userId">, webinarId: string, photos: ReadonlyMap<string, AuthorPhoto>, viewer: "student" | "team" = "student"): string | null {
-  return authorPhotoUrl({ anonymous: question.anonymous, authorUserId: question.userId, displayName: question.displayName, photo: photos.get(question.userId), source: "audience", viewer, webinarId });
+/**
+ * A foto de quem perguntou, pela regra do aluno (nunca na Anonima nem no nome "Aluno {n}"; legado: linhas de antes de
+ * 10/11/2026). A pergunta simulada (11/11/2026, D77) mostra a foto da pessoa que comenta (a copia gravada nela, ja como
+ * endereco em `personas`, pelo id da pergunta), para a turma e para a equipe, como a mensagem do roteiro; sem ela, as
+ * iniciais.
+ */
+export function questionPhotoUrl(
+  question: Pick<WebinarQuestion, "anonymous" | "displayName" | "id" | "simulated" | "userId">,
+  webinarId: string,
+  photos: ReadonlyMap<string, AuthorPhoto>,
+  viewer: "student" | "team" = "student",
+  personas: ReadonlyMap<string, string> = new Map()
+): string | null {
+  if (question.simulated) {
+    return authorPhotoUrl({ authorUserId: null, displayName: question.displayName, personaAvatarUrl: personas.get(question.id) ?? null, photo: null, source: "scripted", viewer, webinarId });
+  }
+  return authorPhotoUrl({
+    anonymous: question.anonymous,
+    authorUserId: question.userId,
+    displayName: question.displayName,
+    photo: question.userId ? photos.get(question.userId) : null,
+    source: "audience",
+    viewer,
+    webinarId
+  });
+}
+
+/**
+ * A foto da pessoa das perguntas simuladas da lista (D77), como endereco pela origem do nosso Supabase: uma leitura pelo
+ * id so quando a lista tem pergunta simulada (a foto de cada uma fica na memoria do processo, como a das mensagens).
+ */
+export async function scriptedQuestionAvatarUrls(db: WebinarsDb, questions: readonly Pick<WebinarQuestion, "id" | "simulated">[], nowMs: number): Promise<Map<string, string>> {
+  const ids = questions.filter((question) => question.simulated).map((question) => question.id);
+  const urls = new Map<string, string>();
+  if (ids.length === 0) {
+    return urls;
+  }
+  const origin = screenStorageOrigin();
+  for (const [id, path] of await loadScriptedQuestionAvatars(db, ids, nowMs)) {
+    const url = personaAvatarUrl(path, origin);
+    if (url) {
+      urls.set(id, url);
+    }
+  }
+  return urls;
 }
 
 /** A foto de quem respondeu no fio: a da equipe sempre; a do aluno pela regra dele (nunca na pergunta Anonima; legado: linhas de antes de 10/11/2026). */
@@ -524,15 +572,17 @@ export async function listStudentQuestions(db: WebinarsDb, session: Pick<Webinar
     listQuestionRows(db, { order, sessionId: session.id, statuses: ["open", "answered", "dismissed"] }),
     listQuestionReplyRows(db, { sessionId: session.id })
   ]);
-  const questions = rows.map(questionFromRow);
+  // A pergunta simulada so aparece quando a hora dela chega (D77: a da Live gravada nasce com o minuto do item).
+  const questions = rows.map(questionFromRow).filter((question) => questionVisibleAt(question, now));
   const replies = replyRows.map(questionReplyFromRow);
-  const [voted, photos] = await Promise.all([
-    listStudentVotedQuestionIds(db, { questionIds: rows.map((row) => row.id), userId }),
-    loadAuthorPhotos(db, [...questions.filter((question) => !question.anonymous).map((question) => question.userId), ...replies.filter((reply) => !reply.anonymous).map((reply) => reply.userId)], now)
+  const [voted, photos, personas] = await Promise.all([
+    listStudentVotedQuestionIds(db, { questionIds: questions.map((question) => question.id), userId }),
+    loadAuthorPhotos(db, [...questions.filter((question) => !question.anonymous).map((question) => question.userId), ...replies.filter((reply) => !reply.anonymous).map((reply) => reply.userId)], now),
+    scriptedQuestionAvatarUrls(db, questions, now)
   ]);
   const thread = studentRepliesByQuestion(replies, userId, session.webinarId, photos);
   return questions
-    .map((question) => toStudentQuestion(question, userId, voted.has(question.id), questionPhotoUrl(question, session.webinarId, photos), thread.get(question.id) ?? []))
+    .map((question) => toStudentQuestion(question, userId, voted.has(question.id), questionPhotoUrl(question, session.webinarId, photos, "student", personas), thread.get(question.id) ?? []))
     .filter((question): question is StudentQuestion => question !== null);
 }
 

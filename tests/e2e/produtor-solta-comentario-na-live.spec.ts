@@ -87,13 +87,17 @@ test.describe("produtor", () => {
     const previa = formulario.locator("[data-persona-photo-preview]");
     await expect(previa).toHaveAttribute("src", /\/storage\/v1\/object\/public\/content-assets\/webinars\/personas\/[a-f0-9]{24}\.webp$/);
     await expect(formulario.getByText(COMENTARIOS.fotoConsentimento, { exact: true })).toBeVisible();
-    await expect(formulario.getByLabel(COMENTARIOS.usarEmTodos(NOME))).toBeChecked();
+    // Desde 11/11/2026 (D75) a caixa "Usar esta foto em todos" saiu: a pessoa nova entra na lista ao enviar.
+    await expect(formulario.locator("[data-persona-photo-all]")).toHaveCount(0);
     await formulario.getByRole("radio", { exact: true, name: COMENTARIOS.papeis.student }).check();
     await formulario.getByLabel(COMENTARIOS.comentario, { exact: true }).fill(TEXTO);
     await formulario.getByRole("button", { exact: true, name: COMENTARIOS.enviarAgora }).click();
     await expect(page.getByText(COMENTARIOS.avisos.enviado)).toBeVisible();
-    // De volta ao Roteiro (o formulario fecha): o "Enviar agora" nao vira item, entao a live segue sem roteiro, com a
-    // frase e o Novo comentário de novo (sem item, nenhuma lista vazia).
+    // Desde 11/11/2026 (D78) o formulario fica aberto para o proximo, com a mesma pessoa e o texto limpo; o Voltar volta
+    // ao Roteiro. O "Enviar agora" nao vira item, entao a live segue sem roteiro, com a frase e o Novo comentário de novo
+    // (sem item, nenhuma lista vazia).
+    await expect(formulario.getByText(WEBINAR_COPY.pessoas.avisos.enviado, { exact: true })).toBeVisible();
+    await page.locator("[data-console-script-back]").click();
     await expect(formulario).toHaveCount(0);
     await expect(roteiro.getByText(WEBINAR_ADMIN_COPY.console.script.emptyLive, { exact: true })).toBeVisible();
     await expect(roteiro.getByRole("button", { exact: true, name: COMENTARIOS.novoComentario })).toBeVisible();

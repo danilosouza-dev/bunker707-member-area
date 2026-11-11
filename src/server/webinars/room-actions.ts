@@ -317,15 +317,20 @@ async function attendanceMarksOf(db: WebinarsDb, target: "chat" | "question", id
 
 /**
  * Fase 4c: a resposta da equipe vai tambem para o sino quando o aluno pediu a equipe, quando a sessao ja nao esta no ar
- * ou quando ele saiu da sala (assistant-model.teamAnswerNeedsNotice). Nunca lanca; devolve se avisou.
+ * ou quando ele saiu da sala (assistant-model.teamAnswerNeedsNotice). Nunca lanca; devolve se avisou. A pergunta
+ * simulada (11/11/2026, D77) nao tem aluno (`userId` nulo): ninguem recebe aviso.
  */
 async function noticeTeamAnswer(
   db: WebinarsDb,
-  input: { answerText: string; handoffRequested: boolean; now: Date; session: WebinarSession; targetId: string; userId: string }
+  input: { answerText: string; handoffRequested: boolean; now: Date; session: WebinarSession; targetId: string; userId: string | null }
 ): Promise<boolean> {
+  const userId = input.userId;
+  if (!userId) {
+    return false;
+  }
   try {
     const sessionRunning = canTeamActOn(input.session);
-    const studentPresent = sessionRunning && !input.handoffRequested ? await studentPresentNow(db, { nowMs: input.now.getTime(), session: input.session, userId: input.userId }) : false;
+    const studentPresent = sessionRunning && !input.handoffRequested ? await studentPresentNow(db, { nowMs: input.now.getTime(), session: input.session, userId }) : false;
 
     if (!teamAnswerNeedsNotice({ handoffRequested: input.handoffRequested, sessionRunning, studentPresent })) {
       return false;
@@ -336,7 +341,7 @@ async function noticeTeamAnswer(
       now: input.now,
       sessionId: input.session.id,
       targetId: input.targetId,
-      userId: input.userId,
+      userId,
       webinarId: input.session.webinarId
     });
     return sent.notifications > 0;
