@@ -10,6 +10,9 @@ import "server-only";
 // - savePersonaRow e removePersonaRow: o CRUD da lista. Editar troca a copia de todos os itens do roteiro ligados a
 //   pessoa (syncPersonaCopies; o que a turma ja viu nao muda: a mensagem e a pergunta guardam a copia); remover deixa
 //   os itens com a copia e sem a pessoa (a ligacao sai antes, e o on delete set null do banco garante);
+// - importPersonas: as pessoas das linhas de um CSV importado (a revisao v8, achado 3): o mesmo nome comparavel liga a
+//   linha a pessoa da lista, e o que falta entra nela (o papel da linha, sem foto); a corrida de duas importacoes (o
+//   indice unico do nome) reaproveita a pessoa que ja entrou;
 // - openScriptedQuestion: a pergunta simulada que o item Pergunta do roteiro abre quando entra (o "Soltar agora" e o
 //   tick da live), ligada a mensagem do item (message_id), com o minuto e a copia da pessoa da mensagem. Nunca lanca:
 //   a mensagem ja entrou, e uma falha so vai para o log.
@@ -20,16 +23,18 @@ import { insertScriptedQuestionRow, type ScriptedQuestionInsert } from "./chat-s
 import type { ChatMessageRow } from "./chat-rows";
 import { WEBINARS_PERSONAS_MIGRATION, WebinarError, WebinarFieldError, assertNoDbError, isMissingWebinarSchema, type WebinarsDb } from "./db";
 import { CHAT_LIMITS, type PersonaRole } from "./model";
-import { personaCleanName, personaNameTaken, type WebinarPersona } from "./persona-model";
+import { personaCleanName, personaNameKey, personaNameTaken, type WebinarPersona } from "./persona-model";
 import {
   deletePersonaRow,
   insertPersonaRow,
+  insertPersonaRows,
   listPersonas,
   personaFromRow,
   syncPersonaCopies,
   updatePersonaRow,
   countPersonaItems,
-  fetchPersonaRow
+  fetchPersonaRow,
+  type PersonaInsert
 } from "./persona-store";
 
 const PESSOAS = WEBINAR_COPY.pessoas;
@@ -151,6 +156,73 @@ export async function removePersonaRow(db: WebinarsDb, id: string): Promise<{ it
   assertNoDbError(unlinked.error, "Webinarios: soltar os itens da pessoa");
   await deletePersonaRow(db, row.id);
   return { items, persona: personaFromRow(row) };
+}
+
+/** Quantas pessoas novas vao por gravacao na importacao (o lote recusado inteiro pelo indice unico cai para uma por vez). */
+const IMPORT_PERSONAS_BATCH = 500;
+
+/**
+ * As pessoas das linhas de um CSV importado (correcao da revisao v8, achado 3): cada nome (pelo nome comparavel,
+ * personaNameKey) vira a pessoa da lista com o mesmo nome, e os que faltam entram na lista com o papel da primeira linha
+ * deles e sem foto. As novas vao em lotes; a corrida com outra importacao (o indice unico (webinar_id, name_key) recusa o
+ * lote) grava uma por vez, e o nome que outra importacao ja gravou e reaproveitado (relido no fim). Devolve as pessoas
+ * pelo nome comparavel e quantas entraram agora; no banco sem a 202611110001, `available` falso (sem lista, como antes).
+ */
+export async function importPersonas(
+  db: WebinarsDb,
+  input: { names: readonly { name: string; role: PersonaRole }[]; userId: string; webinarId: string }
+): Promise<{ available: boolean; byKey: Map<string, WebinarPersona>; created: number }> {
+  const byKey = new Map<string, WebinarPersona>();
+  const list = await listPersonas(db, input.webinarId);
+  if (!list.available) {
+    return { available: false, byKey, created: 0 };
+  }
+  for (const persona of list.personas) {
+    byKey.set(personaNameKey(persona.name), persona);
+  }
+
+  const missing = new Map<string, PersonaInsert>();
+  for (const entry of input.names) {
+    const name = Array.from(personaCleanName(entry.name)).slice(0, CHAT_LIMITS.personaName).join("");
+    const key = personaNameKey(name);
+    if (key && !byKey.has(key) && !missing.has(key)) {
+      missing.set(key, { avatar_path: null, created_by: input.userId, name, role: entry.role, webinar_id: input.webinarId });
+    }
+  }
+
+  let created = 0;
+  let raced = false;
+  const pending = [...missing.values()];
+  for (let start = 0; start < pending.length; start += IMPORT_PERSONAS_BATCH) {
+    const batch = pending.slice(start, start + IMPORT_PERSONAS_BATCH);
+    const inserted = await withPersonaTable(() => insertPersonaRows(db, batch));
+    if ("rows" in inserted) {
+      for (const row of inserted.rows) {
+        byKey.set(personaNameKey(row.name), personaFromRow(row));
+      }
+      created += inserted.rows.length;
+      continue;
+    }
+    // Outra importacao gravou um destes nomes entre a leitura e a gravacao: uma por vez, e a que ja estava fica.
+    for (const row of batch) {
+      const single = await withPersonaTable(() => insertPersonaRow(db, row));
+      if ("taken" in single) {
+        raced = true;
+        continue;
+      }
+      byKey.set(personaNameKey(single.row.name), personaFromRow(single.row));
+      created += 1;
+    }
+  }
+  if (raced) {
+    for (const persona of (await listPersonas(db, input.webinarId)).personas) {
+      const key = personaNameKey(persona.name);
+      if (!byKey.has(key)) {
+        byKey.set(key, persona);
+      }
+    }
+  }
+  return { available: true, byKey, created };
 }
 
 /**

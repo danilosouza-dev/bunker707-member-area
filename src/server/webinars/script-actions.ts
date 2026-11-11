@@ -28,7 +28,9 @@
 // entra (o "Soltar agora", o tick da live e a abertura da gravada), grava a mensagem `scripted` de kind 'question' como
 // antes (o registro de que entrou, que a sala e o console nao mostram no chat) e abre a pergunta ligada a ela
 // (persona-writes.openScriptedQuestion). Banco sem a 202611110001: o comentario segue com o Nome digitado, sem lista, e a
-// Pergunta volta 409 com a frase da migracao.
+// Pergunta volta 409 com a frase da migracao. Correcoes da revisao v8 (11/11/2026): importar o CSV liga cada linha a
+// pessoa da lista com o mesmo nome e cria as que faltam (persona-writes.importPersonas; achado 3), e o Salvar le a lista
+// inteira e busca pelo id a pessoa que a leitura nao trouxe antes de soltar um item (personasOfItems; achado 4).
 
 import { revalidatePath } from "next/cache";
 import type { ActionResult } from "@/lib/action-result";
@@ -72,9 +74,25 @@ import { canTeamActOn } from "./console-model";
 import { listAllSessionChatRows } from "./console-queries";
 import { WEBINARS_SCREEN_MIGRATION, WebinarError, WebinarFieldError, isMissingWebinarSchema, webinarsDb, type WebinarsDb } from "./db";
 import { CHAT_LIMITS, TRANSCRIPT_FORMATS, type ChatMessage, type ScriptItem, type ScriptItemDraft, type ScriptStatus, type WebinarQuestion, type WebinarTranscriptFormat } from "./model";
-import { PERSONA_AVATAR_BUCKET, PERSONA_AVATAR_FOLDER, PERSONA_AVATAR_LIMITS, PERSONA_AVATAR_PATH_PATTERN, personaCopyOf, type WebinarPersona } from "./persona-model";
-import { listPersonas, readScriptItemPersonaAvatar, readScriptItemPersonaId, readScriptPersonaAvatars, withPersonaAvatars, type PersonaAvatars } from "./persona-store";
-import { SCRIPTED_QUESTION_MIGRATION_MESSAGE, commentPersona, openScriptedQuestion, withPersonaTable } from "./persona-writes";
+import {
+  PERSONA_AVATAR_BUCKET,
+  PERSONA_AVATAR_FOLDER,
+  PERSONA_AVATAR_LIMITS,
+  PERSONA_AVATAR_PATH_PATTERN,
+  personaCopyOf,
+  personaNameKey,
+  type WebinarPersona
+} from "./persona-model";
+import {
+  fetchPersonasByIds,
+  listPersonas,
+  readScriptItemPersonaAvatar,
+  readScriptItemPersonaId,
+  readScriptPersonaAvatars,
+  withPersonaAvatars,
+  type PersonaAvatars
+} from "./persona-store";
+import { SCRIPTED_QUESTION_MIGRATION_MESSAGE, commentPersona, importPersonas, openScriptedQuestion, withPersonaTable } from "./persona-writes";
 import { baseRecordingOf, type TranscriptSummary } from "./queries";
 import { sessionOffsetMs } from "./room-model";
 import { sessionFromRow } from "./rows";
@@ -222,6 +240,24 @@ function withAvatarColumn(upsert: ScriptItemUpsert, item: ScriptItemDraft, avata
   return { ...withPhoto, persona_avatar_path: copy.personaAvatarPath, persona_id: copy.personaId, persona_name: copy.personaName, persona_role: copy.personaRole };
 }
 
+/**
+ * As pessoas dos itens que vao para o banco, pelo id: a lista inteira (listPersonas le em paginas) e, das que o item
+ * pede e a lista nao trouxe (a que entrou na lista depois da leitura), uma leitura pelos ids. So a pessoa que nao existe
+ * mais (ou e de outro webinario) solta o item; nunca a que a leitura deixou de fora (correcao da revisao v8, achado 4).
+ */
+async function personasOfItems(db: WebinarsDb, webinarId: string, items: readonly ScriptItemDraft[], avatars: PersonaAvatars): Promise<Map<string, WebinarPersona>> {
+  const personas = new Map((await listPersonas(db, webinarId)).personas.map((persona) => [persona.id, persona] as const));
+  const wanted = items
+    .map((item) => (item.personaId !== undefined ? item.personaId : item.id ? (avatars.personaIds.get(item.id) ?? null) : null))
+    .filter((id): id is string => Boolean(id) && !personas.has(id as string));
+  if (wanted.length > 0) {
+    for (const persona of await fetchPersonasByIds(db, webinarId, wanted)) {
+      personas.set(persona.id, persona);
+    }
+  }
+  return personas;
+}
+
 /** Confere de novo as frases dos itens on_phrase (ao salvar a transcricao ou pelo botao). */
 async function resolveItems(db: WebinarsDb, webinarId: string, transcript: TranscriptContext): Promise<{ items: ScriptItem[]; ready: number; unresolved: number }> {
   const rows = await listScriptItemRows(db, webinarId);
@@ -341,7 +377,7 @@ export async function saveScriptItems(input: SaveScriptItemsInput): Promise<Acti
       throw new WebinarError(SCRIPTED_QUESTION_MIGRATION_MESSAGE, 409);
     }
     // A pessoa da lista e a fonte da copia de cada item ligado a ela (D75).
-    const personas = avatars.linked ? new Map((await listPersonas(db, row.id)).personas.map((persona) => [persona.id, persona] as const)) : new Map<string, WebinarPersona>();
+    const personas = avatars.linked ? await personasOfItems(db, row.id, data.items, avatars) : new Map<string, WebinarPersona>();
     const { transcript } = live ? { transcript: null } : await loadTranscriptFor(db, row.id);
     // Um id de outro webinario nao e deste roteiro: entra como item novo (nunca um upsert la).
     const known = new Set((await listScriptItemRows(db, row.id)).map((item) => item.id));
@@ -376,7 +412,7 @@ export async function importScriptCsv(input: { csv: string; replace?: boolean; w
     // que ficam nao muda). Sem a 202611100002, a live nao grava roteiro (scriptAvatarsFor).
     const row = await requireScriptWebinar(db, data.webinarId);
     const live = row.kind === "live";
-    await scriptAvatarsFor(db, row);
+    const avatars = await scriptAvatarsFor(db, row);
     const parsed = parseScriptCsv(data.csv, { live });
     const current = await scriptItemsWithAvatars(db, row.id);
 
@@ -391,12 +427,21 @@ export async function importScriptCsv(input: { csv: string; replace?: boolean; w
       throw new WebinarError(CHAT_MESSAGES.tooManyItems, 422);
     }
 
+    // Cada linha com a pessoa da lista do mesmo nome; o nome que falta entra na lista (o papel da linha, sem foto) e a
+    // copia da pessoa vai para o item, como no Salvar do editor (correcao da revisao v8, achado 3). Banco sem a
+    // 202611110001: as linhas com o Nome e o Papel do arquivo, sem pessoa, como antes.
+    const found = avatars.linked
+      ? await importPersonas(db, { names: parsed.items.map((item) => ({ name: item.personaName, role: item.personaRole })), userId: user.id, webinarId: row.id })
+      : { available: false, byKey: new Map<string, WebinarPersona>(), created: 0 };
+    const personas = new Map([...found.byKey.values()].map((persona) => [persona.id, persona] as const));
+    const imported = found.available ? parsed.items.map((item) => ({ ...item, personaId: found.byKey.get(personaNameKey(item.personaName))?.id ?? null })) : parsed.items;
     const upserts = [
       ...kept.map((item, position) => toUpsert(draftOfItem(item), position, transcript, user.id, true)),
-      ...parsed.items.map((item, index) => toUpsert(item, kept.length + index, transcript, user.id, false))
+      ...imported.map((item, index) => withAvatarColumn(toUpsert(item, kept.length + index, transcript, user.id, false), item, avatars, personas))
     ];
-    // Sem a coluna da foto no upsert: a dos itens que ficam continua a mesma no banco. Acrescentar nao apaga nada (nem
-    // o que o console guardou entre a leitura e a gravacao); Substituir troca o roteiro inteiro pelo do arquivo.
+    // Os itens que ficam vao sem a coluna da foto nem a pessoa (os ids sao um upsert a parte): a foto e a ligacao deles
+    // continuam as mesmas no banco. Acrescentar nao apaga nada (nem o que o console guardou entre a leitura e a
+    // gravacao); Substituir troca o roteiro inteiro pelo do arquivo.
     const items = await scriptItemsWithAvatars(db, row.id, await replaceScriptItemRows(db, row.id, upserts, data.replace ? null : []));
     const summary = scriptSummary(items);
 
@@ -406,7 +451,7 @@ export async function importScriptCsv(input: { csv: string; replace?: boolean; w
       count: parsed.items.length,
       entityId: row.id,
       entityType: "webinar",
-      metadata: { errors: parsed.errors.length, imported: parsed.items.length, items: items.length, replace: data.replace, truncated: parsed.truncated }
+      metadata: { errors: parsed.errors.length, imported: parsed.items.length, items: items.length, personas_created: found.created, replace: data.replace, truncated: parsed.truncated }
     });
     revalidateWebinar(row.id);
 

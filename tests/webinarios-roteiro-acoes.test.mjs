@@ -440,8 +440,12 @@ test("importar CSV: acrescenta no fim com as posicoes, devolve os erros por linh
   );
   assert.equal(db.tables.webinar_chat_script_items.length, 2);
 
-  const [auditoria] = audits(db, "webinar.script_imported");
-  assert.deepEqual(auditoria.metadata, { errors: 2, imported: 2, items: 3, replace: false, truncated: false });
+  const [auditoria, segunda] = audits(db, "webinar.script_imported");
+  // Revisao v8, achado 3: as duas pessoas novas (Duda e Equipe) entram na lista na primeira importacao e sao
+  // reaproveitadas na segunda; a auditoria conta quantas entraram, nunca o nome.
+  assert.deepEqual(auditoria.metadata, { errors: 2, imported: 2, items: 3, personas_created: 2, replace: false, truncated: false });
+  assert.equal(segunda.metadata.personas_created, 0);
+  assert.deepEqual(db.tables.webinar_personas.map((row) => [row.name, row.role]).sort(), [["Duda", "student"], ["Equipe", "team"]]);
   assert.doesNotMatch(JSON.stringify(db.tables.admin_audit_log), /Boa noite|Bem-vindos/, "nunca o texto das mensagens");
   assert.ok(estado.revalidados.includes(`/admin/comunicacao/webinarios/${WEBINAR}`));
   assert.ok(estado.revalidados.includes(`/admin/comunicacao/webinarios/${WEBINAR}/sala`));
