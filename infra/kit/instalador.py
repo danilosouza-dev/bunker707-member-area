@@ -269,22 +269,25 @@ def arquivo_so_do_dono(caminho):
 
 def perguntar(texto, segredo=False, padrao=""):
     rotulo = f"{texto} [{padrao}]: " if padrao else f"{texto}: "
-    sys.stderr.write(rotulo)
-    sys.stderr.flush()
     if segredo:
         import termios
 
+        # O eco sai antes de a pergunta aparecer: quem responde logo (ou cola) nunca ve o segredo na tela.
         fd = sys.stdin.fileno()
         antigo = termios.tcgetattr(fd)
         novo = termios.tcgetattr(fd)
         novo[3] &= ~termios.ECHO
         try:
-            termios.tcsetattr(fd, termios.TCSADRAIN, novo)
+            termios.tcsetattr(fd, termios.TCSAFLUSH, novo)
+            sys.stderr.write(rotulo)
+            sys.stderr.flush()
             valor = sys.stdin.readline()
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, antigo)
         sys.stderr.write("\n")
     else:
+        sys.stderr.write(rotulo)
+        sys.stderr.flush()
         valor = sys.stdin.readline()
     if valor == "":
         falhar("a entrada acabou no meio das perguntas.", 1)
@@ -382,10 +385,17 @@ def respostas(argv):
     for chave in ("ENDERECO", "ENDERECO_API"):
         if dados.get(chave) and vindo_do_env.get(chave) and normalizar_host(dados[chave]) != vindo_do_env[chave]:
             falhar(f"esta instalacao e de {vindo_do_env[chave]}, e as respostas dizem {normalizar_host(dados[chave])} em {chave}.", 36)
+    # O que as respostas dizem do backup vale inteiro: o aceite do backup so aqui nao se mistura com o destino que ja
+    # estava gravado, nem um destino novo com o aceite de antes.
+    backup_nas_respostas = bool(dados.get("BACKUP_DESTINO") or dados.get("BACKUP_SO_NESTE_SERVIDOR"))
+    # O mesmo destino de antes: as chaves de acesso gravadas valem (o arquivo de respostas pode nao repeti-las).
+    mesmo_destino = bool(dados.get("BACKUP_DESTINO")) and dados.get("BACKUP_DESTINO") == vindo_do_env.get("BACKUP_DESTINO")
     for chave, valor in vindo_do_env.items():
+        if chave.startswith("BACKUP_") and backup_nas_respostas and not mesmo_destino:
+            continue
         if valor and not dados.get(chave):
             dados[chave] = valor
-    if (estado.get("backup_so_neste_servidor") or {}).get("aceito_em") and not dados.get("BACKUP_SO_NESTE_SERVIDOR"):
+    if (estado.get("backup_so_neste_servidor") or {}).get("aceito_em") and not backup_nas_respostas:
         dados["BACKUP_SO_NESTE_SERVIDOR"] = FRASE_DO_BACKUP_LOCAL
 
     pode_perguntar = perguntar_ok and sys.stdin.isatty()
@@ -783,8 +793,8 @@ def estado_iniciar(argv):
     caminho = argv[0]
     valores = dict(a.split("=", 1) for a in argv[1:])
     estado = kit.situacao_ler(caminho)
-    modo = valores.get("modo", "instalacao")
-    if estado.get("modo") and estado["modo"] != modo:
+    modo = valores.get("modo")
+    if modo and estado.get("modo") and estado["modo"] != modo:
         falhar(f"esta instalacao comecou no modo {estado['modo']}; rode o instalador no mesmo modo.", 36)
     if estado.get("endereco") and valores.get("endereco") and estado["endereco"] != valores["endereco"]:
         falhar(f"esta instalacao e de {estado['endereco']}, nao de {valores['endereco']}.", 36)

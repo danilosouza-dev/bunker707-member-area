@@ -81,8 +81,7 @@ elif [ "$da_entrada" = 1 ]; then
     inst_py json-da-chave > "$pasta/pedido" || exit 52
 else
     [ -t 0 ] || sair "$SAI_TERMINAL" "A Chave de ativacao e digitada por uma pessoa no terminal (ou vem de --chave-arquivo, so do administrador)."
-    printf 'Chave de ativacao (comeca com BKA-; nao aparece na tela): ' >&2
-    IFS= read -rs digitada || true
+    IFS= read -rs -p 'Chave de ativacao (comeca com BKA-; nao aparece na tela): ' digitada || true
     printf '\n' >&2
     printf '%s' "$digitada" | inst_py json-da-chave > "$pasta/pedido" || exit 52
     digitada=""

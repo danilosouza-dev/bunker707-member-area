@@ -118,7 +118,8 @@ function imagensDeTerceiros(raiz) {
 
 /** A chave publica (Ed25519) no formato do kit.conf: o DER do SubjectPublicKeyInfo em base64, numa linha. */
 export function chavePublicaDoKit(chavePrivadaOuPublica) {
-  return createPublicKey(chavePrivadaOuPublica).export({ type: "spki", format: "der" }).toString("base64");
+  const publica = chavePrivadaOuPublica?.type === "public" ? chavePrivadaOuPublica : createPublicKey(chavePrivadaOuPublica);
+  return publica.export({ type: "spki", format: "der" }).toString("base64");
 }
 
 export function montarPacote({ raiz = RAIZ_DO_REPOSITORIO, saida, versao, app, imagens = [], instalacao = null, chavePrivada = null, criadoEm = new Date(), commit = null, chavesSeguintes = [] }) {
