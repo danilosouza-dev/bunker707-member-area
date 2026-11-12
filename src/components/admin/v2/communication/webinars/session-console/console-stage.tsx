@@ -13,7 +13,7 @@ import type { RoomThumbs } from "@/lib/webinar-room-prefs";
 import { consoleStageBadgeFor, consoleThumbsWanted, type ConsoleStageTopLeft } from "@/server/webinars/console-v2-model";
 import type { LiveConsoleSnapshot } from "@/server/webinars/live-console-model";
 import type { WebinarSession } from "@/server/webinars/model";
-import type { LiveRoomHandle } from "./live-room-panel";
+import { consoleThumbsReload, type LiveRoomHandle } from "./live-room-panel";
 
 // O palco da live no console de quem apresenta (docs/31 V2-4, V2-13 e V2-A5): o pai do iframe ([data-live-stage], o
 // mesmo ref do useLiveRoom, que nunca muda de pai), os selos por cima do video e as capas. Em cima a esquerda, "Ao vivo ·
@@ -118,6 +118,18 @@ export function ConsoleStage({ busy, className, handle, live, onPresent, present
       syncFilmstrip({ visible: filmstripVisible, wanted: wantColumn });
     }
   }, [filmstripVisible, frameWidth, joined, syncFilmstrip, wantColumn]);
+
+  // A troca entre Lateral e Embaixo (docs/30 D96): com nada de quem esta no console no ar, o video recarrega sozinho,
+  // uma vez (o iframe novo ja monta do jeito escolhido); com o microfone, a camera ou a tela ligados, fica com o menu.
+  const thumbsReload = consoleThumbsReload(handle, thumbs);
+  const reloadVideo = handle.retry;
+  useEffect(() => {
+    if (thumbsReload !== "auto") {
+      return;
+    }
+    const id = window.setTimeout(reloadVideo, 0);
+    return () => window.clearTimeout(id);
+  }, [reloadVideo, thumbsReload]);
 
   // O console ja entrou na sala nesta pagina (a falha depois disso e uma queda; antes, a sala que nao abriu).
   const [everJoined, setEverJoined] = useState(joined);

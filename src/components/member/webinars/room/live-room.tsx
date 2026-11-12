@@ -1257,6 +1257,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               onTogglePanel={togglePanel}
               onToggleReactions={toggleReactions}
               onToggleSettings={toggleSettings}
+              onReloadVideo={room.reloadVideo}
               onThumbs={setThumbs}
               onView={room.setView}
               onViewMenu={setViewMenu}
@@ -1283,7 +1284,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               soundOn={room.soundOn}
               videoOn={room.signals.videoOn}
               thumbs={thumbs}
-              thumbsPending={room.thumbsPending}
+              thumbsWait={room.thumbsWait}
               viewMenuOpen={viewMenuShown}
               viewShown={room.viewShown}
             />

@@ -58,11 +58,11 @@ test("as migracoes ate a 202610290001 continuam byte a byte; a 0002 e o texto ex
     "b48d8504a243ba8f7e860cb20e5b3342acd06cdf2571c3b9a3ec1d2795463fbd",
     "a 202610290002 mudou: aplique de novo na nuvem de teste (docs/21) e atualize este hash junto"
   );
-  // O aviso aponta a mais nova pela ordem dos arquivos, a 202611150001 (a rodada v9: o que abre o link, quem assina a resposta e o comentario na tela; antes dela, a 202611140002 dos participantes simulados, a 202611100002 da Na tela, a 202611100001 do fio das Perguntas e a 202611010001 do Co-apresentador no chat, redesign V2 fase 2,
+  // O aviso aponta a mais nova pela ordem dos arquivos, a 202611160001 (a rodada v10: a pergunta marcada como vista; antes dela, a 202611150001 da rodada v9: o que abre o link, quem assina a resposta e o comentario na tela; antes dela, a 202611140002 dos participantes simulados, a 202611100002 da Na tela, a 202611100001 do fio das Perguntas e a 202611010001 do Co-apresentador no chat, redesign V2 fase 2,
   // depois dos ajustes da fase 4 e da 202610300001 do Quem pode por regras); a fase 4 le webinar_sessions.jit
   // (202610300005) em toda leitura de sessao, e as guardas tests/webinarios-v4*.guard.test.mjs e -v5.guard fixam as
   // migracoes de cada uma.
-  assert.equal(appMigration, "202611150001", "o aviso de migracao pendente aponta a mais nova (a da rodada v9; a guarda dela confere o arquivo)");
+  assert.equal(appMigration, "202611160001", "o aviso de migracao pendente aponta a mais nova (a da rodada v10; a guarda dela confere o arquivo)");
 });
 
 test("a 0002: seis secoes MCP, idempotente, sem create/alter policy, concurrently, truncate, delete nem drop", () => {

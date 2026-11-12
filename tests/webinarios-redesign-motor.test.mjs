@@ -19,10 +19,11 @@ const INTERFACE_WHITELIST = new Set(
 // react/features/base/config/configWhitelist.ts @ stable/jitsi-meet_11248: so as chaves que o liveConfigOverwrite
 // manda (a lista inteira tem ~190 chaves; o teste confere as nossas; participantMenuButtonsWithNotifyClick, so do
 // console de quem apresenta, esta na linha 201; os avisos do motor escondidos, notifications na 190, conferenceInfo na
-// 80 e disabledSounds na 102). Uma entrada com ponto (`prejoinConfig.enabled`)
+// 80 e disabledSounds na 102; disabledNotifications, o aviso da mao no console, na 101, e notifyOnConferenceDestruction, o
+// dialogo da live encerrada, na 192). Uma entrada com ponto (`prejoinConfig.enabled`)
 // libera so aquele campo do objeto; o app descarta o resto e qualquer chave fora da lista, sem avisar.
 const CONFIG_WHITELIST = new Set(
-  "breakoutRooms channelLastN conferenceInfo connectionIndicators constraints desktopSharingFrameRate disableChat disableDeepLinking disableInitialGUM disableInviteFunctions disableLocalVideoFlip disablePolls disableReactions disableRemoteMute disableSelfView disableShortcuts disableTileView disabledSounds filmstrip hideConferenceSubject hideConferenceTimer hideDisplayName hideDominantSpeakerBadge lobby notifications participantMenuButtonsWithNotifyClick prejoinConfig.enabled readOnlyName remoteVideoMenu resolution startWithAudioMuted startWithVideoMuted tileView toolbarButtons toolbarConfig".split(
+  "breakoutRooms channelLastN conferenceInfo connectionIndicators constraints desktopSharingFrameRate disableChat disableDeepLinking disableInitialGUM disableInviteFunctions disableLocalVideoFlip disablePolls disableReactions disableRemoteMute disableSelfView disableShortcuts disableTileView disabledNotifications disabledSounds filmstrip hideConferenceSubject hideConferenceTimer hideDisplayName hideDominantSpeakerBadge lobby notifications notifyOnConferenceDestruction participantMenuButtonsWithNotifyClick prejoinConfig.enabled readOnlyName remoteVideoMenu resolution startWithAudioMuted startWithVideoMuted tileView toolbarButtons toolbarConfig".split(
     " "
   )
 );

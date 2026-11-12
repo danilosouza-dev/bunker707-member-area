@@ -51,7 +51,7 @@ export type WebinarsDb = SupabaseClient;
  * comentario na tela) passa a ser a mais nova, entao o aviso a aponta. Nenhuma coluna dela entra nas listas que o app
  * sempre le: sem ela a sala e o console seguem como antes, e so as escritas novas voltam 409 com o aviso (docs/21 §9.16).
  */
-export const WEBINARS_MIGRATION = "202611150001";
+export const WEBINARS_MIGRATION = "202611160001";
 
 /** 4a: webinar_panel (os paineis Lives ao vivo e Lives gravadas e os numeros da lista). */
 export const WEBINARS_PANELS_MIGRATION = "202610300002";
@@ -138,6 +138,14 @@ export const WEBINAR_CHANGED_MESSAGE = "Esse webinário mudou em outra tela. Rec
  * webinar_questions.answer_author e webinar_question_replies.author_as (quem assina a resposta) e
  * webinar_screen_comments (o comentario ou a pergunta na tela). Nenhuma leitura de sempre depende dela: sem as colunas,
  * o banner vale "so o botao", a resposta aparece como "Equipe" e nada fica na tela; mostrar um comentario e escolher
- * quem assina voltam 409 com o aviso desta. E tambem a mais nova dos webinarios (WEBINARS_MIGRATION).
+ * quem assina voltam 409 com o aviso desta.
  */
 export const WEBINARS_V9_MIGRATION = "202611150001";
+
+/**
+ * Rodada v10 (docs/30 D94; 12/11/2026): webinar_questions.thread_seen_at e thread_seen_by (o fio de uma pergunta
+ * marcado como visto pela equipe). Nenhuma leitura de sempre depende dela: sem as colunas, o aviso "Nova resposta do
+ * aluno" so sai com a resposta da equipe, como antes, e o Marcar como vista volta 409 com o aviso desta. E a mais nova
+ * dos webinarios (WEBINARS_MIGRATION).
+ */
+export const WEBINARS_V10_MIGRATION = "202611160001";

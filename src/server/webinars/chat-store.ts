@@ -16,6 +16,7 @@ import {
   POLL_OPTION_COLUMNS,
   PRESENCE_COLUMNS,
   QUESTION_COLUMNS,
+  QUESTION_COLUMNS_V10,
   QUESTION_COLUMNS_V9,
   QUESTION_REPLY_COLUMNS,
   QUESTION_REPLY_COLUMNS_V9,
@@ -615,28 +616,33 @@ export function visibleQuestionFilter(nowIso: string): string {
 
 /** Depois de uma leitura que esbarrou numa coluna da 202611150001 que nao existe, por quanto tempo o app le so com as listas de sempre. */
 const V9_COLUMNS_RETRY_MS = 60_000;
-const v9ColumnsBaseUntil = { questions: 0, replies: 0 };
+/** Ate quando cada lista com colunas novas fica de fora (a chave e o proprio texto da lista). */
+const newColumnsSkipUntil = new Map<string, number>();
 
 /** Esvazia a memoria das colunas ausentes (os testes). */
 export function clearV9ColumnsMemory() {
-  v9ColumnsBaseUntil.questions = 0;
-  v9ColumnsBaseUntil.replies = 0;
+  newColumnsSkipUntil.clear();
 }
 
 /**
- * Le com a coluna da 202611150001 (quem assina a resposta, docs/30 D88). No banco sem a coluna, de novo so com a lista
- * de sempre (a resposta aparece como "Equipe", como antes) e, por 1 min, direto com ela.
+ * Le com as colunas das migracoes novas, da lista mais nova para a mais antiga: a da 202611160001 (o fio visto pela
+ * equipe, docs/30 D94), a da 202611150001 (quem assina a resposta, D88) e, por fim, a lista de sempre. No banco sem
+ * uma das colunas, a lista que falhou fica de fora por 1 min e a leitura segue com a seguinte: a resposta aparece como
+ * "Equipe" e o aviso do fio so sai com a resposta da equipe, como antes.
  */
-async function withV9Columns<C extends string, T>(table: keyof typeof v9ColumnsBaseUntil, base: C, extended: string, read: (columns: C) => Promise<T>): Promise<T> {
-  if (Date.now() >= v9ColumnsBaseUntil[table]) {
+async function withNewColumns<C extends string, T>(base: C, extended: readonly string[], read: (columns: C) => Promise<T>): Promise<T> {
+  for (const columns of extended) {
+    if (Date.now() < (newColumnsSkipUntil.get(columns) ?? 0)) {
+      continue;
+    }
     try {
-      // O tipo da lista de sempre (o PostgREST tipa o select pelo texto); a linha tem a coluna nova opcional.
-      return await read(extended as C);
+      // O tipo da lista de sempre (o PostgREST tipa o select pelo texto); a linha tem as colunas novas opcionais.
+      return await read(columns as C);
     } catch (failure) {
       if (!isPendingMigrationError(failure)) {
         throw failure;
       }
-      v9ColumnsBaseUntil[table] = Date.now() + V9_COLUMNS_RETRY_MS;
+      newColumnsSkipUntil.set(columns, Date.now() + V9_COLUMNS_RETRY_MS);
     }
   }
   return read(base);
@@ -646,7 +652,7 @@ export async function listQuestionRows(
   db: WebinarsDb,
   input: { limit?: number; order: "recent" | "votes"; sessionId: string; statuses?: readonly string[]; visibleAt?: string }
 ): Promise<QuestionRow[]> {
-  return withV9Columns("questions", QUESTION_COLUMNS, QUESTION_COLUMNS_V9, async (columns) => {
+  return withNewColumns(QUESTION_COLUMNS, [QUESTION_COLUMNS_V10, QUESTION_COLUMNS_V9], async (columns) => {
     let query = db.from("webinar_questions").select(columns).eq("session_id", input.sessionId).is("deleted_at", null);
     if (input.statuses?.length) {
       query = query.in("status", [...input.statuses]);
@@ -674,7 +680,7 @@ export async function listQuestionRows(
  */
 export async function listQuestionReplyRows(db: WebinarsDb, input: { sessionId: string }): Promise<QuestionReplyRow[]> {
   try {
-    return await withV9Columns("replies", QUESTION_REPLY_COLUMNS, QUESTION_REPLY_COLUMNS_V9, (columns) =>
+    return await withNewColumns(QUESTION_REPLY_COLUMNS, [QUESTION_REPLY_COLUMNS_V9], (columns) =>
       fetchAll<QuestionReplyRow>(
         (from, to) =>
           db
@@ -758,6 +764,16 @@ export async function updateQuestionRow(db: WebinarsDb, id: string, patch: Quest
 export async function writeQuestionAnswerAuthor(db: WebinarsDb, id: string, author: { as: string; name: string | null; role: string; v: 1 } | null): Promise<void> {
   const { error } = await db.from("webinar_questions").update({ answer_author: author }).eq("id", id);
   assertNoDbError(error, "Webinarios: quem assina a resposta");
+}
+
+/**
+ * Marca o fio da pergunta como visto pela equipe (202611160001, docs/30 D94). Devolve se a pergunta existe; no banco
+ * sem as colunas, sobe o PendingMigrationError (a acao responde com o aviso da migracao).
+ */
+export async function markQuestionThreadSeen(db: WebinarsDb, input: { id: string; seenAt: string; seenBy: string }): Promise<boolean> {
+  const { data, error } = await db.from("webinar_questions").update({ thread_seen_at: input.seenAt, thread_seen_by: input.seenBy }).eq("id", input.id).is("deleted_at", null).select("id");
+  assertNoDbError(error, "Webinarios: marcar o fio como visto");
+  return ((data ?? []) as unknown[]).length > 0;
 }
 
 /** Alterna o voto do aluno; devolve se ficou votado e o total recontado (gravado em upvotes). */

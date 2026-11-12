@@ -98,7 +98,7 @@ export const clearMessageTranslations = fail;`,
 export const saveScreenItem = fail; export const archiveScreenItem = fail; export const uploadScreenImage = fail; export const showScreenItem = fail; export const hideScreenItem = fail; export const showScreenComment = fail; export const hideScreenComment = fail;`,
   "@/server/webinars/room-actions": `${fail}
 export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const pinPoll = fail; export const unpinPoll = fail; export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;
-export const createConsolePoll = fail;`
+export const createConsolePoll = fail; export const markQuestionSeen = fail;`
 };
 
 function withExtension(base) {

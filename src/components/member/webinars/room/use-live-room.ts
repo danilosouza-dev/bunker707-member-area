@@ -32,6 +32,7 @@ import {
   filmstripStep,
   mountedThumbsRow,
   thumbsPending,
+  thumbsReloadMode,
   gateSwitchDone,
   gateSwitchStarted,
   gateToggle,
@@ -321,8 +322,17 @@ export type LiveRoomController = {
   toggleHand: () => void;
   toggleMic: () => void;
   toggleSound: () => void;
-  /** A escolha das miniaturas entre Lateral e Embaixo ainda espera o video carregar de novo (o menu avisa). */
-  thumbsPending: boolean;
+  /**
+   * Recarrega o video agora (o iframe novo entra com o token novo, pelo caminho da volta depois de uma queda): o que a
+   * troca entre Lateral e Embaixo pede. Fora da sala, ou com outra volta em curso, nao faz nada.
+   */
+  reloadVideo: () => void;
+  /**
+   * A troca entre Lateral e Embaixo que ainda espera o video carregar de novo e nao sai sozinha (thumbsReloadMode):
+   * "manual" (algo do aluno no ar: o menu oferece Recarregar o vídeo agora) ou "locked" (a sala trancada). Nula sem
+   * espera, e tambem enquanto a pagina recarrega o video sozinha.
+   */
+  thumbsWait: "locked" | "manual" | null;
   /** O iframe de agora foi montado com a fileira de miniaturas embaixo (falso sem iframe ou com a coluna). */
   thumbsRow: boolean;
   /** A visao que o aluno escolheu (guardada; Palco por padrao): volta depois de cada entrada. */
@@ -529,6 +539,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
   useEffect(() => {
     dropRef.current = handleDrop;
   });
+  const reloadVideoRef = useRef<() => void>(() => undefined);
 
   /** Le quem esta no palco pelo getRoomsInfo (o participantJoined nao traz o papel de quem ja era moderador). */
   const readRoomsInfo = useCallback(() => {
@@ -909,6 +920,48 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     enter();
   }, [enter]);
 
+  // Recarregar o video de proposito (a troca entre Lateral e Embaixo, docs/30 D96): a mesma sequencia da volta depois
+  // de uma queda, sem a espera. A saida e registrada como no Sair (o iframe desmonta antes de avisar), o pedido do
+  // microfone acaba e o iframe novo monta com o token novo e com o `look` de agora.
+  const reloadVideo = useCallback(() => {
+    if (!joinedRef.current || droppingRef.current || leavingRef.current) {
+      return;
+    }
+    pushEvent(toRoomEvent("videoConferenceLeft", {}, { nowIso: new Date().toISOString(), ownId: ownIdRef.current }));
+    micAskRef.current = null;
+    joinedApiRef.current = null;
+    droppingRef.current = true;
+    rejoinedRef.current = false;
+    setEntry("reconnecting");
+    postJoinToken(webinarId, sessionId)
+      .then((next) => {
+        if (leavingRef.current) {
+          return;
+        }
+        setReply(next);
+        droppingRef.current = false;
+        armJoinTimeout();
+        retryRef.current();
+      })
+      .catch((error: unknown) => {
+        if (leavingRef.current) {
+          return;
+        }
+        const failure = joinFailureOf(error);
+        if (failure !== "error") {
+          refuse(failure);
+          return;
+        }
+        // Sem rede: o iframe de antes continua montado; vale o caminho da queda (as tentativas de voltar).
+        droppingRef.current = false;
+        dropRef.current();
+      });
+  }, [armJoinTimeout, pushEvent, refuse, sessionId, webinarId]);
+
+  useEffect(() => {
+    reloadVideoRef.current = reloadVideo;
+  });
+
   const hangUp = useCallback(() => {
     leavingRef.current = true;
     micAskRef.current = null;
@@ -1123,6 +1176,18 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     }
   }, [filmstripVisible, frameWidth, joinedNow, wantColumn]);
 
+  // A troca entre Lateral e Embaixo (D96): com nada do aluno no ar, a pagina recarrega o video sozinha, uma vez (o
+  // iframe novo ja monta do jeito escolhido, e a espera acaba); com o microfone ou a camera ligados, ou com a sala
+  // trancada, fica com o menu (thumbsWait).
+  const thumbsReload = thumbsReloadMode({ joined: joinedNow, locked: lobby, onAir: signals.audioOn || signals.videoOn, pending: thumbsPending({ row: mountedRow, thumbs }) });
+  useEffect(() => {
+    if (thumbsReload !== "auto") {
+      return;
+    }
+    const id = window.setTimeout(() => reloadVideoRef.current(), 0);
+    return () => window.clearTimeout(id);
+  }, [thumbsReload]);
+
   return {
     acceptMic: accept,
     declineMic: decline,
@@ -1144,8 +1209,9 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     toggleHand,
     toggleMic,
     toggleSound,
-    thumbsPending: thumbsPending({ row: mountedRow, thumbs }),
+    reloadVideo,
     thumbsRow,
+    thumbsWait: thumbsReload === "auto" ? null : thumbsReload,
     view,
     viewShown: signals.viewShown
   };

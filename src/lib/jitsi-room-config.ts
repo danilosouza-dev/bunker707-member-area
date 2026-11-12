@@ -158,6 +158,23 @@ function roomEngineQuiet(audience: boolean): Record<string, unknown> {
 }
 
 /**
+ * O que o motor deixa de mostrar no console de quem apresenta (teste do produtor de 12/11/2026, docs/30 D95; docs/31
+ * §15.5): o aviso "{nome} Gostaria de participar." com o "Ver participantes" (a mao levantada: a chave
+ * `notify.raisedHand`, lida em base/participants/middleware.ts da tag fixada) e o selo do motor no topo do video (o
+ * "✋ 1" amarelo das maos e o da gravacao, conferenceInfo). O console ja mostra os dois por conta propria: o numero na
+ * aba Mãos e no botao da barra, e os selos Ao vivo e Gravando do palco. Os outros avisos do motor continuam (a gravacao
+ * que nao comecou, a tela negada, V2-A59), vestidos pela folha da instancia; o som da mao continua para quem apresenta.
+ */
+export const CONSOLE_DISABLED_NOTIFICATIONS: readonly string[] = ["notify.raisedHand"];
+
+function consoleEngineTrim(): Record<string, unknown> {
+  return {
+    conferenceInfo: { alwaysVisible: [], autoHide: [] },
+    disabledNotifications: [...CONSOLE_DISABLED_NOTIFICATIONS]
+  };
+}
+
+/**
  * Quem desenha o Compartilhar tela de quem apresenta no console (docs/31 V2-14 e V2-A39): o nosso circulo da barra
  * (toggleShareScreen pelo IFrame API) ou o botao de tela do proprio motor (toolbarButtons ["desktop"], que aparece ao
  * passar o mouse no video).
@@ -241,10 +258,15 @@ export function liveConfigOverwrite(
     // aviso escondido (notifications/actions.ts:143-145 da tag fixada; configWhitelist.ts:190). Sai tambem o selo do
     // motor no topo (o "✋ 1" das maos e o de gravacao: conferenceInfo, configWhitelist.ts:80), que o palco ja tem nos
     // selos da pagina, e, para o aluno e a Equipe, o som da mao de cada aluno para a turma (disabledSounds,
-    // configWhitelist.ts:102). Tudo na montagem, sem mexer na instancia. O console fica sem nenhuma das tres chaves:
-    // ninguem la ouve o notificationTriggered, e quem apresenta continua vendo os avisos do motor (a gravacao que nao
-    // comecou, a tela negada) ate os avisos do console entrarem (V2-A59).
-    ...(surface === "room" ? roomEngineQuiet(audience) : {}),
+    // configWhitelist.ts:102). Tudo na montagem, sem mexer na instancia. O console nao cala os avisos (ninguem la ouve o
+    // notificationTriggered, e quem apresenta continua vendo a gravacao que nao comecou e a tela negada, V2-A59): ele so
+    // tira o aviso da mao levantada e o selo do motor no topo, que ja mostra por conta propria (consoleEngineTrim, D95).
+    ...(surface === "room" ? roomEngineQuiet(audience) : consoleEngineTrim()),
+    // Sem o dialogo "A chamada foi encerrada" do motor quando quem apresenta encerra a live (teste do produtor de
+    // 12/11/2026, docs/30 D97; docs/31 §15.6): com a chave em falso o motor so desliga e avisa o readyToClose
+    // (base/conference/middleware.web.ts e conference.js da tag fixada; configWhitelist.ts:192), e a pagina mostra a
+    // tela dela de live encerrada. Vale na sala e no console (o co-apresentador tambem via o dialogo).
+    notifyOnConferenceDestruction: false,
     // O nome/selo que o motor escreve na base do video grande (StageParticipantNameLabel) sai: os selos do palco sao da
     // pagina (docs/31 V2-4).
     hideDominantSpeakerBadge: true,

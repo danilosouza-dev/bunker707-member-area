@@ -330,6 +330,9 @@ const VARIA_NA_LINHA = { direction: "both", every_max_seconds: 60, every_min_sec
 
 test("Variar sozinho no ar: a mudanca grava a variacao na regra e na frase; o mesmo numero com a mesma variacao recusa; mudar ou desligar a variacao aplica; o +0 ignora", async () => {
   const db = usar(bancoDaSimulacao({ tables: escolaAoVivo() }));
+  // Duas mudancas nunca caem no mesmo milissegundo de verdade (sao cliques de uma pessoa); aqui as chamadas sao
+  // seguidas, e duas linhas com a mesma hora ficariam na ordem do id sorteado (a leitura ordena por created_at e id).
+  const umInstante = () => new Promise((resolve) => setTimeout(resolve, 3));
 
   const salvo = ok(await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION, vary: VARIA }));
   const [mudanca] = mudancas(db);
@@ -357,16 +360,20 @@ test("Variar sozinho no ar: a mudanca grava a variacao na regra e na frase; o me
   assert.equal(mudancas(db).length, 1);
 
   // O mesmo numero com outra variacao aplica; sem a variacao (desligar) tambem.
+  await umInstante();
   ok(await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION, vary: { ...VARIA, direction: "up", percent: 10 } }));
   assert.deepEqual(mudancas(db).at(-1).count_rule.vary, { ...VARIA_NA_LINHA, direction: "up", percent: 10 });
+  await umInstante();
   const desligada = ok(await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION }));
   assert.deepEqual(mudancas(db).at(-1).count_rule, { base: 300, jitter: 0, mode: "fixed", peak: 300 }, "sem a chave, o numero parado");
   assert.equal(desligada.audience.current.vary, undefined);
   assert.equal(mudancas(db).at(-1).ack_text, frase(300));
+  await umInstante();
   const parado = await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION, vary: null });
   assert.deepEqual([parado.status, parado.fieldErrors?.extra?.[0]], [400, SERVIDOR.plateiaIgual]);
 
   // Com o +0 (o Tirar) a variacao e ignorada.
+  await umInstante();
   ok(await actions.saveSimulatedAudience({ extra: 0, sessionId: LIVE_SESSION, vary: VARIA }));
   assert.equal(mudancas(db).at(-1).count_rule, null);
 

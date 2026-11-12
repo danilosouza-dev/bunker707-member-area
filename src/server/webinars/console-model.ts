@@ -197,11 +197,17 @@ const QUESTION_ORDER: Record<WebinarQuestion["status"], number> = { answered: 1,
 /**
  * A pergunta respondida em que o aluno escreveu por ultimo no fio (docs/30 §2.4; decisao do produtor de 10/11/2026): a
  * conversa esta com a equipe. Conta junto das abertas no numero da aba e sobe para o topo do quadro, com o selo "Nova
- * resposta do aluno"; some quando a equipe responde no fio ou pelo campo de cima (ou apaga a resposta).
+ * resposta do aluno"; some quando a equipe responde no fio ou pelo campo de cima (ou apaga a resposta), e tambem
+ * quando ela marca o fio como visto (rodada v10, docs/30 D94).
  */
-export function questionAwaitsTeam(question: Pick<WebinarQuestion, "answeredAt" | "replies" | "status">): boolean {
+export function questionAwaitsTeam(question: Pick<WebinarQuestion, "answeredAt" | "replies" | "status"> & Pick<Partial<WebinarQuestion>, "threadSeenAt">): boolean {
   const last = question.replies?.[question.replies.length - 1];
   if (question.status !== "answered" || last?.role !== "student") {
+    return false;
+  }
+  // A equipe marcou o fio como visto depois da ultima fala do aluno (docs/30 D94): o aviso sai sem ela responder, e
+  // volta sozinho quando o aluno escrever de novo.
+  if (question.threadSeenAt && toTime(question.threadSeenAt) >= toTime(last.createdAt)) {
     return false;
   }
   // A resposta de cima gravada depois da ultima fala do aluno (o campo de cima no "Falar com a equipe", ou Reabrir e
@@ -235,7 +241,7 @@ export async function whileSettling(input: { key: string; set: (update: (current
 }
 
 /** A ordem do quadro: a aberta e a que espera a equipe no fio (0), a respondida (1), a dispensada (2). */
-function boardRank(question: Pick<WebinarQuestion, "answeredAt" | "replies" | "status">): number {
+function boardRank(question: Pick<WebinarQuestion, "answeredAt" | "replies" | "status"> & Pick<Partial<WebinarQuestion>, "threadSeenAt">): number {
   return questionAwaitsTeam(question) ? 0 : QUESTION_ORDER[question.status];
 }
 
@@ -243,7 +249,7 @@ function boardRank(question: Pick<WebinarQuestion, "answeredAt" | "replies" | "s
  * O quadro: primeiro o que pede a equipe (as abertas e as respondidas em que o aluno escreveu por ultimo no fio; as
  * mais votadas, depois as mais antigas), depois as respondidas e as dispensadas.
  */
-export function sortQuestionsForBoard<T extends Pick<WebinarQuestion, "answeredAt" | "createdAt" | "replies" | "status" | "upvotes">>(questions: readonly T[]): T[] {
+export function sortQuestionsForBoard<T extends Pick<WebinarQuestion, "answeredAt" | "createdAt" | "replies" | "status" | "upvotes"> & Pick<Partial<WebinarQuestion>, "threadSeenAt">>(questions: readonly T[]): T[] {
   return [...questions].sort((a, b) => {
     const byStatus = boardRank(a) - boardRank(b);
     if (byStatus !== 0) {

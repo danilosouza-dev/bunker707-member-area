@@ -83,7 +83,7 @@ test("consoleSkeleton (docs/31 V2-13 e §10): com palco, a coluna do palco com o
   // O painel e a referencia dos rotulos sr-only dele (o corpo de dentro rola, console-panel.tsx).
   assert.ok(has(live.panel, "relative"), "o painel com palco e a referencia dos rotulos dele");
   // O cartao do YouTube a partir de lg: o fundo do painel, o contorno de 1 px e o raio 12, com a largura da sala.
-  for (const classe of ["lg:rounded-[12px]", "lg:border", "lg:border-room-panel-border", "lg:bg-room-panel", "lg:w-[clamp(320px,27.5vw,400px)]", "lg:flex-none"]) {
+  for (const classe of ["lg:rounded-[12px]", "lg:border", "lg:border-room-panel-border", "lg:bg-room-panel", layout.CONSOLE_PANEL_WIDTH, "lg:flex-none"]) {
     assert.ok(has(live.panel, classe), `o painel com ${classe}`);
   }
   // Dentro do cartao, os cartoes do admin (SectionCard) ficam no fundo do proprio cartao: nunca um cartao escuro dentro dele.
@@ -369,12 +369,13 @@ test("liveConfigOverwrite no console: host e co-apresentador sem a barra do moto
     assert.equal(console.disableShortcuts, true, role);
     assert.deepEqual(console.participantMenuButtonsWithNotifyClick, [{ key: "ask-unmute", preventExecution: true }, { key: "kick", preventExecution: true }]);
     assert.deepEqual(embed.liveConfigOverwrite(role, settings, null, "console", "engine").toolbarButtons, ["desktop"], `${role}: o botao de tela do motor`);
-    // So a barra, os atalhos, o ⋮ e os avisos do motor mudam (no console eles continuam, V2-A59): o resto e o da sala
-    // (o envio do palco, o mudo, o menu da miniatura).
+    // So a barra, os atalhos, o ⋮ e os avisos do motor mudam (no console eles continuam, V2-A59, menos o da mao
+    // levantada, D95): o resto e o da sala (o envio do palco, o mudo, o menu da miniatura). O selo do motor no topo
+    // (conferenceInfo) sai nas duas, entao nao esta na lista.
     const diferentes = Object.keys({ ...sala, ...console }).filter((key) => JSON.stringify(sala[key]) !== JSON.stringify(console[key]));
     assert.deepEqual(
       diferentes.sort(),
-      ["bunkerTheme", "conferenceInfo", "disableShortcuts", "notifications", "participantMenuButtonsWithNotifyClick", "toolbarButtons", "toolbarConfig"],
+      ["bunkerTheme", "disableShortcuts", "disabledNotifications", "notifications", "participantMenuButtonsWithNotifyClick", "toolbarButtons", "toolbarConfig"],
       role
     );
     // A pagina da sala com o papel de quem apresenta continua com a barra do motor.
@@ -384,9 +385,10 @@ test("liveConfigOverwrite no console: host e co-apresentador sem a barra do moto
     assert.deepEqual(embed.liveConfigOverwrite(role, settings, null, "room"), sala, "room e o padrao");
   }
   for (const role of ["student", "team"]) {
-    // Igual a sala, menos o motor calado da sala (V2-20): no console ninguem ouve o notificationTriggered.
-    const semAvisos = Object.fromEntries(Object.entries(embed.liveConfigOverwrite(role, settings)).filter(([key]) => !["conferenceInfo", "disabledSounds", "notifications"].includes(key)));
-    assert.deepEqual(embed.liveConfigOverwrite(role, settings, null, "console", "engine"), semAvisos, `${role}: igual a sala, com os avisos do motor`);
+    // Igual a sala, menos o motor calado da sala (V2-20): no console ninguem ouve o notificationTriggered, e so o aviso
+    // da mao levantada sai (D95). O selo do motor no topo sai nas duas.
+    const semAvisos = Object.fromEntries(Object.entries(embed.liveConfigOverwrite(role, settings)).filter(([key]) => !["disabledSounds", "notifications"].includes(key)));
+    assert.deepEqual(embed.liveConfigOverwrite(role, settings, null, "console", "engine"), { ...semAvisos, disabledNotifications: ["notify.raisedHand"] }, `${role}: igual a sala, com os avisos do motor menos o da mao`);
   }
   // O interfaceConfig e o mesmo nas duas superficies (so o papel e o visual): o dialogo de fundo do motor, que o
   // Mais opções de fundo abre, continua so com os aparelhos.

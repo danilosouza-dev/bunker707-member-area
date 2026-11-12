@@ -190,9 +190,14 @@ test("configOverwrite por papel (D26): aluno sem chat/enquete/reacao do Jitsi, m
   assert.deepEqual(aluno.disabledSounds, ["RAISE_HAND_SOUND"]);
   assert.deepEqual(host.notifications, [], "tambem quem apresenta pela pagina da sala");
   assert.equal(host.disabledSounds, undefined);
-  // O console continua com os avisos do motor ate os avisos do console entrarem (V2-A59): ninguem la ouve o notificationTriggered.
+  // O console continua com os avisos do motor ate os avisos do console entrarem (V2-A59): ninguem la ouve o
+  // notificationTriggered. So o aviso da mao levantada e o selo do motor no topo saem (D95): o console ja mostra os dois.
   assert.equal(embed.liveConfigOverwrite("co_host", settings, null, "console").notifications, undefined);
-  assert.equal(embed.liveConfigOverwrite("host", settings, null, "console").conferenceInfo, undefined);
+  assert.deepEqual(embed.liveConfigOverwrite("co_host", settings, null, "console").disabledNotifications, ["notify.raisedHand"]);
+  assert.deepEqual(embed.liveConfigOverwrite("host", settings, null, "console").conferenceInfo, { alwaysVisible: [], autoHide: [] });
+  // A live encerrada por quem apresenta: o motor so desliga, sem o dialogo dele (D97), na sala e no console.
+  assert.equal(aluno.notifyOnConferenceDestruction, false);
+  assert.equal(embed.liveConfigOverwrite("co_host", settings, null, "console").notifyOnConferenceDestruction, false);
   assert.ok(!JSON.stringify(embed.liveInterfaceConfigOverwrite()).toLowerCase().includes("jitsi"));
   assert.ok(!JSON.stringify(embed.liveInterfaceConfigOverwrite("host")).toLowerCase().includes("jitsi"));
   assert.equal(embed.liveInterfaceConfigOverwrite().SETTINGS_SECTIONS, undefined, "sem o papel, sem engrenagem");
