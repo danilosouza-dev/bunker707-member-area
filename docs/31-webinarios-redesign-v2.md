@@ -559,7 +559,7 @@ O controle **Participantes simulados** (o do console e o do card depois do come�
 - **A mão levantada**: o motor pinta o contorno da miniatura de quem levantou a mão (`.raised-hand-border`, pela classe da regra `raisedHand`) e o selo da mão no topo (`raisedHandIndicator`) de amarelo. Agora os dois ficam no ativo do design system (`docs/12`): branco com a mão escura no tema escuro, quase preto com a mão branca no claro; o selo fica redondo, como o botão do menu. Só cor e canto: a espessura e o tamanho continuam os da tag.
 - **Os pontos do nível de áudio** na lateral da miniatura eram azuis; ficam no verde de quem fala, como o anel (que já era nosso).
 - **Conferido no código da tag fixada** (`stable-11248`): `Thumbnail.tsx`, `RaisedHandIndicator.tsx`, `AudioLevelIndicator.tsx` e `_videolayout_default.scss`. A miniatura fixada não tem contorno próprio nessa tag. As iniciais coloridas de quem está sem câmera ficaram como estão: a área também usa avatares coloridos.
-- **Para chegar ao ar**: a etapa `deploy-meet` (`.github/workflows/infra.yml`), com `SEM_LIVE_2H=sim` e o ok do produtor no chat (`docs/20`). O `?v=` do carregador mudou junto com a folha (a guarda `tests/infra-jitsi-css.guard.test.mjs` confere).
+- **Para chegar ao ar**: a etapa `deploy-meet` (`.github/workflows/infra.yml`), com `SEM_LIVE_2H=sim` e o ok do produtor no chat (`docs/20`). O `?v=` do carregador mudou junto com a folha (a guarda `tests/infra-jitsi-css.guard.test.mjs` confere). A etapa rodou em 12/11/2026 (`docs/21` §9.18).
 
 ### 14.9 Perguntas novas
 
@@ -602,7 +602,7 @@ Na aba **Perguntas** da sala, com o fio aberto, o **Responder** de quem pergunto
 
 - **No console, o aviso da mão levantada sai**: o cartão "{nome} Gostaria de participar." com **Ver participantes**, e o selo amarelo "✋ 1" no topo do vídeo, eram do motor. O console já mostra as mãos no número da aba **Mãos** e no círculo da barra, então os dois saem pela configuração do iframe (`disabledNotifications` e `conferenceInfo`, lidos na lista permitida da tag fixada). Vale no merge, sem `deploy-meet`. O som da mão continua para quem apresenta.
 - **A live encerrada sem o diálogo do motor**: quando quem apresenta clica em **Encerrar live**, o motor abria "A chamada foi encerrada" com um botão **OK** no meio do palco de cada aluno. Com `notifyOnConferenceDestruction` em falso (lido em `conference/middleware.web.ts` e `conference.js` da tag fixada), ele só desliga e avisa a página, que mostra a tela dela de live encerrada. Vale na sala e no console, no merge, sem `deploy-meet`.
-- **O que ainda pode aparecer do motor** (no console: a gravação que não começou, a tela negada, V2-A59; e algum diálogo de permissão): a folha `infra/jitsi/web/bunker707.css` veste os avisos (`#notifications-container`, pelos papéis `status` e `alert`) como o aviso da área, com o cartão invertido do tema, canto de 12 px, sem a faixa colorida e com o botão sublinhado na cor do texto; e os diálogos (`role="dialog"` com `aria-modal`) com o cartão do tema, canto de 16 px e o botão principal invertido, sem azul. Só ids e papéis, nunca as classes geradas do motor. **Para chegar ao ar**: a etapa `deploy-meet`, com `SEM_LIVE_2H=sim` e o ok do produtor no chat; o `?v=` do carregador mudou junto.
+- **O que ainda pode aparecer do motor** (no console: a gravação que não começou, a tela negada, V2-A59; e algum diálogo de permissão): a folha `infra/jitsi/web/bunker707.css` veste os avisos (`#notifications-container`, pelos papéis `status` e `alert`) como o aviso da área, com o cartão invertido do tema, canto de 12 px, sem a faixa colorida e com o botão sublinhado na cor do texto; e os diálogos (`role="dialog"` com `aria-modal`) com o cartão do tema, canto de 16 px e o botão principal invertido, sem azul. Só ids e papéis, nunca as classes geradas do motor. **Para chegar ao ar**: a etapa `deploy-meet`, com `SEM_LIVE_2H=sim` e o ok do produtor no chat; o `?v=` do carregador mudou junto. A etapa rodou em 12/11/2026 (`docs/21` §9.18).
 
 ### 15.6 Perguntas novas
 
@@ -615,7 +615,7 @@ Na aba **Perguntas** da sala, com o fio aberto, o **Responder** de quem pergunto
 
 ## 16. Rodada v11: o terceiro teste do produtor na `dev`, em 12/11/2026
 
-Depois do merge da rodada v10, o produtor testou a `dev` outra vez e mandou seis pontos. As decisões estão no `docs/30` (D98 a D104); aqui fica o desenho. A migração é a `202611170001` (`docs/21` §9.18), só para as curtidas. O que é da folha do motor continua esperando a etapa `deploy-meet`, com o ok do produtor no chat; o resto vale no merge.
+Depois do merge da rodada v10, o produtor testou a `dev` outra vez e mandou seis pontos. As decisões estão no `docs/30` (D98 a D104); aqui fica o desenho. A migração é a `202611170001` (`docs/21` §9.18), só para as curtidas. O que é da folha do motor chegou ao servidor de vídeo pela etapa `deploy-meet` de 12/11/2026, com o ok do produtor no chat (`docs/21` §9.18); o resto vale no merge.
 
 ### 16.1 Trocar as miniaturas sem duplicar a pessoa (D98)
 
@@ -651,7 +651,7 @@ No card **Sala** do editor, a chave **Mostrar quantas pessoas estão na sala**, 
 
 ### 16.6 Os avisos e os diálogos do motor (D103)
 
-O produtor viu, ao abrir a live, cartões do motor (aparelho novo conectado e outros) ainda com o visual dele. A regra: nada do motor é tirado sem ter o nosso equivalente; o que continua aparecendo é vestido pela folha `infra/jitsi/web/bunker707.css` (§15.5), que já está escrita desde a rodada v10 e **ainda não chegou ao servidor de vídeo**. Ela chega pela etapa `deploy-meet`, com `SEM_LIVE_2H=sim` e o ok do produtor no chat.
+O produtor viu, ao abrir a live, cartões do motor (aparelho novo conectado e outros) ainda com o visual dele. A regra: nada do motor é tirado sem ter o nosso equivalente; o que continua aparecendo é vestido pela folha `infra/jitsi/web/bunker707.css` (§15.5), que já estava escrita desde a rodada v10 e não tinha chegado ao servidor de vídeo. **Chegou em 12/11/2026**, pela etapa `deploy-meet` rodada da `dev`, com `SEM_LIVE_2H=sim` e o ok do produtor no chat (`docs/21` §9.18). O visual no ar fica para o produtor conferir na `dev`.
 
 ### 16.7 A janela "A live foi encerrada" (D104)
 
