@@ -81,6 +81,7 @@ import {
   updateQuestionRow,
   type ChatMessagePatch
 } from "./chat-store";
+import { takeDownScreenComments } from "./screen-comment-store";
 import { ackSentenceMatches, canEndSession, canOpenSession, canTeamActOn, consoleAckSentence } from "./console-model";
 import { isMissingWebinarSchema, WEBINARS_MIGRATION, WEBINARS_SCREEN_MIGRATION, WEBINARS_V9_MIGRATION, WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
 import { roomRoleFor } from "./jitsi-token";
@@ -708,6 +709,8 @@ export async function moderateMessage(input: { action: ModerationAction; message
       }
     } else if (data.action === "delete") {
       await softDeleteQuestionsOfMessage(db, { messageId: message.id, nowIso, reason: "team" });
+      // A mensagem apagada sai da tela na hora, se a equipe a tinha mostrado (rodada v9, docs/30 D89).
+      await takeDownScreenComments(db, { messageIds: [message.id], nowIso });
     }
 
     if (data.action === "pin") {
@@ -1238,7 +1241,7 @@ async function withV9Columns<T>(work: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Grava quem assina a resposta (docs/30 D87). No banco sem a 202611150001: com "Equipe" (o que a sala ja mostra sem a
+ * Grava quem assina a resposta (docs/30 D88). No banco sem a 202611150001: com "Equipe" (o que a sala ja mostra sem a
  * coluna) segue sem gravar; com "Meu nome" ou "Outro nome", 409 com a frase da migracao, antes de qualquer outra escrita.
  */
 async function writeAnswerAuthor(db: WebinarsDb, questionId: string, author: AnswerAuthor): Promise<void> {
@@ -1257,8 +1260,8 @@ async function writeAnswerAuthor(db: WebinarsDb, questionId: string, author: Ans
 /**
  * [messaging.write] Responde uma pergunta: por escrito e/ou "Respondida ao vivo". A resposta escrita fica so no fio da
  * pergunta (a aba Perguntas da sala e do console) e NAO entra mais no chat (rodada v9, P1; decisao do produtor em
- * 12/11/2026, docs/30 D84: "Chat e chat, pergunta e pergunta"; antes ela era gravada tambem como linha da equipe de
- * kind `answer`, e aparecia como comentario do Apresentador). Com "Responder como" (P8, D87), a resposta leva quem
+ * 12/11/2026, docs/30 D85: "Chat e chat, pergunta e pergunta"; antes ela era gravada tambem como linha da equipe de
+ * kind `answer`, e aparecia como comentario do Apresentador). Com "Responder como" (P8, D88), a resposta leva quem
  * assina: o nome de quem responde, "Equipe" ou um nome personalizado; sem a escolha (a pagina de antes), "Equipe".
  */
 export async function answerQuestion(input: { answerText?: string; answeredLive?: boolean; author?: AnswerAuthorChoice; questionId: string }): Promise<ActionResult<AnsweredQuestion>> {
@@ -1351,7 +1354,7 @@ export async function replyToQuestion(input: { author?: AnswerAuthorChoice; body
 
     const { session, webinar } = await loadSession(db, question.sessionId);
     const role = await teamRoleFor(db, { nowMs: now.getTime(), userId: user.id, webinar });
-    // "Responder como" (docs/30 D87): sem a escolha (a pagina de antes), o nome de quem escreve, como sempre, e nenhuma
+    // "Responder como" (docs/30 D88): sem a escolha (a pagina de antes), o nome de quem escreve, como sempre, e nenhuma
     // coluna nova na linha. Com "Outro nome", o nome escrito vai em display_name.
     const author = data.author ? answerAuthorOf({ choice: data.author, displayName: teamDisplayName(user), role }) : null;
     if (data.author && !author) {
@@ -1436,6 +1439,10 @@ export async function setQuestionStatus(input: { questionId: string; status: Web
 
     if (data.status === "answered" && previousStatus !== "answered") {
       await markTeamAnswer(db, question.id);
+    }
+    // A pergunta dispensada some para a turma: se estava na tela, sai na hora (rodada v9, docs/30 D89).
+    if (data.status === "dismissed") {
+      await takeDownScreenComments(db, { nowIso, questionIds: [question.id] });
     }
 
     await recordAudit(db, {
@@ -1640,6 +1647,8 @@ export async function removeStudentMessages(input: { reason: string; userId: str
     const nowIso = new Date().toISOString();
     const consent = await fetchConsentRow(db, data.userId);
     const counts = await softDeleteStudentContent(db, { nowIso, reason: "consent_revoked", userId: data.userId });
+    // O que era dessa pessoa e estava na tela sai na hora (rodada v9, docs/30 D89).
+    await takeDownScreenComments(db, { nowIso, userId: data.userId });
     const consentRevoked = await revokeConsentRow(db, data.userId, nowIso);
 
     if (consent) {

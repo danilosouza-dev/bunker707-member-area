@@ -95,7 +95,7 @@ export const loadAssistantEditor = fail; export const saveAssistant = fail; expo
   "@/server/webinars/translation-actions": `${fail}
 export const clearMessageTranslations = fail;`,
   "@/server/webinars/screen-actions": `${fail}
-export const saveScreenItem = fail; export const archiveScreenItem = fail; export const uploadScreenImage = fail; export const showScreenItem = fail; export const hideScreenItem = fail;`,
+export const saveScreenItem = fail; export const archiveScreenItem = fail; export const uploadScreenImage = fail; export const showScreenItem = fail; export const hideScreenItem = fail; export const showScreenComment = fail; export const hideScreenComment = fail;`,
   "@/server/webinars/room-actions": `${fail}
 export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const pinPoll = fail; export const unpinPoll = fail; export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;
 export const createConsolePoll = fail;`
@@ -1259,10 +1259,11 @@ test("Live gravada: o ⋯ da mensagem de aluno com Silenciar 5/15/60 min, até o
   const silenciar = [vivo.silenciarNoChat[5], vivo.silenciarNoChat[15], vivo.silenciarNoChat[60], vivo.silenciarNoChat.fim];
 
   const markup = render(snapshotDa());
-  assert.deepEqual(itensDo(markup, "m-ana"), [...silenciar, vivo.removerDaSala, vivo.banir], "os mesmos itens da live, sem Destacar, palco nem camera");
+  // O "Mostrar na tela" (rodada v9, docs/30 D89) e o primeiro do ⋯ de toda mensagem liberada; depois, os da pessoa.
+  assert.deepEqual(itensDo(markup, "m-ana"), [naTela.console.mostrarNaTela, ...silenciar, vivo.removerDaSala, vivo.banir], "os mesmos itens da live, sem Destacar, palco nem camera");
   assert.doesNotMatch(block(markup, 'data-room-message="m-ana"', "li"), new RegExp(`${vivo.destacar}|${vivo.convidarPalco}|${vivo.fecharCamera}`));
   const daBarrada = itensDo(markup, "m-bia");
-  assert.equal(daBarrada[0], `${LIVE_CONSOLE_COPY_DESFAZER}: Sem escrever até 20:15`, "o silencio da barrada vira Desfazer");
+  assert.deepEqual(daBarrada.slice(0, 2), [naTela.console.mostrarNaTela, `${LIVE_CONSOLE_COPY_DESFAZER}: Sem escrever até 20:15`], "depois do Mostrar na tela (rodada v9), o silencio da barrada vira Desfazer");
   assert.ok(daBarrada.includes(`${LIVE_CONSOLE_COPY_DESFAZER}: ${vivo.removido}`), "o remover tambem");
   assert.deepEqual(itensDo(markup, "m-equipe").filter((item) => silenciar.includes(item) || item === vivo.banir), [], "a equipe nunca e alvo");
   assert.match(block(block(markup, 'data-room-message="m-ana"', "li"), "data-stub-menu", "div"), new RegExp(`aria-label="${WEBINAR_COPY.consoleV2.chat.maisAcoes("Ana M.")}"`));
@@ -1284,7 +1285,7 @@ test("Live gravada: o ⋯ da mensagem de aluno com Silenciar 5/15/60 min, até o
   // Sem ninguem barrado, sem o bloco; o ⋯ continua.
   const semBarrados = render(snapshotDa({ barred: [] }));
   assert.doesNotMatch(semBarrados, /data-console-chat-barred|data-live-barred/);
-  assert.deepEqual(itensDo(semBarrados, "m-bia"), [...silenciar, vivo.removerDaSala, vivo.banir]);
+  assert.deepEqual(itensDo(semBarrados, "m-bia"), [naTela.console.mostrarNaTela, ...silenciar, vivo.removerDaSala, vivo.banir]);
 
   // Sem messaging.publish: Banir desligado, com a frase.
   const semPublicar = render(snapshotDa({ barred: [] }), { canPublish: false, canWrite: true });
@@ -1299,7 +1300,7 @@ test("Live gravada: o ⋯ da mensagem de aluno com Silenciar 5/15/60 min, até o
   assert.doesNotMatch(replay, /data-console-chat-barred|data-console-person-badge/);
 });
 
-test("rodada v9 (P3, docs/30 D86): o formulario do banner oferece 'O que abre o link' so com o link e o texto do botao escritos; o padrao e Imagem e botão; a Previa segue a escolha", () => {
+test("rodada v9 (P3, docs/30 D87): o formulario do banner oferece 'O que abre o link' so com o link e o texto do botao escritos; o padrao e Imagem e botão; a Previa segue a escolha", () => {
   const { screenFormInput, screenFormPreview, screenFormStart, screenFormErrors } = screenForm;
   // O banner novo: sem link nem texto do botao, a escolha nao aparece (nao faria diferenca).
   assert.doesNotMatch(html(createElement(ConsoleScreenForm, formProps())), /data-console-screen-link-target/);
@@ -1328,4 +1329,64 @@ test("rodada v9 (P3, docs/30 D86): o formulario do banner oferece 'O que abre o 
   // (O id do item de teste nao e um uuid: os erros sao conferidos como num banner novo.)
   assert.deepEqual(screenFormErrors({ ...estado, buttonLabel: "", id: null, linkTarget: "button" }, WEBINAR), { buttonLabel: naTela.erros.soBotaoSemTexto });
   assert.deepEqual(screenFormErrors({ ...soImagem, id: null }, WEBINAR), {});
+});
+
+test("rodada v9 (P11, docs/30 D89): 'Mostrar na tela' no ⋯ de cada mensagem liberada do chat; na que ja esta na tela, 'Tirar da tela'; a que espera a equipe e a sessao que nao aceita a equipe ficam sem o item", () => {
+  const itensDe = (markup, id) => {
+    const item = block(markup, `data-room-message="${id}"`, "li");
+    return item.includes('role="menu"') ? Array.from(block(item, 'role="menu"', "div").matchAll(/role="menuitem"[^>]*>([^<]+)</g)).map((match) => match[1]) : [];
+  };
+  const pendente = message({ approved: false, body: "Esperando", displayName: "Leo P.", id: "m-pendente" });
+  const com = html(createElement(ConsoleChat, chatProps({ messages: [...messages, pendente], onScreenComment() {}, screenCommentMessageId: "m-equipe" })));
+  assert.equal(naTela.console.mostrarNaTela, "Mostrar na tela");
+  for (const id of ["m-aluna", "m-roteiro-equipe", "m-roteiro-aluno", "m-ia", "m-sem-link"]) {
+    assert.equal(itensDe(com, id)[0], naTela.console.mostrarNaTela, `${id}: o primeiro item do ⋯`);
+  }
+  assert.equal(itensDe(com, "m-equipe")[0], naTela.console.tirarDaTela, "a que esta na tela: Tirar da tela");
+  assert.equal(count(com, />Tirar da tela</g), 1, "so uma esta na tela");
+  assert.ok(!itensDe(com, "m-pendente").includes(naTela.console.mostrarNaTela), "a que espera a equipe a turma ainda nao viu");
+  // Sem a acao (o Replay, a sessao encerrada, quem so le): nenhum item.
+  const sem = html(createElement(ConsoleChat, chatProps()));
+  assert.doesNotMatch(sem, /Mostrar na tela|Tirar da tela/);
+});
+
+test("rodada v9 (P11): em Na tela agora, o comentario ou a pergunta com quem escreveu, o texto, ha quanto tempo e o Tirar da tela; conta no numero da entrada e na pilula do palco; sem poder agir, sem o botao", () => {
+  const comentario = { avatar: "person", avatarUrl: null, body: "Como faz isso?", displayId: "d-comentario", name: "Ana M.", role: null, shownAt: new Date(NOW - 2 * MIN - 5_000).toISOString(), source: "chat", sourceId: "m-aluna" };
+  const tela = (extra = {}) => html(createElement(ConsoleScreen, screenProps({ onHideComment() {}, screen: { active: [], comment: comentario, items: [], pending: false, stats: {} }, ...extra })));
+  const markup = tela();
+  const linha = block(markup, 'data-console-screen-now-item="comment"', "li");
+  assert.equal(textOf(linha), `Comentário · Ana M.: Como faz isso? há 2 min ${consoleCopy.tirarDaTela}`);
+  assert.match(linha, /data-display-id="d-comentario"/);
+  assert.match(linha, /<button[^>]*data-console-screen-hide-comment=""/);
+  assert.doesNotMatch(textOf(markup), new RegExp(consoleCopy.agoraVazio), "com o comentario, a tela dos alunos nao esta vazia");
+  const daPergunta = tela({ screen: { active: [], comment: { ...comentario, body: "Posso fazer?", source: "question" }, items: [], pending: false, stats: {} } });
+  assert.match(textOf(block(daPergunta, 'data-console-screen-now-item="comment"', "li")), /^Pergunta · Ana M\.: Posso fazer\?/);
+  assert.doesNotMatch(block(tela({ canAct: false }), 'data-console-screen-now-item="comment"', "li"), /<button/, "sem poder agir, sem o Tirar");
+  assert.doesNotMatch(html(createElement(ConsoleScreen, screenProps())), /data-console-screen-now-item="comment"/, "sem comentario, a lista de antes");
+
+  // O contador da entrada e a pilula do palco.
+  assert.equal(consoleScreenCount({ active: [], comment: comentario, pinnedMessageId: null }), 1);
+  assert.equal(consoleScreenCount({ active: [exibicaoDe(banner)], comment: comentario, pinnedMessageId: "mensagem-1" }), 3);
+  assert.equal(consoleScreenCount({ active: [], pinnedMessageId: null }), 0);
+  assert.equal(naTela.console.pilulaPalco([naTela.tipos.banner, naTela.tipoComentario.chat]), "Na tela: Banner · Comentário");
+  assert.equal(naTela.tipoComentario.question, "Pergunta");
+  const fonte = readFileSync(new URL("../src/components/admin/v2/communication/webinars/session-console/session-console.tsx", import.meta.url), "utf8");
+  assert.match(fonte, /showScreenComment\(source === "chat" \? \{ messageId: id, sessionId \} : \{ questionId: id, sessionId \}\)/, "o console manda a origem certa");
+  assert.match(fonte, /hideScreenComment\(\{ sessionId \}\)/);
+});
+
+test("rodada v9 (P11): cada pergunta que a turma ve tem 'Mostrar na tela'; a que esta na tela leva o selo Na tela e o 'Tirar da tela'; a dispensada nao vai para a tela", async () => {
+  const { ConsoleQuestions } = await import("../src/components/admin/v2/communication/webinars/session-console/console-questions.tsx");
+  const pergunta = (extra = {}) => ({ anonymous: false, answerText: null, answeredAt: null, answeredBy: null, answeredLive: false, body: "Posso fazer?", createdAt: new Date(NOW - MIN).toISOString(), displayName: "Ana M.", id: "q-aberta", messageId: null, offsetMs: 0, sessionId: "s-1", simulated: false, status: "open", upvotes: 0, userId: "u-ana", ...extra });
+  const perguntas = [pergunta(), pergunta({ answerText: "Pode", id: "q-respondida", status: "answered" }), pergunta({ id: "q-dispensada", status: "dismissed" })];
+  const painel = (extra = {}) => html(createElement(ConsoleQuestions, { busyKey: null, canAct: true, onAnswer: async () => true, onScreenComment() {}, onStatus() {}, questions: perguntas, ...extra }));
+  const de = (markup, id) => block(markup, `data-console-question="${id}"`, "li");
+  const markup = painel({ screenCommentQuestionId: "q-respondida" });
+  assert.match(de(markup, "q-aberta"), /<button[^>]*data-console-screen-comment="show"[^>]*>Mostrar na tela<\/button>/);
+  assert.doesNotMatch(de(markup, "q-aberta"), /data-console-question-on-screen/);
+  assert.match(de(markup, "q-respondida"), /<button[^>]*data-console-screen-comment="hide"[^>]*>Tirar da tela<\/button>/);
+  assert.match(textOf(block(de(markup, "q-respondida"), 'data-console-question-on-screen=""', "span")), /^Na tela$/, "o selo da que esta na tela");
+  assert.doesNotMatch(de(markup, "q-dispensada"), /data-console-screen-comment/, "a dispensada some para a turma: nao vai para a tela");
+  assert.doesNotMatch(painel({ onScreenComment: null }), /data-console-screen-comment/, "sem a acao (o Replay, a sessao encerrada)");
+  assert.doesNotMatch(painel({ canAct: false }), /data-console-screen-comment/);
 });

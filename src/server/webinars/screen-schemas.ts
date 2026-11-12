@@ -62,7 +62,7 @@ export const screenItemInputSchema = z
     imageAlt: optionalText(SCREEN_LIMITS.imageAlt),
     imagePath: optionalText(160, ERROS.imagemSumiu),
     kind: z.enum(SCREEN_KINDS, { error: ERROS.invalido }),
-    /** O que abre o link do banner (D86): ausente (a pagina de antes), o padrao. */
+    /** O que abre o link do banner (D87): ausente (a pagina de antes), o padrao. */
     linkTarget: z.enum(SCREEN_LINK_TARGETS, { error: ERROS.invalido }).nullish(),
     linkUrl: optionalText(SCREEN_LIMITS.link, ERROS.link),
     name: optionalText(SCREEN_LIMITS.name),
@@ -180,6 +180,17 @@ export const showScreenItemSchema = z.object({ itemId: uuidSchema, sessionId: uu
 
 /** Tirar da tela uma exibicao. */
 export const hideScreenItemSchema = z.object({ displayId: uuidSchema });
+
+/**
+ * Mostrar na tela uma mensagem do chat ou uma pergunta (rodada v9, P11; docs/30 D89): uma das duas, nunca as duas nem
+ * nenhuma. O comentario que estava na tela sai (um por sessao).
+ */
+export const showScreenCommentSchema = z
+  .object({ messageId: uuidSchema.optional(), questionId: uuidSchema.optional(), sessionId: uuidSchema })
+  .refine((value) => Boolean(value.messageId) !== Boolean(value.questionId), { message: ERROS.invalido, path: ["messageId"] });
+
+/** Tirar da tela o comentario que esta na frente da turma na sessao. */
+export const hideScreenCommentSchema = z.object({ sessionId: uuidSchema });
 
 /** Fixar uma enquete da sessao (aberta, ou encerrada com o resultado compartilhado). */
 export const pinPollSchema = z.object({ pollId: uuidSchema, sessionId: uuidSchema });

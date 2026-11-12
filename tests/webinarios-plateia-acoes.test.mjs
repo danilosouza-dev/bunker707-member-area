@@ -5,7 +5,7 @@ import { actionStubs } from "./support/admin-action-stubs.mjs";
 import { ENDED_SESSION, LIVE_SESSION, MIN, REPLAY, SESSION, WEBINAR, bancoDaSimulacao, escolaDaSimulacao } from "./support/webinarios-v4-simulacao-banco.mjs";
 
 // Os participantes simulados mudados a qualquer momento, no servidor e sem banco (docs/30 D79 e D80; docs/18 §2.2):
-// saveSimulatedAudience no banco da Simulacao em memoria. Somar nao pede frase nem caixa desde 12/11/2026 (D85): o
+// saveSimulatedAudience no banco da Simulacao em memoria. Somar nao pede frase nem caixa desde 12/11/2026 (D86): o
 // servidor grava sozinho a frase da mudanca (a de hoje, com o numero e o nome de quem muda) no registro; com a live
 // no ar, a mudanca vira uma linha de webinar_simulation_changes com o offset
 // desde o Começar para todos, a decisao da sessao passa a ser a frase dela (o carimbo da sala muda) e a sessao sem
@@ -120,13 +120,13 @@ function semATabela(db) {
   return db;
 }
 
-test("a live no ar: +300 direto, sem frase nem caixa (D85); o servidor grava a frase da mudanca, a linha com o offset, a decisao da sessao (o carimbo) e a janela com o numero novo depois da rampa", async () => {
+test("a live no ar: +300 direto, sem frase nem caixa (D86); o servidor grava a frase da mudanca, a linha com o offset, a decisao da sessao (o carimbo) e a janela com o numero novo depois da rampa", async () => {
   const db = usar(bancoDaSimulacao({ tables: escolaAoVivo() }));
   const antes = linha(db, LIVE_SESSION).updated_at;
 
   const texto = frase(300);
   assert.match(texto, /A partir de agora, os participantes simulados somam \+300 ao número de quem assiste\. Responsável: Produtora de Teste\.$/);
-  // O pedido leva so o numero, a sessao e a origem: a frase e a confirmacao da tela sairam (D85).
+  // O pedido leva so o numero, a sessao e a origem: a frase e a confirmacao da tela sairam (D86).
   const salvo = ok(await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION }));
   const [mudanca] = mudancas(db);
   assert.equal(mudanca.session_id, LIVE_SESSION);

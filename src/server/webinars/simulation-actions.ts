@@ -21,7 +21,7 @@
 // depois do comeco, ate o Encerrar, pelo console ou pelo card (o card deixa de travar o numero; as entradas e os avisos
 // de venda continuam travados no ar pelo saveSessionSimulation). Cada mudanca grava a frase dela (a da decisao com o
 // numero novo, simulationAudienceAckFor, montada pelo servidor: desde 12/11/2026 a tela nao mostra frase nem pede a
-// caixa, D85; o Tirar grava a frase do +0), grava uma linha em
+// caixa, D86; o Tirar grava a frase do +0), grava uma linha em
 // webinar_simulation_changes (antes do comeco sem offset, trocando tambem a regra da sessao; no ar, o offset do relogio
 // da Simulacao, e a sala chega no numero em 90 s) e depois a decisao na sessao (quem, quando e a frase), que muda o
 // carimbo que a sala ja le na consulta de 5 s. Banco sem a 202611140002: 409 com a frase dela, antes de gravar.
@@ -189,7 +189,7 @@ export async function loadSessionSimulations(input: { webinarId: string }): Prom
 
 /**
  * [messaging.publish] Grava a Simulacao de uma sessao gravada (ou da Live ao vivo, R7): o selo, as regras e a decisao
- * (D10). Sem frase nem caixa na tela desde 12/11/2026 (D85): o servidor monta a frase de hoje com o nome de quem
+ * (D10). Sem frase nem caixa na tela desde 12/11/2026 (D86): o servidor monta a frase de hoje com o nome de quem
  * decide (a da live na live; tudo desligado grava a frase de tudo desligado) e a guarda na sessao. As regras
  * gravadas sao as normalizadas (avisos ligados sem nenhum item contam como desligados): a frase confere com o que fica
  * no banco. Na live o selo nunca liga (erro no campo `showLiveBadge`).
@@ -233,7 +233,7 @@ export async function saveSessionSimulation(input: SaveSessionSimulationInput): 
     const webinar = await requireWebinarRow(db, row.webinar_id);
     const rules = normalizeSimulationRules({ countRule: data.countRule, joins: data.joins, saleNotices: data.saleNotices, showLiveBadge: data.showLiveBadge });
     const responsible = getUserDisplayName(user).fullName;
-    // Sem frase nem caixa na tela (D85, 12/11/2026): o servidor monta a frase da decisao e a grava com quem e quando.
+    // Sem frase nem caixa na tela (D86, 12/11/2026): o servidor monta a frase da decisao e a grava com quem e quando.
     const ackText = clampSimulationAck(simulationAckFor({ live, nowMs, responsible, rules }));
     let saved: SessionSimulation;
     try {
@@ -304,7 +304,7 @@ const REAL_PLUS_ZERO = { base: 0, jitter: 0, mode: "fixed", peak: 0 } as const;
 /**
  * [messaging.publish] Os participantes simulados da sessao a partir de agora (D79): a gravada e a Live ao vivo, antes,
  * durante e depois do comeco, ate o Encerrar (encerrada, o Replay e a cancelada recusam com 409). Sem frase nem caixa
- * na tela (D85, 12/11/2026): o servidor grava sozinho a frase da mudanca (a de hoje, com o numero novo e o nome de
+ * na tela (D86, 12/11/2026): o servidor grava sozinho a frase da mudanca (a de hoje, com o numero novo e o nome de
  * quem muda) no registro, e o Tirar (+0) grava a do +0. O mesmo numero de agora e recusado (nada mudaria). Antes do comeco a linha
  * fica sem offset e a regra da sessao passa a ser a nova (vale na hora: a espera da live nao tem relogio que ande); no
  * ar, a linha leva o offset do relogio da Simulacao e a sala sobe ou desce em 90 s. Depois, a decisao da sessao (quem,
@@ -367,7 +367,7 @@ export async function saveSimulatedAudience(input: SaveSimulatedAudienceInput): 
 
     const flags = simulationAudienceFlagsOf({ joins: simulation.joins, saleNotices: simulation.saleNotices, showLiveBadge: row.show_live_badge === true });
     const responsible = getUserDisplayName(user).fullName;
-    // Sem frase nem caixa na tela (D85, 12/11/2026): o servidor monta a frase da mudanca e a grava no registro.
+    // Sem frase nem caixa na tela (D86, 12/11/2026): o servidor monta a frase da mudanca e a grava no registro.
     const ackText = clampSimulationAck(simulationAudienceAckFor({ extra: data.extra, flags, live, nowMs, responsible }));
     const atMs = started ? Math.max(0, Math.floor(clockMs)) : null;
     // Antes do comeco, a regra da sessao passa a ser a nova. No ar, a regra de antes do comeco nunca muda, menos o "Só o

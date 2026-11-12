@@ -655,7 +655,7 @@ test("o Co-apresentador no chat (docs/31 V2-A12): quem e co-apresentador do webi
   assert.equal(ok(await roomActions.sendTeamMessage({ body: "Do Apresentador", sessionId: SESSAO_NO_AR })).message.role, "host");
 
   // A resposta escrita a uma pergunta tambem leva o papel de quem responde, agora em quem assina (rodada v9: a
-  // resposta nao entra mais no chat, docs/30 D84; o papel fica em answer_author, D87).
+  // resposta nao entra mais no chat, docs/30 D85; o papel fica em answer_author, D88).
   actionStubs.role = { ...original, user: { ...original.user, id: CO, user_metadata: { full_name: "Rui Pereira" } } };
   try {
     const resposta = ok(await roomActions.answerQuestion({ answerText: "Vai, fica 7 dias.", author: { as: "self" }, questionId: pergunta.id }));
@@ -1179,7 +1179,7 @@ test("banco sem a 202611100001: responder e apagar no fio pela equipe voltam 409
   assert.equal(db.tables.notifications.length, 0);
 });
 
-test("D31 na Live ao vivo: a mensagem da equipe nasce na linha mestre (o replay toca o chat da live); a resposta escrita nao e mais mensagem do chat (rodada v9, D84); na Live gravada nao", async () => {
+test("D31 na Live ao vivo: a mensagem da equipe nasce na linha mestre (o replay toca o chat da live); a resposta escrita nao e mais mensagem do chat (rodada v9, D85); na Live gravada nao", async () => {
   const SESSAO_LIVE = "bbbbbbbb-2222-4222-8222-444444444444";
   const noAr = new Date(Date.now() - 5 * MIN).toISOString();
   const live = { ...DEFAULTS.webinar_sessions, id: SESSAO_LIVE, kind: "live", recording_id: null, scheduled_at: noAr, started_at: noAr, status: "live", webinar_id: WEBINAR };

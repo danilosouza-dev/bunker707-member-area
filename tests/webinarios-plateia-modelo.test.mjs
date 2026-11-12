@@ -177,9 +177,9 @@ test("a frase da mudanca e a da decisao com o numero novo; sem `audience`, a fra
   );
   assert.equal(ack.simulationAudienceClause(undefined), "");
 
-  // Desde 12/11/2026 (D85) a tela nao mostra a frase nem pede a caixa: o servidor a monta e grava no registro.
-  assert.equal("simulationAudienceNeedsAck" in model, false, "a caixa saiu (D85)");
-  assert.equal("simulationAudienceAckMatches" in model, false, "a conferencia da frase digitada saiu (D85)");
+  // Desde 12/11/2026 (D86) a tela nao mostra a frase nem pede a caixa: o servidor a monta e grava no registro.
+  assert.equal("simulationAudienceNeedsAck" in model, false, "a caixa saiu (D86)");
+  assert.equal("simulationAudienceAckMatches" in model, false, "a conferencia da frase digitada saiu (D86)");
   assert.ok(live.length <= 600, "cabe em simulation_ack_text");
 });
 
@@ -214,7 +214,7 @@ test("a vista do controle: a regra de agora, a rampa em curso, as mudancas mais 
   assert.deepEqual([...audience.AUDIENCE_SHORTCUTS], [50, 100, 300, 500]);
 });
 
-test("o formulario (D85, sem frase nem caixa): Aplicar direto com o numero valido e diferente do de agora; Tirar; sem permissao, encerrada ou sem a migracao, nada", () => {
+test("o formulario (D86, sem frase nem caixa): Aplicar direto com o numero valido e diferente do de agora; Tirar; sem permissao, encerrada ou sem a migracao, nada", () => {
   const base = {
     busy: false,
     canPublish: true,

@@ -6,7 +6,7 @@ import "./support/transpile-tsx.mjs";
 
 // Os participantes simulados desenhados (docs/30 D79; docs/31 §13.2; docs/18 §2.2), no Node e sem navegador: o controle
 // "Participantes simulados" (o numero somado agora, os atalhos, o Aplicar direto sem frase nem caixa desde 12/11/2026
-// (D85), o Tirar, quem mudou por ultimo, as mudancas, sem permissao sem botoes, encerrada e sem a migracao), o
+// (D86), o Tirar, quem mudou por ultimo, as mudancas, sem permissao sem botoes, encerrada e sem a migracao), o
 // selo dos presentes do topo do console que abre o controle (e o do palco, pela fiacao do console), a Presença com o
 // controle no alto, e a aba Participantes do "ver como" com a frase de que a simulacao nao aparece na previa.
 
@@ -78,7 +78,7 @@ const controle = (extra = {}) =>
     })
   );
 
-test("o controle: o numero somado agora, quem mudou por ultimo, os atalhos, Aplicar desligado so sem numero, o Tirar e as mudancas; sem frase nem caixa (D85)", () => {
+test("o controle: o numero somado agora, quem mudou por ultimo, os atalhos, Aplicar desligado so sem numero, o Tirar e as mudancas; sem frase nem caixa (D86)", () => {
   const markup = controle();
   const text = textOf(markup);
   assert.match(markup, /<h3[^>]*id="t-titulo"[^>]*tabindex="-1"[^>]*>Participantes simulados<\/h3>/, "o titulo recebe o foco do selo dos presentes");
@@ -97,7 +97,7 @@ test("o controle: o numero somado agora, quem mudou por ultimo, os atalhos, Apli
   assert.match(text, /No ar, o número sobe ou desce em linha reta em 1 min 30 s, igual para todos\./);
   assert.match(markup, /<a[^>]*data-simulation-audience-link=""[^>]*href="\/admin\/comunicacao\/webinarios\/w#webinar-card-simulacao"[^>]*>Ver no editor<\/a>/, "o atalho para o card do editor");
   assert.match(text, /Mudanças \(2\) 10:00 · \+300 · Carla Produtora antes do começo · \+100 · Ana Souza/);
-  assert.doesNotMatch(markup, /data-simulation-audience-sentence|data-simulation-audience-confirm|type="checkbox"/, "sem frase e sem caixa (decisao do produtor em 12/11/2026, D85)");
+  assert.doesNotMatch(markup, /data-simulation-audience-sentence|data-simulation-audience-confirm|type="checkbox"/, "sem frase e sem caixa (decisao do produtor em 12/11/2026, D86)");
   assert.doesNotMatch(text, /Decisão do produtor|Confirmo|Marque a confirmação/, "nenhuma frase de decisao na tela");
   assert.doesNotMatch(text, /personagem/i);
 });
@@ -127,7 +127,7 @@ test("sem permissao, com a sessao encerrada ou sem a 202611140002: o numero sem 
   }
 });
 
-test("a frase da mudanca continua a mesma conta do servidor (gravada no registro, D80), mas a tela nao a mostra nem pede a caixa (D85)", () => {
+test("a frase da mudanca continua a mesma conta do servidor (gravada no registro, D80), mas a tela nao a mostra nem pede a caixa (D86)", () => {
   const sentence = model.simulationAudienceAckFor({ extra: 500, flags: FLAGS, live: true, nowMs: NOW, responsible: "Produtora de Teste" });
   assert.match(sentence, /^Decisão do produtor em 11\/11\/2026: nesta live ao vivo, .* A partir de agora, os participantes simulados somam \+500 ao número de quem assiste\. Responsável: Produtora de Teste\.$/);
   const component = source("src/components/admin/v2/communication/webinars/simulation/simulation-audience-control.tsx");
@@ -180,7 +180,7 @@ test("a fiacao do console: o selo do palco e o do topo abrem a Presença com o c
   assert.equal(count(consoleSource, /onPresent=\{audience \? openAudience : undefined\}/g), 2, "o topo e o palco");
   assert.match(consoleSource, /setPanelView\(\{ more: "presenca" \}\);[\s\S]*?document\.getElementById\(AUDIENCE_TITLE_ID\)/);
   assert.match(consoleSource, /consoleMoreEntriesFor\(\{ audience: audience !== null,/);
-  assert.match(consoleSource, /saveSimulatedAudience\(\{ extra: input\.extra, sessionId, source: "console" \}\)/, "sem frase nem caixa no pedido (D85)");
+  assert.match(consoleSource, /saveSimulatedAudience\(\{ extra: input\.extra, sessionId, source: "console" \}\)/, "sem frase nem caixa no pedido (D86)");
   assert.match(consoleSource, /<SimulationAudienceControl[\s\S]*?link=\{\{ href: `\$\{webinarAdminHref\(webinar\.id\)\}#webinar-card-simulacao`, label: plateiaCopy\.verNoEditor \}\}[\s\S]*?titleId=\{AUDIENCE_TITLE_ID\}/);
   const presenca = consoleSource.slice(consoleSource.indexOf("presenca:"), consoleSource.indexOf("tela:", consoleSource.indexOf("presenca:")));
   assert.ok(presenca.indexOf("<SimulationAudienceControl") < presenca.indexOf("<ConsolePresencePanel"), "os participantes simulados no alto da Presença");

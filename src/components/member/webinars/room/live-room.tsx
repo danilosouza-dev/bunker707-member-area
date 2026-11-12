@@ -97,6 +97,7 @@ import { entryInRoom, useLiveRoom } from "./use-live-room";
 import { useRoomPolls } from "./use-room-polls";
 import { RoomPinnedArea, RoomPinnedPills, usePinnedFocus, type PinnedFocusTarget } from "./screen/room-pinned";
 import type { ScreenItemHandlers } from "./screen/room-screen-card";
+import { RoomScreenCommentAnnouncer, RoomScreenCommentLayer } from "./screen/room-screen-comment";
 import { RoomScreenAnnouncer, RoomScreenLayer } from "./screen/room-screen-layer";
 import { screenFocusKey, screenPlacement, screenStripForcedLive } from "./screen/room-screen-model";
 import { RoomScreenStrip } from "./screen/room-screen-strip";
@@ -106,6 +107,7 @@ import { useRoomSimulation } from "./use-room-simulation";
 import { useDeferredPolls, useRoomHydrated, useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
 import { usePanelMotion } from "./use-panel-motion";
 import { useStageGeometry } from "./use-stage-geometry";
+import { screenCommentPlace } from "@/server/webinars/screen-comment-model";
 import { leaveStageFullscreen, refocusRoom, returnFocusFromPanel, returnFocusFromPoll, roomFocusTarget, trapRoomFocus, useRoomConfirmFocus, useRoomDialogLock, useRoomReducedMotion } from "./webinar-room";
 import { roomSkeleton } from "./vertical/vertical-model";
 
@@ -672,6 +674,9 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const screenForced = screenStripForcedLive({ entry: room.entry, screen });
   const pinnedPillsOn = pinnedShortcuts && (pinnedMessage !== null || pinnedPoll !== null);
   const placement = screenPlacement({ items: screenForced ? [] : screenItems, offerShown: false, pinnedPills: !screenForced && pinnedPillsOn });
+  // O comentario ou a pergunta que a equipe trouxe para a tela (rodada v9, docs/30 D89): pelas mesmas regras da Na tela.
+  const screenComment = pinnedOn && !blocked ? naTela.comment : null;
+  const screenCommentAt = screenCommentPlace(placement.cells.map((cell) => cell.place));
   const screenEvents = useRoomScreenEvents({ enabled: !readOnly && pinnedOn, pollOver: stagePoll !== null, sessionId, webinarId });
   const sendScreenEvent = screenEvents.sendEvent;
   const closeScreenItem = naTela.closeItem;
@@ -1174,10 +1179,13 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                   topLeftExtra={blocked ? null : <RoomSimulationSales layout="cell" offsetMs={simulationOffsetMs} reducedMotion={reducedMotion} state={simulation} />}
                 />
               ) : null}
+              {/* O comentario ou a pergunta na tela (docs/30 D89): o cartao no palco de 640 px ou mais; no estreito, na faixa. */}
+              <RoomScreenCommentLayer comment={screenComment} engineBar={joined && !ourBar} forced={screenForced} place={screenCommentAt} />
               <RoomReactionBubbles bubbles={reactions.bubbles} overflow={reactions.overflow} />
-              {/* Com o painel fechado, as 2 ultimas mensagens em pilulas sobre o palco (V2-8); com um item embaixo, so no palco estreito. */}
+              {/* Com o painel fechado, as 2 ultimas mensagens em pilulas sobre o palco (V2-8); com um item embaixo ou o
+                  comentario na tela, so no palco estreito. */}
               {chatPillsShown({ blocked, design: "normal", offerShown: false, panelShown, settingsTakeover }) ? (
-                <RoomWideHidden hidden={!placement.chatPills}>
+                <RoomWideHidden hidden={!placement.chatPills || screenComment !== null}>
                   <RoomChatPills kind="live" messages={overlayMessages(translation.messages)} />
                 </RoomWideHidden>
               ) : null}
@@ -1207,6 +1215,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
           {/* O palco mais estreito (ou com uma capa): as fixadas, o banner e o QR Code em linhas logo abaixo dele, acima da barra. */}
           {pinnedOn ? (
             <RoomScreenStrip
+              comment={screenComment}
               forced={screenForced}
               handlers={screenHandlers}
               items={screenItems}
@@ -1214,6 +1223,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
             />
           ) : null}
           {pinnedOn ? <RoomScreenAnnouncer items={screenItems} /> : null}
+          {pinnedOn ? <RoomScreenCommentAnnouncer comment={screenComment} /> : null}
           {!barShown ? null : (
             <LiveControls
               allowStudentCamera={room.reply ? room.reply.settings.allowStudentCamera : null}

@@ -17,7 +17,7 @@ import {
 // As Server Actions do card Simulacao (docs/30 §2.2, §2.6, §4.3, §5.2 e §8.6; D10; docs/18 §2.2), sem banco: o banco
 // da Simulacao em memoria, a permissao por um duble (sem messaging.publish recusa o salvar com 403 e deixa ler), o nome
 // de quem decide pelo duble da sessao e "next/cache" so anotando. Aqui: ler as regras sem a semente (e o aviso da
-// 202610300003); salvar nao pede frase nem caixa desde 12/11/2026 (D85): o servidor monta a frase de hoje com o nome
+// 202610300003); salvar nao pede frase nem caixa desde 12/11/2026 (D86): o servidor monta a frase de hoje com o nome
 // de quem decide e a grava com as colunas de §4.3, quem e quando; tudo desligado grava a frase de tudo desligado; a live, o replay, a
 // encerrada e a que nao existe recusam; a auditoria leva so numeros e booleanos (dos avisos, so a contagem).
 
@@ -110,7 +110,7 @@ test("ler: as regras das sessoes gravadas do webinario sem a semente; banco sem 
   assert.equal((await actions.loadSessionSimulations({ webinarId: "nao-e-id" })).status, 400);
 });
 
-test("salvar: 403 sem messaging.publish e nada gravado; com permissao, cada regra sozinha salva direto, sem frase nem caixa (D85)", async () => {
+test("salvar: 403 sem messaging.publish e nada gravado; com permissao, cada regra sozinha salva direto, sem frase nem caixa (D86)", async () => {
   const db = usar(bancoDaSimulacao({ tables: escolaDaSimulacao(AGENDADA) }));
   estado.semPublicar = true;
   const negado = await actions.saveSessionSimulation({ ...regrasLigadas, sessionId: SESSION });
@@ -183,7 +183,7 @@ test("salvar tudo desligado: grava nulo nas regras e a frase de tudo desligado; 
   assert.deepEqual([row.simulated_count_rule, row.simulated_joins, row.simulated_sale_notices, row.show_live_badge], [null, null, null, false]);
   assert.match(row.simulation_ack_text, /fica desligado, os números de plateia são reais e os avisos de venda não aparecem\. .*Responsável: Produtora de Teste\.$/);
   assert.equal(salvo.simulation.saleNotices.enabled, false);
-  assert.equal("acknowledged" in auditorias(db)[0].metadata, false, "a auditoria nao leva mais a caixa (D85)");
+  assert.equal("acknowledged" in auditorias(db)[0].metadata, false, "a auditoria nao leva mais a caixa (D86)");
   assert.equal(auditorias(db)[0].metadata.numbers_simulated, false);
 });
 
@@ -341,7 +341,7 @@ test("revisao v8, achado 6: o card que carregou antes da mudanca feita no consol
   const semNada = { badgeOn: false, joinsSimulated: false, saleNoticesSimulated: false };
   const doConsole = model.simulationAudienceAckFor({ extra: 200, flags: semNada, nowMs: Date.now(), responsible: "Produtora de Teste" });
   ok(await actions.saveSimulatedAudience({ extra: 200, sessionId: SESSION }));
-  assert.equal(linha(db).simulation_ack_text, doConsole, "a frase da mudanca, montada pelo servidor (D85)");
+  assert.equal(linha(db).simulation_ack_text, doConsole, "a frase da mudanca, montada pelo servidor (D86)");
   const decididaNoConsole = linha(db).simulation_decided_at;
   assert.deepEqual(linha(db).simulated_count_rule, { base: 200, jitter: 0, mode: "fixed", peak: 200 });
 

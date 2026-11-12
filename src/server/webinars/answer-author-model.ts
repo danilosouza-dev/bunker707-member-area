@@ -1,4 +1,4 @@
-// "Responder como" (rodada v9, P8; docs/30 D87; 12/11/2026): quem assina a resposta da equipe a uma pergunta, a primeira
+// "Responder como" (rodada v9, P8; docs/30 D88; 12/11/2026): quem assina a resposta da equipe a uma pergunta, a primeira
 // resposta escrita (webinar_questions.answer_author) e as respostas do fio (webinar_question_replies.author_as), as
 // colunas da 202611150001. O produtor: "Quando respondo uma pergunta so aparece que quem respondeu foi a equipe, mas
 // nao tem como aparecer tambem o nome da pessoa que respondeu? ... seria bom ter a opcao de escolher se responde como a

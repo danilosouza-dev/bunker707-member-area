@@ -831,7 +831,7 @@ test("Mostrar: o banner entra com a copia congelada e o minuto, o carimbo por ul
     buttonLabel: "Quero",
     closable: true,
     image: null,
-    // O item do banco de antes da 202611150001 (sem link_target) vale "so o botao", e a copia guarda isso (docs/30 D86).
+    // O item do banco de antes da 202611150001 (sem link_target) vale "so o botao", e a copia guarda isso (docs/30 D87).
     linkTarget: "button",
     linkUrl: "https://exemplo.com/vaga",
     name: "Banner da vaga",
@@ -1277,4 +1277,170 @@ test("sem permissão: Salvar, Excluir, Enviar imagem, Mostrar e Tirar respondem 
   }
   assert.equal(db.calls.from.length, 0);
   estado.negar = false;
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Rodada v9 (P11, docs/30 D89): o comentario ou a pergunta na tela (showScreenComment, hideScreenComment)
+ * ---------------------------------------------------------------------------------------------- */
+
+const screenQueries = await import("../src/server/webinars/screen-queries.ts");
+const AVISO_V9 = WEBINAR_COPY.exportar.migracaoPendente("202611150001");
+const MSG_ALUNA = "dddddddd-0000-4000-8000-000000000a01";
+const MSG_PENDENTE = "dddddddd-0000-4000-8000-000000000a02";
+const MSG_APAGADA = "dddddddd-0000-4000-8000-000000000a03";
+const MSG_DE_OUTRA = "dddddddd-0000-4000-8000-000000000a04";
+const MSG_EQUIPE = "dddddddd-0000-4000-8000-000000000a05";
+const PERGUNTA = "dddddddd-0000-4000-8000-000000000b01";
+const PERGUNTA_DISPENSADA = "dddddddd-0000-4000-8000-000000000b02";
+const PERGUNTA_DE_OUTRA = "dddddddd-0000-4000-8000-000000000b03";
+
+/** A escola com mensagens e perguntas na sessao no ar (e uma de cada em outra sessao) e a tabela dos comentarios na tela. */
+function cenarioDoComentario() {
+  const tables = cenario();
+  const base = { ...DEFAULTS.webinar_chat_messages, author_user_id: ALUNA, created_at: iso(Date.now() - MIN), display_name: "Ana M.", offset_ms: 60_000, role: "student", session_id: SESSION, source: "audience", webinar_id: WEBINAR };
+  tables.webinar_chat_messages.push(
+    { ...base, body: "Como faz isso?", id: MSG_ALUNA },
+    { ...base, approved: false, body: "Esperando a equipe", id: MSG_PENDENTE },
+    { ...base, body: "Apagada", deleted_at: iso(Date.now()), deleted_reason: "team", id: MSG_APAGADA },
+    { ...base, body: "De outra sessão", id: MSG_DE_OUTRA, session_id: OTHER_SESSION, webinar_id: OTHER_WEBINAR },
+    { ...base, author_user_id: EQUIPE, body: "Bem-vindos!", display_name: "Produtor T.", id: MSG_EQUIPE, role: "host", source: "team" }
+  );
+  const pergunta = { ...DEFAULTS.webinar_questions, body: "Posso fazer?", created_at: iso(Date.now() - MIN), display_name: "Ana M.", offset_ms: 60_000, session_id: SESSION, updated_at: iso(Date.now()), user_id: ALUNA };
+  tables.webinar_questions.push({ ...pergunta, id: PERGUNTA }, { ...pergunta, id: PERGUNTA_DISPENSADA, status: "dismissed" }, { ...pergunta, id: PERGUNTA_DE_OUTRA, session_id: OTHER_SESSION });
+  tables.webinar_screen_comments = [];
+  tables.webinar_screen_displays = [];
+  return tables;
+}
+
+DEFAULTS.webinar_screen_comments = { hidden_at: null, hidden_by: null, hidden_offset_ms: null, hidden_reason: null, message_id: null, question_id: null, shown_offset_ms: null };
+const comentarios = (db) => db.tables.webinar_screen_comments;
+const ativos = (db, sessionId = SESSION) => comentarios(db).filter((row) => row.session_id === sessionId && row.hidden_at === null);
+
+test("Mostrar na tela: a mensagem do chat entra so com a referencia (nunca o texto), o carimbo por ultimo e a auditoria sem texto; a mesma de novo nao grava nada; outra troca (replaced); a sala le o cartao da origem", async () => {
+  const db = usar(cenarioDoComentario());
+  const antes = db.calls.writes.length;
+
+  const mostrado = ok(await screenActions.showScreenComment({ messageId: MSG_ALUNA, sessionId: SESSION }));
+  assert.deepEqual([mostrado.changed, mostrado.source, mostrado.sourceId, mostrado.replaced], [true, "chat", MSG_ALUNA, 0]);
+  assert.deepEqual(escritas(db, antes), ["update webinar_screen_comments", "insert webinar_screen_comments", "update webinar_sessions"], "tira o que estava, grava o novo e o carimbo por ultimo");
+  const [linha] = ativos(db);
+  assert.deepEqual([linha.source, linha.message_id, linha.question_id, linha.shown_by], ["chat", MSG_ALUNA, null, EQUIPE]);
+  assert.ok(Math.abs(linha.shown_offset_ms - 10 * MIN) < 10_000, "o minuto da sessao");
+  assert.doesNotMatch(JSON.stringify(linha), /Como faz isso|Ana M\./, "nem o texto nem o nome sao copiados para a exibicao");
+  const [auditoria] = audits(db, "webinar.screen_comment_shown");
+  assert.deepEqual(auditoria.metadata, { display_id: mostrado.displayId, replaced: 0, session_id: SESSION, source: "chat", source_id: MSG_ALUNA });
+  assert.doesNotMatch(JSON.stringify(auditoria), /Como faz isso/, "o texto nunca vai para a auditoria");
+  assert.ok(estado.revalidados.includes(`/admin/comunicacao/webinarios/${WEBINAR}/sala`));
+
+  // A sala le o cartao da origem: o nome que o chat mostra, o texto, sem papel (aluno) e sem foto (sem aceite em dia).
+  const cartao = await screenQueries.loadScreenComment(db, { id: SESSION, webinarId: WEBINAR }, Date.now());
+  assert.deepEqual(cartao, { avatar: "person", avatarUrl: null, body: "Como faz isso?", displayId: mostrado.displayId, name: "Ana M.", role: null, shownAt: linha.shown_at, source: "chat", sourceId: MSG_ALUNA });
+
+  // A mesma de novo: nada gravado.
+  const meio = db.calls.writes.length;
+  const deNovo = ok(await screenActions.showScreenComment({ messageId: MSG_ALUNA, sessionId: SESSION }));
+  assert.deepEqual([deNovo.changed, deNovo.displayId], [false, mostrado.displayId]);
+  assert.deepEqual(escritas(db, meio), []);
+
+  // Outra (a da equipe) entra no lugar: um por vez.
+  const outra = ok(await screenActions.showScreenComment({ messageId: MSG_EQUIPE, sessionId: SESSION }));
+  assert.deepEqual([outra.changed, outra.replaced], [true, 1]);
+  assert.equal(ativos(db).length, 1, "um comentario na tela por sessao");
+  assert.equal(comentarios(db).find((row) => row.id === mostrado.displayId).hidden_reason, "replaced");
+  const daEquipe = await screenQueries.loadScreenComment(db, { id: SESSION, webinarId: WEBINAR }, Date.now());
+  assert.deepEqual([daEquipe.name, daEquipe.role, daEquipe.body], ["Produtor T.", "host", "Bem-vindos!"], "a equipe com o selo do papel");
+});
+
+test("Mostrar na tela: a pergunta da sessao entra; a dispensada, a de outra sessao, a mensagem que espera a equipe, a apagada e a de outra sessao voltam 404 sem gravar; duas ou nenhuma origem, 400", async () => {
+  const db = usar(cenarioDoComentario());
+  const pergunta = ok(await screenActions.showScreenComment({ questionId: PERGUNTA, sessionId: SESSION }));
+  assert.deepEqual([pergunta.source, pergunta.sourceId], ["question", PERGUNTA]);
+  const [linha] = ativos(db);
+  assert.deepEqual([linha.source, linha.question_id, linha.message_id], ["question", PERGUNTA, null]);
+  const cartao = await screenQueries.loadScreenComment(db, { id: SESSION, webinarId: WEBINAR }, Date.now());
+  assert.deepEqual([cartao.source, cartao.name, cartao.body, cartao.role, cartao.avatar], ["question", "Ana M.", "Posso fazer?", null, "person"]);
+
+  const antes = db.calls.writes.length;
+  for (const [rotulo, input] of [
+    ["a pergunta dispensada (so o autor a ve)", { questionId: PERGUNTA_DISPENSADA }],
+    ["a pergunta de outra sessao", { questionId: PERGUNTA_DE_OUTRA }],
+    ["a pergunta que nao existe", { questionId: randomUUID() }],
+    ["a mensagem que espera a equipe", { messageId: MSG_PENDENTE }],
+    ["a mensagem apagada", { messageId: MSG_APAGADA }],
+    ["a mensagem de outra sessao", { messageId: MSG_DE_OUTRA }]
+  ]) {
+    const recusado = await screenActions.showScreenComment({ ...input, sessionId: SESSION });
+    assert.deepEqual([recusado.ok, recusado.status, recusado.error], [false, 404, WEBINAR_COPY.naTela.erros.comentarioSumiu], rotulo);
+  }
+  assert.equal((await screenActions.showScreenComment({ messageId: MSG_ALUNA, questionId: PERGUNTA, sessionId: SESSION })).status, 400, "as duas origens");
+  assert.equal((await screenActions.showScreenComment({ sessionId: SESSION })).status, 400, "nenhuma origem");
+  assert.deepEqual(escritas(db, antes), [], "nada gravado nas recusas");
+  assert.equal(ativos(db)[0].question_id, PERGUNTA, "a pergunta continua na tela");
+});
+
+test("Tirar da tela: o comentario sai com o motivo team, o carimbo muda e a auditoria registra; sem nada na tela, nada muda; a sala nao recebe mais o cartao", async () => {
+  const db = usar(cenarioDoComentario());
+  const vazio = ok(await screenActions.hideScreenComment({ sessionId: SESSION }));
+  assert.equal(vazio.hidden, false);
+  assert.equal(audits(db, "webinar.screen_comment_hidden").length, 0);
+
+  const mostrado = ok(await screenActions.showScreenComment({ messageId: MSG_ALUNA, sessionId: SESSION }));
+  const antes = db.calls.writes.length;
+  const tirado = ok(await screenActions.hideScreenComment({ sessionId: SESSION }));
+  assert.equal(tirado.hidden, true);
+  assert.deepEqual(escritas(db, antes), ["update webinar_screen_comments", "update webinar_sessions"]);
+  const linha = comentarios(db).find((row) => row.id === mostrado.displayId);
+  assert.deepEqual([linha.hidden_reason, linha.hidden_by, Boolean(linha.hidden_at)], ["team", EQUIPE, true]);
+  assert.deepEqual(audits(db, "webinar.screen_comment_hidden")[0].metadata, { display_id: mostrado.displayId, session_id: SESSION, source: "chat" });
+  assert.equal(await screenQueries.loadScreenComment(db, { id: SESSION, webinarId: WEBINAR }, Date.now()), null);
+});
+
+test("a origem removida sai da tela: a mensagem que a equipe apaga e a pergunta dispensada tiram o comentario na hora (motivo removed) e mudam o carimbo; a leitura nunca desenha a origem apagada", async () => {
+  const db = usar(cenarioDoComentario());
+  const mostrado = ok(await screenActions.showScreenComment({ messageId: MSG_ALUNA, sessionId: SESSION }));
+  // Um carimbo antigo de proposito: a troca nao depende de duas escritas cairem em milissegundos diferentes.
+  sessao(db).updated_at = "2026-01-01T00:00:00.000Z";
+  const carimboAntes = sessao(db).updated_at;
+  ok(await roomActions.moderateMessage({ action: "delete", messageId: MSG_ALUNA }));
+  const linha = comentarios(db).find((row) => row.id === mostrado.displayId);
+  assert.deepEqual([linha.hidden_reason, linha.hidden_by, Boolean(linha.hidden_at)], ["removed", null, true], "saiu sozinho quando a mensagem foi apagada");
+  assert.notEqual(sessao(db).updated_at, carimboAntes, "o carimbo muda: a sala ve em ate 5 s");
+  assert.equal(ativos(db).length, 0);
+
+  const daPergunta = ok(await screenActions.showScreenComment({ questionId: PERGUNTA, sessionId: SESSION }));
+  ok(await roomActions.setQuestionStatus({ questionId: PERGUNTA, status: "dismissed" }));
+  assert.equal(comentarios(db).find((row) => row.id === daPergunta.displayId).hidden_reason, "removed", "a pergunta dispensada some para a turma");
+
+  // A defesa da leitura: uma exibicao ainda ativa de uma origem apagada (outro caminho apagou) nunca e desenhada.
+  comentarios(db).push({ ...DEFAULTS.webinar_screen_comments, created_at: iso(Date.now()), id: randomUUID(), message_id: MSG_APAGADA, session_id: SESSION, shown_at: iso(Date.now()), shown_by: EQUIPE, source: "chat" });
+  assert.equal(await screenQueries.loadScreenComment(db, { id: SESSION, webinarId: WEBINAR }, Date.now()), null);
+});
+
+test("o comentario na tela: no Replay e na sessao encerrada ou cancelada, 409; sem permissao, 403 sem tocar no banco; banco sem a 202611150001, 409 com o aviso e a sala segue sem comentario", async () => {
+  const db = usar(cenarioDoComentario());
+  for (const [sessionId, frase] of [[REPLAY, WEBINAR_COPY.naTela.erros.replay], [ENCERRADA, WEBINAR_COPY.naTela.erros.sessaoFechada], [CANCELADA, WEBINAR_COPY.naTela.erros.sessaoFechada]]) {
+    const mostrar = await screenActions.showScreenComment({ messageId: MSG_ALUNA, sessionId });
+    assert.deepEqual([mostrar.status, mostrar.error], [409, frase], sessionId);
+    const tirar = await screenActions.hideScreenComment({ sessionId });
+    assert.deepEqual([tirar.status, tirar.error], [409, frase], sessionId);
+  }
+  assert.equal(comentarios(db).length, 0);
+
+  estado.negar = true;
+  const reads = db.calls.from.length;
+  assert.equal((await screenActions.showScreenComment({ messageId: MSG_ALUNA, sessionId: SESSION })).status, 403);
+  assert.equal((await screenActions.hideScreenComment({ sessionId: SESSION })).status, 403);
+  assert.equal(db.calls.from.length, reads, "sem tocar no banco");
+  estado.negar = false;
+
+  const sem = semMigracao(usar(cenarioDoComentario()), ["webinar_screen_comments"]);
+  const antes = sem.calls.writes.length;
+  const mostrar = await screenActions.showScreenComment({ messageId: MSG_ALUNA, sessionId: SESSION });
+  assert.deepEqual([mostrar.ok, mostrar.status, mostrar.error], [false, 409, AVISO_V9]);
+  const tirar = await screenActions.hideScreenComment({ sessionId: SESSION });
+  assert.deepEqual([tirar.ok, tirar.status, tirar.error], [false, 409, AVISO_V9]);
+  assert.deepEqual(escritas(sem, antes), []);
+  assert.equal(await screenQueries.loadScreenComment(sem, { id: SESSION, webinarId: WEBINAR }, Date.now()), null, "sem a tabela, a sala segue como antes");
+  // Apagar uma mensagem num banco sem a tabela continua funcionando (nao ha o que tirar da tela).
+  ok(await roomActions.moderateMessage({ action: "delete", messageId: MSG_ALUNA }));
 });

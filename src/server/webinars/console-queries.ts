@@ -55,7 +55,7 @@ import { questionVisibleAt } from "./room-rules";
 import { RECORDING_COLUMNS, recorderStatusOf, roomSettingsOfRow, sessionFromRow, type RecordingRow, type SessionBanRow, type SessionRow, type WebinarRow } from "./rows";
 import { reportViewOf } from "./report-queries";
 import { screenDisplayFromRow, screenItemFromRow } from "./screen-rows";
-import { loadScreenStats } from "./screen-queries";
+import { loadScreenComment, loadScreenStats } from "./screen-queries";
 import { loadConsoleScreenRows } from "./screen-store";
 import { simulationAudienceViewOf, type SimulationAudienceView } from "./simulation-audience-model";
 import {
@@ -592,12 +592,17 @@ async function loadConsoleScreen(db: WebinarsDb, session: WebinarSession, nowMs:
     return NO_CONSOLE_SCREEN;
   }
 
-  const rows = await loadConsoleScreenRows(db, { sessionId: session.id, webinarId: session.webinarId });
+  const [rows, comment] = await Promise.all([
+    loadConsoleScreenRows(db, { sessionId: session.id, webinarId: session.webinarId }),
+    // O comentario ou a pergunta na tela (rodada v9, docs/30 D89), como a turma ve; nulo sem nada (ou sem a 202611150001).
+    loadScreenComment(db, session, nowMs)
+  ]);
   const active = rows.active.map(screenDisplayFromRow).filter((display) => display !== null);
   const items = rows.items.map(screenItemFromRow).filter((item) => item !== null);
   const stats = !rows.pending && active.some((display) => display.kind !== "poll") ? await loadScreenStats(db, session.id, nowMs) : {};
 
-  return { active, items, pending: rows.pending, stats };
+  // So com algo na tela (sem a chave, o retrato fica como antes).
+  return { active, ...(comment ? { comment } : {}), items, pending: rows.pending, stats };
 }
 
 /** O retrato do console de uma sessao agora (com `webinar`, o bloco da Live ao vivo na sessao `live`). */
@@ -658,7 +663,7 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
         ...authors,
         ...questions.filter((question) => !question.anonymous).map((question) => question.userId),
         ...replies.filter((reply) => !reply.anonymous).map((reply) => reply.userId),
-        // Quem assinou a resposta com "Meu nome" (docs/30 D87).
+        // Quem assinou a resposta com "Meu nome" (docs/30 D88).
         ...questions.filter((question) => question.answerAuthor?.as === "self").map((question) => question.answeredBy)
       ],
       nowMs
@@ -672,7 +677,7 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
   const thread = new Map<string, QuestionReply[]>();
   for (const reply of replies) {
     const list = thread.get(reply.questionId) ?? [];
-    // Com "Equipe" ou "Outro nome" (D87) a resposta aparece no console como a turma ve: sem a foto de quem escreveu.
+    // Com "Equipe" ou "Outro nome" (D88) a resposta aparece no console como a turma ve: sem a foto de quem escreveu.
     list.push({ ...reply, avatarUrl: reply.role !== "student" && (reply.authorAs === "team" || reply.authorAs === "custom") ? null : replyPhotoUrl(reply, session.webinarId, photos, "team") });
     thread.set(reply.questionId, list);
   }

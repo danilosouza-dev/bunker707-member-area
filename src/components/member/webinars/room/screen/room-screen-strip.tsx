@@ -10,6 +10,8 @@ import { RoomPinnedRows, type RoomPinnedShortcutsProps } from "./room-pinned";
 import { RoomScreenClose, RoomScreenImage, RoomScreenLink, RoomScreenQr, RoomScreenStays, type ScreenItemHandlers } from "./room-screen-card";
 import { SCREEN_NARROW_FLEX, screenBannerAction, screenImageSrc, screenLinkOf, screenRowDetail, screenRowExpandable, screenRowTitle, screenSectionName } from "./room-screen-model";
 import { useScreenShownRef } from "./use-room-screen";
+import type { StudentScreenComment } from "@/server/webinars/screen-comment-model";
+import { RoomScreenCommentRow } from "./room-screen-comment";
 
 // A faixa da Na tela (especificacao de 10/11/2026, §3.1, §3.3, §3.4 e §3.7): fora do video, no fluxo da pagina, logo
 // abaixo do palco e acima da barra, quando o palco tem menos de 640 px (o celular de 375 px), quando a tela tem 500 px
@@ -129,6 +131,8 @@ export function RoomScreenRow({ expanded, handlers, item, onToggle }: { expanded
 }
 
 export type RoomScreenStripProps = {
+  /** O comentario ou a pergunta na tela (rodada v9, docs/30 D89): a primeira linha da faixa; nulo sem nada. */
+  comment?: StudentScreenComment | null;
   /** A capa no palco: a faixa vale tambem no palco largo (data-tela="faixa"). */
   forced: boolean;
   handlers?: ScreenItemHandlers;
@@ -139,10 +143,10 @@ export type RoomScreenStripProps = {
 };
 
 /** A faixa abaixo do palco: as fixadas e a Na tela em linhas, so com o palco estreito ou com a capa. */
-export function RoomScreenStrip({ forced, handlers, items, pinned }: RoomScreenStripProps) {
+export function RoomScreenStrip({ comment = null, forced, handlers, items, pinned }: RoomScreenStripProps) {
   const [expanded, setExpanded] = useState<string[]>([]);
   const withPinned = pinned !== null && (pinned.message !== null || pinned.poll !== null);
-  if (!withPinned && items.length === 0) {
+  if (!withPinned && items.length === 0 && !comment) {
     return null;
   }
   const open = expanded.filter((displayId) => items.some((item) => item.displayId === displayId));
@@ -153,10 +157,12 @@ export function RoomScreenStrip({ forced, handlers, items, pinned }: RoomScreenS
       <div
         className={cn(
           "flex flex-col overflow-y-auto overscroll-contain border-b border-room-border bg-room-surface lg:mt-3",
-          open.length > 0 ? "max-h-[45dvh]" : "max-h-[120px]",
+          // Com o comentario na tela a faixa guarda lugar para ele inteiro (ate 3 linhas) alem das outras linhas.
+          open.length > 0 ? "max-h-[45dvh]" : comment ? "max-h-[200px]" : "max-h-[120px]",
           forced ? null : SCREEN_NARROW_FLEX
         )}
       >
+        {comment ? <RoomScreenCommentRow comment={comment} form="strip" /> : null}
         {withPinned ? <RoomPinnedRows {...pinned} /> : null}
         {items.map((item) => (
           <RoomScreenRow
@@ -205,13 +211,17 @@ export function RoomScreenCompactRow({ form, handlers, item }: { form: Extract<S
   );
 }
 
-/** A doca da sala vertical: no maximo duas linhas compactas (o banner e o QR Code), antes da pilula da Oferta. */
-export function RoomScreenDock({ handlers, items }: { handlers?: ScreenItemHandlers; items: readonly StudentScreenItem[] }) {
-  if (items.length === 0) {
+/**
+ * A doca da sala vertical: o comentario ou a pergunta na tela (rodada v9, docs/30 D89) e no maximo duas linhas compactas
+ * (o banner e o QR Code), antes da pilula da Oferta.
+ */
+export function RoomScreenDock({ comment = null, handlers, items }: { comment?: StudentScreenComment | null; handlers?: ScreenItemHandlers; items: readonly StudentScreenItem[] }) {
+  if (items.length === 0 && !comment) {
     return null;
   }
   return (
     <div className="pointer-events-none flex min-w-0 flex-col gap-1.5" data-room-screen-dock="">
+      {comment ? <RoomScreenCommentRow comment={comment} form="vertical" /> : null}
       {items.slice(0, 2).map((item) => (
         <RoomScreenCompactRow form="vertical" handlers={handlers} item={item} key={item.displayId} />
       ))}

@@ -23,9 +23,9 @@ import { CHAT_LIMITS, QUESTION_REPLY_LIMITS, type QuestionReply, type QuestionSt
 // equipe" e com quem esta), o texto e, com a resposta escrita, a resposta como a do fio (o icone da equipe e o texto).
 // Na aberta (ou na respondida pelo Assistente em que o aluno pediu a equipe), o campo da resposta com a linha embaixo,
 // como o campo da sala, e as pilulas Responder por escrito (fica so no fio da pergunta, nunca no chat: rodada v9, P1,
-// docs/30 D84; branca, desligada sem texto), Respondida ao vivo e Dispensar; na que saiu da fila, Reabrir. Nenhuma frase
+// docs/30 D85; branca, desligada sem texto), Respondida ao vivo e Dispensar; na que saiu da fila, Reabrir. Nenhuma frase
 // escrita aqui.
-// "Responder como" (rodada v9, P8; docs/30 D87): no alto do painel, quem assina as respostas da equipe (a primeira e as
+// "Responder como" (rodada v9, P8; docs/30 D88): no alto do painel, quem assina as respostas da equipe (a primeira e as
 // do fio): Meu nome (o padrao), Equipe ou Outro nome (com o campo do nome). A escolha vem de quem usa o painel (o
 // console a guarda no navegador, useConsoleAnswerAuthor) e vai com cada resposta; com "Outro nome" sem um nome valido,
 // responder fica desligado. A resposta mostra quem assinou como a turma ve (o nome, o selo e a foto; ou so a Equipe).
@@ -52,7 +52,7 @@ type ConsoleQuestionsProps = {
   currentUserAvatarUrl?: string | null;
   /** O nome de quem esta no console, para as iniciais do avatar do campo sem a foto; sem ele, o icone da equipe. */
   currentUserName?: string | null;
-  /** "Responder como" (docs/30 D87): a escolha de agora; sem ela (o teste de tela de antes), o seletor nao aparece. */
+  /** "Responder como" (docs/30 D88): a escolha de agora; sem ela (o teste de tela de antes), o seletor nao aparece. */
   author?: AnswerAuthorChoice | null;
   onAnswer: (questionId: string, answerText: string, answeredLive: boolean, author?: AnswerAuthorChoice) => Promise<boolean>;
   /** Troca a escolha de "Responder como"; sem a prop, o seletor nao aparece. */
@@ -61,6 +61,13 @@ type ConsoleQuestionsProps = {
   onDeleteReply?: ((replyId: string) => Promise<boolean>) | null;
   /** A resposta da equipe no fio de uma pergunta respondida (devolve se gravou); sem a prop, sem o Responder. */
   onReply?: ((questionId: string, body: string, author?: AnswerAuthorChoice) => Promise<boolean>) | null;
+  /**
+   * Rodada v9 (docs/30 D89): "Mostrar na tela" em cada pergunta que a turma ve (o id) e "Tirar da tela" na que ja esta
+   * (nulo). Nula quando a sessao nao aceita a equipe ou no Replay: o botao nao aparece.
+   */
+  onScreenComment?: ((questionId: string | null) => void) | null;
+  /** A pergunta que esta na tela agora (a exibicao de origem pergunta); nula sem nenhuma. */
+  screenCommentQuestionId?: string | null;
   onStatus: (questionId: string, status: QuestionStatus) => void;
   questions: readonly WebinarQuestion[];
 };
@@ -70,7 +77,7 @@ type ConsoleQuestionsProps = {
  * Legado: linhas de antes de 10/11/2026 (D64). Na pergunta anonima antiga, "Anônima" e a mascara, como a pergunta.
  */
 function ThreadReply({ busy, canAct, onDelete, reply }: { busy: boolean; canAct: boolean; onDelete: ((replyId: string) => void) | null; reply: QuestionReply }) {
-  // "Responder como" (docs/30 D87): a resposta da equipe aparece aqui como a turma ve. Com "Equipe", so o selo e o icone
+  // "Responder como" (docs/30 D88): a resposta da equipe aparece aqui como a turma ve. Com "Equipe", so o selo e o icone
   // da equipe; com "Outro nome", o nome personalizado com o icone da equipe e sem o selo do papel.
   const staff = reply.role !== "student";
   const asTeam = staff && reply.authorAs === "team";
@@ -186,8 +193,10 @@ export function ConsoleQuestions({
   onAuthor = null,
   onDeleteReply = null,
   onReply = null,
+  onScreenComment = null,
   onStatus,
-  questions
+  questions,
+  screenCommentQuestionId = null
 }: ConsoleQuestionsProps) {
   const writer = consoleWriterAvatar(currentUserAvatarUrl, currentUserName);
   // "Responder como": sem a escolha (quem usa o painel nao a passou), a resposta vai sem assinatura, como antes.
@@ -259,6 +268,20 @@ export function ConsoleQuestions({
           // O Responder do fio: so na respondida que nao voltou para a equipe pelo "Falar com a equipe" (essa usa o campo de cima).
           const canReply = canAct && Boolean(onReply) && question.status === "answered" && !backToTeam && replies.length < QUESTION_REPLY_LIMITS.perQuestion;
           const replyOpen = canReply && replying?.id === question.id;
+          // "Mostrar na tela" (docs/30 D89): a pergunta que a turma ve (a dispensada some para ela, entao nao vai).
+          const onScreen = screenCommentQuestionId === question.id;
+          const screenButton =
+            canAct && onScreenComment && (question.status !== "dismissed" || onScreen) ? (
+              <button
+                className={roomPillClassName({ size: "s", tone: onScreen ? "tonal" : "text" })}
+                data-console-screen-comment={onScreen ? "hide" : "show"}
+                disabled={busy}
+                onClick={() => onScreenComment(onScreen ? null : question.id)}
+                type="button"
+              >
+                {onScreen ? WEBINAR_COPY.naTela.console.tirarDaTela : WEBINAR_COPY.naTela.console.mostrarNaTela}
+              </button>
+            ) : null;
 
           return (
             <li
@@ -285,10 +308,15 @@ export function ConsoleQuestions({
                   {mark?.handoffRequested ? <Chip tone="warning">{WEBINAR_COPY.assistente.console.pediuEquipe}</Chip> : null}
                   {mark?.assignedName && question.status === "open" ? <Chip tone="success">{WEBINAR_COPY.assistente.console.assumida(mark.assignedName)}</Chip> : null}
                   {awaitsTeam ? <Chip tone="warning">{copy.newReply}</Chip> : null}
+                  {onScreen ? (
+                    <span data-console-question-on-screen="">
+                      <Chip tone="success">{WEBINAR_COPY.naTela.console.seloComentarioNaTela}</Chip>
+                    </span>
+                  ) : null}
                 </div>
                 <p className="mt-1 text-sm leading-5 break-words whitespace-pre-wrap text-room-fg">{question.body}</p>
                 {question.answerText ? (
-                  // Quem assinou (docs/30 D87), como a turma ve: com "Meu nome", a foto, o nome e o selo do papel; com
+                  // Quem assinou (docs/30 D88), como a turma ve: com "Meu nome", a foto, o nome e o selo do papel; com
                   // "Outro nome", o nome; com "Equipe" (e a resposta de antes), so o icone da equipe.
                   <div className="mt-3 flex min-w-0 gap-3" data-console-answer="" data-console-answer-as={mark?.answerSource === "ai" ? undefined : (question.answerAuthor?.as ?? "team")}>
                     {mark?.answerSource !== "ai" && question.answerAuthor?.as === "self" ? (
@@ -362,6 +390,7 @@ export function ConsoleQuestions({
                       <button className={roomPillClassName({ size: "s", tone: "text" })} disabled={busy} onClick={() => onStatus(question.id, "dismissed")} type="button">
                         {copy.dismiss}
                       </button>
+                      {screenButton}
                     </div>
                   </div>
                 ) : null}
@@ -381,6 +410,7 @@ export function ConsoleQuestions({
                     <button className={roomPillClassName({ className: canReply && !replyOpen ? undefined : "-ml-3", size: "s", tone: "text" })} disabled={busy} onClick={() => onStatus(question.id, "open")} type="button">
                       {copy.reopen}
                     </button>
+                    {screenButton}
                   </div>
                 ) : null}
               </div>

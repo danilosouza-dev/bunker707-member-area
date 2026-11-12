@@ -70,7 +70,7 @@ test.describe("aluna e produtor", () => {
 
     await controle.getByRole("button", { exact: true, name: PLATEIA.atalhoRotulo(300) }).click();
     await expect(controle.getByLabel(PLATEIA.campo, { exact: true })).toHaveValue("300");
-    // Sem frase nem caixa (decisao do produtor em 12/11/2026, docs/30 D85): com o numero no campo, o Aplicar ja liga.
+    // Sem frase nem caixa (decisao do produtor em 12/11/2026, docs/30 D86): com o numero no campo, o Aplicar ja liga.
     const aplicar = controle.getByRole("button", { exact: true, name: PLATEIA.aplicar });
     await expect(controle.locator("[data-simulation-audience-sentence]")).toHaveCount(0);
     await expect(controle.getByRole("checkbox")).toHaveCount(0);

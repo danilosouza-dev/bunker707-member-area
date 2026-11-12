@@ -29,7 +29,7 @@ import { SimulationRulesFields } from "./simulation-rules-fields";
 
 // Uma sessao gravada no card Simulacao (docs/30 §2.2, §4.3 e §8.6; D10): a data, o selo "Ao vivo", os tres blocos da
 // fase 4 (contador, entradas e saidas, avisos de venda; simulation-rules-fields.tsx), o Salvar direto quando algo
-// mudou (sem frase nem caixa desde 12/11/2026, decisao do produtor, docs/30 D85), quem decidiu e quando e o que a
+// mudou (sem frase nem caixa desde 12/11/2026, decisao do produtor, docs/30 D86), quem decidiu e quando e o que a
 // sessao mostrou (congelado no fim). Salva tudo de uma vez por saveSessionSimulation (o servidor monta a frase da
 // decisao e grava quem e quando). Banco sem a 202610300003 ("v2"): so o selo, como na fase 2 (saveSimulation, que
 // ainda recebe a frase: o card a manda sem mostrar).

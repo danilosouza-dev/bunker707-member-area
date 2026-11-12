@@ -171,7 +171,7 @@ export function storedAnswerAuthor(raw: string | null): AnswerAuthorChoice {
 }
 
 /**
- * "Responder como" do console (rodada v9, docs/30 D87): Meu nome (o padrao), Equipe ou Outro nome, lembrado no navegador
+ * "Responder como" do console (rodada v9, docs/30 D88): Meu nome (o padrao), Equipe ou Outro nome, lembrado no navegador
  * de quem responde para a proxima resposta e a proxima live.
  */
 export function useConsoleAnswerAuthor(): [AnswerAuthorChoice, (choice: AnswerAuthorChoice) => void] {

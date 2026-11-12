@@ -23,7 +23,7 @@ import { adminInputClass } from "../../../form";
 // card Simulacao do editor depois do comeco: o numero somado agora ("+300"), a sala chegando nele durante a rampa de
 // 90 s, quem mudou por ultimo e quando, o campo "Somar à plateia" com os atalhos (+50, +100, +300, +500: o campo fica
 // com o numero), o Aplicar direto e o Tirar (volta a +0). Sem frase nem caixa desde 12/11/2026 (decisao do produtor,
-// docs/30 D85): o servidor grava sozinho a frase da mudanca no registro (quem, quando e o numero). Sem permissao
+// docs/30 D86): o servidor grava sozinho a frase da mudanca no registro (quem, quando e o numero). Sem permissao
 // (messaging.publish), com a sessao encerrada ou sem a 202611140002, o numero sem os botoes e a frase do motivo. As
 // mudancas ficam num <details> com a hora, o +N e quem. O link leva ao outro lado (o console leva ao card do editor; o
 // card, ao console). Quem usa faz o pedido (`onApply`) e diz se deu certo (o formulario volta ao vazio). Nenhuma frase

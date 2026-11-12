@@ -5,6 +5,7 @@
 // imports relativos: tests/webinarios-console-modelo.test.mjs carrega direto pelo Node. Nada aqui le o relogio:
 // tudo recebe `nowMs`.
 
+import type { StudentScreenComment } from "./screen-comment-model";
 import { chatRoleLabel, chatTimeAt, chatTimeLabel, roleBadgeOnly } from "../../lib/webinar-room-client";
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { saoPauloDate } from "../../lib/webinar-time";
@@ -495,6 +496,11 @@ export type ConsolePollView = Poll & { counts: PollCounts };
  */
 export type ConsoleScreen = {
   active: ScreenDisplay[];
+  /**
+   * O comentario ou a pergunta que esta na tela (rodada v9, docs/30 D89), como a turma ve; nulo sem nada. Opcional: o
+   * retrato montado por quem ainda nao conhece o campo (os testes de tela de antes) vale como sem comentario.
+   */
+  comment?: StudentScreenComment | null;
   items: ScreenItem[];
   pending: boolean;
   stats: Record<string, ScreenStats>;

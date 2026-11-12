@@ -20,6 +20,7 @@
 import { NA_TELA_COPY } from "../../lib/webinar-copy-v4/na-tela";
 import { linkDomain, safeHttpsUrl } from "../../lib/webinar-links";
 import type { StudentChatMessage, WebinarSession } from "./model";
+import type { StudentScreenComment } from "./screen-comment-model";
 
 /* ------------------------------------------------------------------------------------------------
  * Listas e limites (os checks da 202611100002)
@@ -41,7 +42,7 @@ export const SCREEN_SIZES = ["s", "m", "l"] as const;
 export type ScreenSize = (typeof SCREEN_SIZES)[number];
 
 /**
- * O que abre o link do banner (rodada v9, P3; docs/30 D86; webinar_screen_items.link_target, 202611150001): a imagem e
+ * O que abre o link do banner (rodada v9, P3; docs/30 D87; webinar_screen_items.link_target, 202611150001): a imagem e
  * o botao (o padrao), so o botao ou so a imagem. "A imagem" e o banner em si (a imagem, o titulo e o texto). Sem texto
  * do botao, o banner inteiro abre o link, qualquer que seja a escolha; no QR Code nao vale nada.
  */
@@ -336,7 +337,7 @@ export type ScreenItem = {
   id: string;
   image: ScreenImage | null;
   kind: ScreenKind;
-  /** O que abre o link do banner (D86); no QR Code, sempre "both". */
+  /** O que abre o link do banner (D87); no QR Code, sempre "both". */
   linkTarget: ScreenLinkTarget;
   linkUrl: string | null;
   name: string;
@@ -353,7 +354,7 @@ export type ScreenSnapshot = {
   buttonLabel: string | null;
   closable: boolean;
   image: ScreenImage | null;
-  /** O que abre o link (D86). Ausente na copia gravada antes da 202611150001: so o botao, como a turma viu. */
+  /** O que abre o link (D87). Ausente na copia gravada antes da 202611150001: so o botao, como a turma viu. */
   linkTarget?: ScreenLinkTarget;
   linkUrl: string | null;
   name: string;
@@ -470,7 +471,7 @@ export type StudentScreenItem = {
   displayId: string;
   image: { alt: string; height: number; url: string; width: number } | null;
   kind: ScreenKind;
-  /** O que abre o link do banner (D86). Ausente no servidor de antes: so o botao. */
+  /** O que abre o link do banner (D87). Ausente no servidor de antes: so o botao. */
   linkTarget?: ScreenLinkTarget;
   linkUrl: string | null;
   place: ScreenPlace;
@@ -489,6 +490,11 @@ export type StudentScreenItem = {
  * seguinte (ate 90 s) nem na espera de 5 min sem nada ligado. Opaco e curto; nunca as regras nem a semente.
  */
 export type StudentScreenState = {
+  /**
+   * O comentario ou a pergunta que a equipe trouxe para a tela (rodada v9, docs/30 D89); ausente sem nada na tela (o
+   * servidor de antes nunca manda a chave).
+   */
+  comment?: StudentScreenComment | null;
   items: StudentScreenItem[];
   pinned: StudentChatMessage | null;
   pinnedPollId: string | null;

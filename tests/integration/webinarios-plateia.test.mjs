@@ -12,7 +12,7 @@ import { LIVE_AO_VIVO_DE_TESTE, limparWebinarios, seedEscolaDeTeste, seedLiveAoV
 //   onde), a decisao da sessao passa a ser a frase dela e a consulta de 5 s do chat leva a sala o resumo novo da decisao
 //   (simulationKey); a janela da Simulacao pela rota devolve +300 depois da rampa de 90 s; o retrato do console traz o
 //   controle com o numero de agora e quem mudou;
-// - sem messaging.publish, recusa (403); nada gravado (a frase e a caixa sairam da tela em 12/11/2026, D85: o servidor
+// - sem messaging.publish, recusa (403); nada gravado (a frase e a caixa sairam da tela em 12/11/2026, D86: o servidor
 //   grava a frase sozinho);
 // - depois do Encerrar live, recusa (409); o tick do resumo junta os trechos de cada regra (o maior numero que a turma
 //   viu, igual a conta do modelo com as linhas do banco) e o relatorio da live lista as mudancas.

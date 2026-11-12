@@ -356,7 +356,7 @@ export function screenImageSrc(url: string | null | undefined): string | null {
 }
 
 /**
- * O que o banner faz com o link (rodada v9, P3; docs/30 D86): "both" (o banner e o botao abrem o link), "button" (so o
+ * O que o banner faz com o link (rodada v9, P3; docs/30 D87): "both" (o banner e o botao abrem o link), "button" (so o
  * botao), "card" (o banner inteiro: sem texto do botao, ou com "Só a imagem") ou "none" (sem link). Sem `linkTarget` (o
  * servidor de antes), so o botao, como era.
  */

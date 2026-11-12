@@ -27,7 +27,7 @@ import { PERSONA_AVATAR_LIMITS, PERSONA_AVATAR_PATH_PATTERN, personaCleanName, p
 
 export const CHAT_MESSAGES = {
   answer: "A resposta pode ter até 1.000 caracteres.",
-  /** Rodada v9 (docs/30 D87): o nome de "Responder como › Outro nome". */
+  /** Rodada v9 (docs/30 D88): o nome de "Responder como › Outro nome". */
   authorName: `Escreva o nome que aparece na resposta (de ${ANSWER_AUTHOR_LIMITS.nameMin} a ${ANSWER_AUTHOR_LIMITS.nameMax} caracteres).`,
   body: "Escreva a mensagem.",
   bodyTooLong: "A mensagem pode ter até 1.000 caracteres.",
@@ -372,7 +372,7 @@ export const launchPollSchema = z.object({ pin: z.boolean().default(false), poll
 export const closePollSchema = z.object({ pollId: uuidSchema, sessionId: sessionIdSchema, shareResults: z.boolean().default(false) });
 
 /**
- * "Responder como" (rodada v9, docs/30 D87): o modo e, em "Outro nome", o nome. Ausente (a pagina de antes): quem chama
+ * "Responder como" (rodada v9, docs/30 D88): o modo e, em "Outro nome", o nome. Ausente (a pagina de antes): quem chama
  * usa o padrao de sempre (a primeira resposta como "Equipe"; a do fio com o nome de quem escreve).
  */
 const answerAuthorChoiceSchema = z

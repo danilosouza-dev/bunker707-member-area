@@ -77,7 +77,7 @@ const SAIU = "eeeeeeee-0000-4000-8000-000000000004";
 const ENQUETE = "eeeeeeee-0000-4000-8000-000000000010";
 const MENSAGEM = "eeeeeeee-0000-4000-8000-000000000020";
 /** As tabelas da Na tela (as que so ela le). */
-const TABELAS_DA_TELA = ["webinar_screen_displays", "webinar_polls"];
+const TABELAS_DA_TELA = ["webinar_screen_displays", "webinar_polls", "webinar_screen_comments"];
 let proximoAluno = 300;
 
 function novoAluno() {
@@ -200,10 +200,12 @@ test("chat com outro carimbo: o estado inteiro em 3 leituras pequenas; o segundo
   assert.equal(screen.pinnedPollId, ENQUETE);
   assert.equal(screen.pollsKey, screenModel.pollsKeyOf([{ id: ENQUETE, resultsShared: false, status: "open" }]));
   assert.deepEqual([screen.pinned.id, screen.pinned.body, screen.pinned.links, screen.pinned.mine, screen.pinned.role], [MENSAGEM, "Material em https://bunker707.com.br/apostila.", true, false, "team"]);
-  // As leituras a mais: as exibicoes ativas, a fixada pela chave e as enquetes da sessao (uma vez cada).
+  // As leituras a mais: as exibicoes ativas, a fixada pela chave, as enquetes da sessao e, desde a rodada v9 (docs/30
+  // D89), o comentario que esta na tela (uma vez cada; sem comentario, e so a linha ativa que nao existe).
   const extras = velho.calls.length - sem.calls.length;
-  assert.equal(extras, 3, `3 leituras a mais (${velho.calls.join(", ")})`);
-  assert.deepEqual(daTela(velho.calls).sort(), ["webinar_polls", "webinar_screen_displays"]);
+  assert.equal(extras, 4, `4 leituras a mais (${velho.calls.join(", ")})`);
+  assert.deepEqual(daTela(velho.calls).sort(), ["webinar_polls", "webinar_screen_comments", "webinar_screen_displays"]);
+  assert.equal("comment" in screen, false, "sem comentario na tela, o estado nao leva a chave");
   assert.ok(db.calls.reads.some((read) => read.table === "webinar_screen_displays" && read.filters.some(([op, column, value]) => op === "is" && column === "hidden_at" && value === null)), "so as ativas, pelo indice unico");
 
   // O segundo aluno com o carimbo velho: o mesmo estado, da memoria do processo (nenhuma leitura da Na tela).
@@ -226,7 +228,7 @@ test("o carimbo novo (a equipe tirou da tela e atualizou a sessao): a consulta s
   const comOAntigo = await consultar(db, { tela: primeiro.screen.stamp });
   assert.equal(comOAntigo.screen.stamp, carimbo(db));
   assert.deepEqual(comOAntigo.screen.items.map((item) => item.kind), ["qr"], "o banner saiu");
-  assert.deepEqual(daTela(comOAntigo.calls).sort(), ["webinar_polls", "webinar_screen_displays"], "o carimbo novo releu");
+  assert.deepEqual(daTela(comOAntigo.calls).sort(), ["webinar_polls", "webinar_screen_comments", "webinar_screen_displays"], "o carimbo novo releu");
   const emDia = await consultar(db, { tela: comOAntigo.screen.stamp });
   assert.equal(emDia.screen, null);
 });

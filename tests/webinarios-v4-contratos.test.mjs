@@ -138,7 +138,7 @@ test("os schemas zod da fase 4 aceitam o certo e recusam o errado com a frase ce
   const duplicated = offerSchemas.offerDraftSchema.safeParse({ productId: "formacao", status: "active", triggerKind: "manual", variants: [variant, variant] });
   assert.ok(duplicated.error.issues.some((issue) => issue.message === offerSchemas.OFFER_MESSAGES.labelsUnique));
   const simulation = simulationSchemas.saveSessionSimulationSchema.safeParse({ joins: { enabled: true }, sessionId: SESSION });
-  assert.ok(simulation.success, "entradas simuladas salvam sem a caixa (D85, 12/11/2026)");
+  assert.ok(simulation.success, "entradas simuladas salvam sem a caixa (D86, 12/11/2026)");
   assert.equal("acknowledged" in simulation.data || "ackText" in simulation.data, false, "a frase e a caixa nao fazem mais parte do pedido");
   assert.ok(simulationSchemas.saveSessionSimulationSchema.safeParse({ sessionId: SESSION }).success, "tudo desligado tambem");
   assert.ok(!simulationSchemas.saveSessionSimulationSchema.safeParse({ joins: { enabled: true } }).success, "sem a sessao, recusa");

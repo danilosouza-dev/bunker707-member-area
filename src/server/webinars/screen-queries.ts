@@ -34,13 +34,16 @@ import { cleanEnvValue } from "../../lib/env-value";
 import type { StudentEventInsert } from "../students/store";
 import { loadAuthorPhotos } from "./author-photos";
 import { personaAvatarUrl } from "./persona-model";
-import { loadScriptedMessageAvatars } from "./persona-store";
-import { chatMessageFromRow } from "./chat-rows";
+import { loadScriptedMessageAvatars, loadScriptedQuestionAvatars } from "./persona-store";
+import { chatMessageFromRow, questionFromRow } from "./chat-rows";
 import { CHAT_MESSAGES } from "./chat-schemas";
-import { fetchPinnedMessageRow } from "./chat-store";
+import { fetchChatMessageRow, fetchPinnedMessageRow, fetchQuestionRow } from "./chat-store";
 import { WebinarError, type WebinarsDb } from "./db";
 import type { ChatMessage, WebinarSession } from "./model";
 import { authorPhotoUrl, sessionOffsetMs, toStudentMessage } from "./room-model";
+import { questionVisibleAt } from "./room-rules";
+import { messageBelongsToSession, screenCommentOfMessage, screenCommentOfQuestion, type StudentScreenComment } from "./screen-comment-model";
+import { fetchActiveScreenCommentRow, screenCommentFromRow } from "./screen-comment-store";
 import {
   SCREEN_EVENT_TYPES,
   SCREEN_KINDS,
@@ -65,6 +68,8 @@ export const SCREEN_STATE_CACHE_MAX = 500;
 
 /** A parte do estado que e igual para todos os alunos da sessao. */
 type SharedScreen = {
+  /** O comentario ou a pergunta na tela (docs/30 D89): igual para todos (o cartao nao diz "Você"). */
+  comment: StudentScreenComment | null;
   items: StudentScreenItem[];
   pinned: { avatarUrl: string | null; message: ChatMessage } | null;
   pinnedPollId: string | null;
@@ -102,11 +107,90 @@ function remember(sessionId: string, entry: Entry) {
 
 const KIND_ORDER = new Map<string, number>(SCREEN_KINDS.map((kind, index) => [kind, index]));
 
+/**
+ * O comentario ou a pergunta que esta na tela, lido da origem (docs/30 D89): a exibicao guarda so a referencia, entao a
+ * mensagem apagada, a que voltou a esperar a equipe, a de outra sessao e a pergunta apagada ou dispensada nao aparecem
+ * (nulo). A foto pela regra da turma (authorPhotoUrl, viewer "student": a da equipe sempre, a do aluno com o aceite em
+ * dia, a da pessoa que comenta no roteiro). Uma leitura a mais so com algo na tela; sem a 202611150001, nada.
+ */
+export async function loadScreenComment(db: WebinarsDb, session: Pick<WebinarSession, "id" | "webinarId">, nowMs: number): Promise<StudentScreenComment | null> {
+  const row = await fetchActiveScreenCommentRow(db, session.id);
+  const display = row ? screenCommentFromRow(row) : null;
+
+  if (!display) {
+    return null;
+  }
+
+  if (display.source === "chat") {
+    const messageRow = display.messageId ? await fetchChatMessageRow(db, display.messageId) : null;
+
+    if (!messageRow || messageRow.deleted_at) {
+      return null;
+    }
+
+    const message = chatMessageFromRow(messageRow);
+
+    if (!messageBelongsToSession(message, session)) {
+      return null;
+    }
+
+    const [photos, personas] = await Promise.all([
+      loadAuthorPhotos(db, [message.authorUserId], nowMs),
+      message.source === "scripted" ? loadScriptedMessageAvatars(db, [message.id], nowMs) : Promise.resolve(new Map<string, string>())
+    ]);
+
+    return screenCommentOfMessage(
+      display,
+      message,
+      authorPhotoUrl({
+        authorUserId: message.authorUserId,
+        displayName: message.displayName,
+        personaAvatarUrl: personaAvatarUrl(personas.get(message.id), screenStorageOrigin()),
+        photo: message.authorUserId ? photos.get(message.authorUserId) : null,
+        source: message.source,
+        viewer: "student",
+        webinarId: message.webinarId
+      })
+    );
+  }
+
+  const questionRow = display.questionId ? await fetchQuestionRow(db, display.questionId) : null;
+
+  if (!questionRow || questionRow.deleted_at) {
+    return null;
+  }
+
+  const question = questionFromRow(questionRow);
+
+  if (question.sessionId !== session.id || !questionVisibleAt(question, nowMs)) {
+    return null;
+  }
+
+  const [photos, personas] = await Promise.all([
+    loadAuthorPhotos(db, [question.userId], nowMs),
+    question.simulated ? loadScriptedQuestionAvatars(db, [question.id], nowMs) : Promise.resolve(new Map<string, string>())
+  ]);
+  const avatarUrl = question.simulated
+    ? authorPhotoUrl({ authorUserId: null, displayName: question.displayName, personaAvatarUrl: personaAvatarUrl(personas.get(question.id), screenStorageOrigin()), photo: null, source: "scripted", viewer: "student", webinarId: session.webinarId })
+    : authorPhotoUrl({
+        anonymous: question.anonymous,
+        authorUserId: question.userId,
+        displayName: question.displayName,
+        photo: question.userId ? photos.get(question.userId) : null,
+        source: "audience",
+        viewer: "student",
+        webinarId: session.webinarId
+      });
+
+  return screenCommentOfQuestion(display, question, avatarUrl);
+}
+
 async function buildSharedScreen(db: WebinarsDb, session: WebinarSession, nowMs: number): Promise<SharedScreen> {
-  const [displayRows, pinnedRow, pollRows] = await Promise.all([
+  const [displayRows, pinnedRow, pollRows, comment] = await Promise.all([
     listActiveScreenDisplayRows(db, session.id),
     fetchPinnedMessageRow(db, session.pinnedMessageId),
-    listSessionPollKeyRows(db, session.id)
+    listSessionPollKeyRows(db, session.id),
+    loadScreenComment(db, session, nowMs)
   ]);
   const origin = screenStorageOrigin();
   const displays = displayRows.map(screenDisplayFromRow).filter((display) => display !== null);
@@ -138,6 +222,7 @@ async function buildSharedScreen(db: WebinarsDb, session: WebinarSession, nowMs:
   }
 
   return {
+    comment,
     items,
     pinned,
     pinnedPollId: displays.find((display) => display.kind === "poll" && display.hiddenAt === null)?.pollId ?? null,
@@ -150,6 +235,8 @@ async function buildSharedScreen(db: WebinarsDb, session: WebinarSession, nowMs:
 /** O estado de um aluno a partir da parte comum: so o `mine` da fixada muda de aluno para aluno. */
 function screenStateFor(shared: SharedScreen, viewerUserId: string, sessionKind: WebinarSession["kind"]): StudentScreenState {
   return {
+    // So com algo na tela (sem a chave, o estado fica como antes: a sala trata a falta como sem comentario).
+    ...(shared.comment ? { comment: shared.comment } : {}),
     items: shared.items,
     pinned: shared.pinned ? toStudentMessage(shared.pinned.message, viewerUserId, sessionKind, shared.pinned.message.offsetMs, shared.pinned.avatarUrl) : null,
     pinnedPollId: shared.pinnedPollId,

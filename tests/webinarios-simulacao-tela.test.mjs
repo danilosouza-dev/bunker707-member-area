@@ -5,7 +5,7 @@ import "./support/transpile-tsx.mjs";
 
 // A Simulacao desenhada (docs/30 §1.6, §1.7, §2.2, §4.3 e §8.6; D10; docs/18 §2.2), no Node e sem navegador: o card do
 // editor com os tres blocos por sessao gravada (Contador de plateia, Entradas e saidas, Notificacoes de venda), o aviso
-// do CDC, o Salvar direto so quando algo mudou (sem frase nem caixa desde 12/11/2026, D85), a sessao encerrada so para ler com o que mostrou, o banco
+// do CDC, o Salvar direto so quando algo mudou (sem frase nem caixa desde 12/11/2026, D86), a sessao encerrada so para ler com o que mostrou, o banco
 // sem a 202610300003 (o aviso da migracao e o selo da fase 2) e o card lendo as regras; o formulario puro (erros em
 // portugues, minutos dos avisos, mudanca, limite de 50); e a sala: o contador somado ao real no cabecalho, a entrada
 // "Ana M. entrou" no chat por 8 s, o aviso de venda num toast de 4 s (no topo na sala vertical), o leitor de tela no
@@ -160,8 +160,8 @@ test("card: o aviso do CDC, os tres blocos por sessao gravada com o que esta gra
   assert.match(text, /Desligadas por padrão\./);
   assert.match(text, /Soma de \+20 a \+180/);
   assert.equal(count(markup, /role="switch"/g), 2, "o selo de cada sessao");
-  assert.doesNotMatch(text, /Salvar simulação|Confirmo a decisão/, "o Salvar so aparece quando algo muda; a caixa nao existe mais (D85)");
-  assert.doesNotMatch(text, /Decisão do produtor em/, "a frase gravada nao aparece mais no card (D85); fica quem decidiu e quando");
+  assert.doesNotMatch(text, /Salvar simulação|Confirmo a decisão/, "o Salvar so aparece quando algo muda; a caixa nao existe mais (D86)");
+  assert.doesNotMatch(text, /Decisão do produtor em/, "a frase gravada nao aparece mais no card (D86); fica quem decidiu e quando");
   assert.match(text, /Sessão encerrada: a decisão fica registrada como estava\./);
   assert.match(text, /Nesta sessão: contador com até \+183, 0 entradas e 0 avisos de venda\./);
   assert.match(text, /Decisão de Produtora de Teste em 03\/11\/2026 às 09:00\./);
@@ -172,7 +172,7 @@ test("card: o aviso do CDC, os tres blocos por sessao gravada com o que esta gra
   assert.match(soEscreve, /Só quem publica na Comunicação decide o selo\./);
 });
 
-test("card (D85, decisao do produtor em 12/11/2026): uma mudanca pendente mostra so Salvar simulacao, ligado de primeira, e Descartar; sem frase nem caixa", () => {
+test("card (D86, decisao do produtor em 12/11/2026): uma mudanca pendente mostra so Salvar simulacao, ligado de primeira, e Descartar; sem frase nem caixa", () => {
   const saved = simulations.simulations[0];
   const initialForm = { ...form.simulationFormOf(saved, false), countMode: "curve", base: "30", jitter: "4", peak: "250", showLiveBadge: true };
   const markup = html(
@@ -367,7 +367,7 @@ test("R7 card na Live ao vivo: o aviso do CDC da live, 'Live de ...' sem o selo 
   assert.equal(count(semMigracao, /data-simulation-session=/g), 0, "sem a Simulacao completa, a live nao tem o que decidir");
 });
 
-test("R7 card na Live ao vivo: a mudanca mostra o Salvar direto (a frase da live e so do servidor, D85); a live ja comecada fica so para ler", () => {
+test("R7 card na Live ao vivo: a mudanca mostra o Salvar direto (a frase da live e so do servidor, D86); a live ja comecada fica so para ler", () => {
   const saved = simulations.simulations[0];
   const initialForm = { ...form.simulationFormOf(saved, false), base: "300", countMode: "fixed" };
   const row = (extra) =>
@@ -392,7 +392,7 @@ test("R7 card na Live ao vivo: a mudanca mostra o Salvar direto (a frase da live
   const text = textOf(row({}));
   const frase = model.simulationAckFor({ live: true, nowMs: NOW, responsible: "Produtora de Teste", rules: form.simulationRulesOfForm(initialForm).rules });
   assert.equal(frase, "Decisão do produtor em 05/11/2026: nesta live ao vivo, dentro da área de membros, os números de plateia são simulados e os avisos de venda são simulados. Responsável: Produtora de Teste.");
-  assert.ok(!text.includes(frase), "a frase nao aparece na tela (D85)");
+  assert.ok(!text.includes(frase), "a frase nao aparece na tela (D86)");
   assert.equal(form.simulationFormSentence(initialForm, { live: true, nowMs: NOW, responsible: "Produtora de Teste" }), frase);
   assert.doesNotMatch(text, /Confirmo a decisão/);
   assert.match(text, /Salvar simulação/);

@@ -77,7 +77,7 @@ export const loadAssistantEditor = fail; export const saveAssistant = fail; expo
   "@/server/webinars/translation-actions": `${fail}
 export const clearMessageTranslations = fail;`,
   "@/server/webinars/screen-actions": `${fail}
-export const saveScreenItem = fail; export const archiveScreenItem = fail; export const uploadScreenImage = fail; export const showScreenItem = fail; export const hideScreenItem = fail;`,
+export const saveScreenItem = fail; export const archiveScreenItem = fail; export const uploadScreenImage = fail; export const showScreenItem = fail; export const hideScreenItem = fail; export const showScreenComment = fail; export const hideScreenComment = fail;`,
   "@/server/webinars/room-actions": `${fail}
 export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const pinPoll = fail; export const unpinPoll = fail; export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;
 export const createConsolePoll = fail;`
@@ -532,7 +532,9 @@ test("Mãos e Pessoas (docs/31 V2-15): as abas com o numero (Mãos 0), vazias, o
   }
   assert.doesNotMatch(textOf(chat), new RegExp(`${escape(copy.destacar)}|${escape(copy.convidarPalco)}|${escape(copy.fecharCamera)}`), "sem os itens da sala");
   const equipe = chatItem(markup, "m-equipe");
-  assert.doesNotMatch(equipe, /Mais ações/, "a equipe nao tem o ⋯ de moderacao");
+  // Desde a rodada v9 (docs/30 D89) a mensagem da equipe tem o ⋯ so com o "Mostrar na tela"; nunca os itens de moderacao.
+  assert.match(equipe, /Mais ações/);
+  assert.doesNotMatch(textOf(equipe), new RegExp(`Silenciar|${escape(copy.removerDaSala)}|${escape(copy.banir)}`), "a equipe nao tem os itens de moderacao");
 
   const semPublicar = render(snapshot(), { permissions: { canPublish: false, canWrite: true } });
   const banir = chatItem(semPublicar, "m-ana");

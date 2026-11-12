@@ -624,7 +624,7 @@ export function clearV9ColumnsMemory() {
 }
 
 /**
- * Le com a coluna da 202611150001 (quem assina a resposta, docs/30 D87). No banco sem a coluna, de novo so com a lista
+ * Le com a coluna da 202611150001 (quem assina a resposta, docs/30 D88). No banco sem a coluna, de novo so com a lista
  * de sempre (a resposta aparece como "Equipe", como antes) e, por 1 min, direto com ela.
  */
 async function withV9Columns<C extends string, T>(table: keyof typeof v9ColumnsBaseUntil, base: C, extended: string, read: (columns: C) => Promise<T>): Promise<T> {
@@ -709,7 +709,7 @@ export async function countQuestionReplyRows(db: WebinarsDb, questionId: string)
 }
 
 /**
- * `author_as` (202611150001, docs/30 D87) so vai na linha quando a equipe escolheu como aparecer: sem a chave (o aluno,
+ * `author_as` (202611150001, docs/30 D88) so vai na linha quando a equipe escolheu como aparecer: sem a chave (o aluno,
  * a resposta de antes), a escrita nao depende da coluna.
  */
 export type QuestionReplyInsert = Pick<QuestionReplyRow, "anonymous" | "body" | "display_name" | "question_id" | "role" | "session_id" | "user_id"> & { author_as?: string };
@@ -751,7 +751,7 @@ export async function updateQuestionRow(db: WebinarsDb, id: string, patch: Quest
 }
 
 /**
- * Grava quem assina a resposta escrita (webinar_questions.answer_author, 202611150001; docs/30 D87). A parte do
+ * Grava quem assina a resposta escrita (webinar_questions.answer_author, 202611150001; docs/30 D88). A parte do
  * atualizar de sempre: no banco sem a coluna sobe o PendingMigrationError, e quem chama decide (com "Equipe", que e o
  * que a sala ja mostra sem a coluna, segue; com outro nome, responde com o aviso da migracao antes de gravar a resposta).
  */

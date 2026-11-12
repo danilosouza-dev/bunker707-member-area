@@ -129,7 +129,7 @@ type RoomQuestionItemProps = {
 function RoomQuestionReplyComment({ reply, serverNowMs }: { reply: StudentQuestionReply; serverNowMs?: number }) {
   const sala = WEBINAR_COPY.sala;
   const novas = WEBINAR_COPY.salaV2;
-  // "Responder como" (rodada v9, docs/30 D87): com "Equipe", so o selo Equipe e o icone da equipe (como a primeira
+  // "Responder como" (rodada v9, docs/30 D88): com "Equipe", so o selo Equipe e o icone da equipe (como a primeira
   // resposta); com "Outro nome", o nome personalizado com o icone da equipe e sem o selo do papel.
   const asTeam = reply.authorAs === "team";
   const custom = reply.authorAs === "custom";
@@ -160,7 +160,7 @@ function RoomQuestionComment({ footer, onToggleThread, onVote, question, reply =
   const status = questionStatusOf(question);
   const ai = question.answerSource === "ai";
   const badge = ai ? sala.selos.assistente : sala.selos.equipe;
-  // Quem assina a resposta escrita (rodada v9, docs/30 D87): com "Meu nome", o nome, o selo do papel e a foto de quem
+  // Quem assina a resposta escrita (rodada v9, docs/30 D88): com "Meu nome", o nome, o selo do papel e a foto de quem
   // respondeu; com "Outro nome", o nome personalizado; sem assinatura (Equipe, a resposta de antes, o Assistente), o selo.
   const author = ai ? null : (question.answerAuthor ?? null);
   const answerName = author ? author.name : badge;
@@ -316,7 +316,7 @@ export function RoomQuestionItem({ footer = null, look = "classic", onToggleThre
           {question.answerText ? (
             <p className="mt-1.5 whitespace-pre-line text-sm leading-5 text-room-fg">
               {question.answerSource === "ai" ? <span className="sr-only">{`${copy.selos.assistente}: `}</span> : null}
-              {/* Quem assina (rodada v9, docs/30 D87), tambem no cartao da gaveta do vertical. */}
+              {/* Quem assina (rodada v9, docs/30 D88), tambem no cartao da gaveta do vertical. */}
               {question.answerSource !== "ai" && question.answerAuthor ? (
                 <span className="font-semibold" data-room-answer-author="">
                   {`${question.answerAuthor.name}: `}

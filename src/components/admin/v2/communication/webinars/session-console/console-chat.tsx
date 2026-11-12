@@ -120,6 +120,13 @@ type ConsoleChatProps = {
   onModerate: (action: ModerationAction, messageId: string) => Promise<boolean> | void;
   /** Fase 4f: "Refazer tradução" (apaga a traducao guardada do texto); nulo com a traducao desligada no ambiente. */
   onRetranslate?: ((messageId: string) => void) | null;
+  /**
+   * Rodada v9 (docs/30 D89): "Mostrar na tela" no ⋯ de cada mensagem liberada (o id) e "Tirar da tela" na que ja esta
+   * (nulo). Nula quando a sessao nao aceita a equipe ou no Replay: o item nao aparece.
+   */
+  onScreenComment?: ((messageId: string | null) => void) | null;
+  /** A mensagem que esta na tela agora (a exibicao de origem chat); nula sem nenhuma. */
+  screenCommentMessageId?: string | null;
   /** O envio da equipe; `pin` e o "Fixar ao enviar" ligado (publica e fixa num passo). Devolve se gravou. */
   onSend: (body: string, pin: boolean) => Promise<boolean>;
   /**
@@ -157,11 +164,13 @@ export function ConsoleChat({
   onEditAssistant = null,
   onModerate,
   onRetranslate = null,
+  onScreenComment = null,
   onSend,
   personBadges = null,
   personMenu = null,
   pinned = null,
   pinnedMessageId,
+  screenCommentMessageId = null,
   session,
   shown = true
 }: ConsoleChatProps) {
@@ -354,6 +363,16 @@ export function ConsoleChat({
       items.push(
         <DropdownMenuItem className={adminMenuItem} key="retranslate" onClick={() => onRetranslate(message.id)}>
           {WEBINAR_COPY.traducao.console.refazer}
+        </DropdownMenuItem>
+      );
+    }
+
+    // Rodada v9 (docs/30 D89): trazer a mensagem liberada para a tela de todos, ou tirar a que esta la.
+    if (onScreenComment && message.approved && message.kind !== "system") {
+      const onScreen = screenCommentMessageId === message.id;
+      items.unshift(
+        <DropdownMenuItem className={adminMenuItem} data-console-screen-comment={onScreen ? "hide" : "show"} key="screen-comment" onClick={() => onScreenComment(onScreen ? null : message.id)}>
+          {onScreen ? WEBINAR_COPY.naTela.console.tirarDaTela : WEBINAR_COPY.naTela.console.mostrarNaTela}
         </DropdownMenuItem>
       );
     }

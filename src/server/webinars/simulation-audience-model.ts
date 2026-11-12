@@ -116,7 +116,7 @@ export type AudiencePhase = "before" | "ended" | "on_air";
 
 /**
  * O estado do formulario: o numero, o erro do campo e se o Aplicar liga (o numero valido, diferente do de agora, a
- * sessao de pe, com permissao e sem outra acao em andamento). Sem frase nem caixa desde 12/11/2026 (D85): o servidor
+ * sessao de pe, com permissao e sem outra acao em andamento). Sem frase nem caixa desde 12/11/2026 (D86): o servidor
  * grava a frase da mudanca sozinho.
  */
 export function audienceFormState(input: {

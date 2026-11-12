@@ -1,20 +1,20 @@
--- Webinarios v9 (docs/30 D86 a D88, §4.2; docs/31 §14; docs/21 §9.16; teste do produtor de 12/11/2026): o que abre o
+-- Webinarios v9 (docs/30 D87 a D89, §4.2; docs/31 §14; docs/21 §9.16; teste do produtor de 12/11/2026): o que abre o
 -- link do banner, quem assina a resposta de uma pergunta e o comentario ou a pergunta que a equipe traz para a tela. As
 -- migracoes de antes nao mudam; este arquivo so acrescenta.
 --
 -- Regras:
--- - webinar_screen_items.link_target (P3, D86): o que abre o link do banner, 'both' (a imagem e o botao; o padrao, tambem
+-- - webinar_screen_items.link_target (P3, D87): o que abre o link do banner, 'both' (a imagem e o botao; o padrao, tambem
 --   dos itens que ja existem), 'button' (so o botao) ou 'image' (so a imagem). No QR Code nao vale nada (fica 'both').
 --   A lista e a de screen-model.SCREEN_LINK_TARGETS. A coluna nao entra na lista que o app sempre le
 --   (SCREEN_ITEM_COLUMNS): o app de antes continua de pe com esta migracao, e o app novo le a coluna a parte;
--- - webinar_questions.answer_author (P8, D87): quem assina a resposta escrita, `{ v: 1, as: 'self' | 'team' | 'custom',
+-- - webinar_questions.answer_author (P8, D88): quem assina a resposta escrita, `{ v: 1, as: 'self' | 'team' | 'custom',
 --   name, role }` (o nome com que a pessoa escreve para a turma, ou o nome personalizado; nulo em 'team'). Nula na
 --   resposta de antes e na do Assistente: a sala mostra "Equipe" (ou "Assistente"), como sempre;
--- - webinar_question_replies.author_as (P8, D87): como a resposta da equipe no fio aparece, 'self' (o nome e a foto de
+-- - webinar_question_replies.author_as (P8, D88): como a resposta da equipe no fio aparece, 'self' (o nome e a foto de
 --   quem escreveu), 'team' (so "Equipe") ou 'custom' (o nome personalizado, gravado em display_name). Nula na resposta de
 --   antes e na do aluno: vale o nome gravado, como sempre. Nenhuma das duas colunas entra nas listas que o app sempre le
 --   (QUESTION_COLUMNS, QUESTION_REPLY_COLUMNS);
--- - webinar_screen_comments (P11, D88): cada vez que a equipe mostrou na tela uma mensagem do chat ou uma pergunta
+-- - webinar_screen_comments (P11, D89): cada vez que a equipe mostrou na tela uma mensagem do chat ou uma pergunta
 --   numa sessao. So a referencia (message_id ou question_id), nunca a copia do texto nem do nome: a sala le o comentario
 --   da origem a cada leitura, entao a mensagem que o aluno removeu ou que a equipe apagou sai da tela na hora, e a
 --   retencao que apaga a origem apaga a linha (on delete cascade). No maximo um comentario na tela por sessao (indice
@@ -45,7 +45,7 @@ end;
 $$;
 
 comment on column public.webinar_screen_items.link_target is
-  'O que abre o link do banner (docs/30 D86): both (a imagem e o botao, o padrao), button (so o botao) ou image (so a imagem). No QR Code nao vale nada.';
+  'O que abre o link do banner (docs/30 D87): both (a imagem e o botao, o padrao), button (so o botao) ou image (so a imagem). No QR Code nao vale nada.';
 
 /* ------------------------------------------------------------------------------------------------
  * 2. webinar_questions e webinar_question_replies: quem assina a resposta (P8). MCP.
@@ -68,9 +68,9 @@ end;
 $$;
 
 comment on column public.webinar_questions.answer_author is
-  'Quem assina a resposta escrita (docs/30 D87): { v: 1, as: self | team | custom, name, role }. Nula: "Equipe" (ou o Assistente), como antes.';
+  'Quem assina a resposta escrita (docs/30 D88): { v: 1, as: self | team | custom, name, role }. Nula: "Equipe" (ou o Assistente), como antes.';
 comment on column public.webinar_question_replies.author_as is
-  'Como a resposta da equipe no fio aparece (docs/30 D87): self (o nome e a foto de quem escreveu), team (so "Equipe") ou custom (o nome personalizado em display_name). Nula: o nome gravado, como antes.';
+  'Como a resposta da equipe no fio aparece (docs/30 D88): self (o nome e a foto de quem escreveu), team (so "Equipe") ou custom (o nome personalizado em display_name). Nula: o nome gravado, como antes.';
 
 /* ------------------------------------------------------------------------------------------------
  * 3. webinar_screen_comments: o comentario ou a pergunta que a equipe mostra na tela (P11). MCP.
@@ -100,7 +100,7 @@ create table if not exists public.webinar_screen_comments (
   )
 );
 
-comment on table public.webinar_screen_comments is 'Na tela (docs/30 D88): cada vez que a equipe mostrou na tela uma mensagem do chat ou uma pergunta numa sessao. So a referencia: o texto e o nome sao lidos da origem.';
+comment on table public.webinar_screen_comments is 'Na tela (docs/30 D89): cada vez que a equipe mostrou na tela uma mensagem do chat ou uma pergunta numa sessao. So a referencia: o texto e o nome sao lidos da origem.';
 
 create unique index if not exists webinar_screen_comments_active_idx on public.webinar_screen_comments (session_id) where hidden_at is null;
 create index if not exists webinar_screen_comments_session_idx on public.webinar_screen_comments (session_id, shown_at);

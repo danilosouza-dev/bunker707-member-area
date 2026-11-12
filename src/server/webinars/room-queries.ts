@@ -556,7 +556,7 @@ export function replyPhotoUrl(reply: Pick<QuestionReply, "anonymous" | "displayN
   });
 }
 
-/** A foto de quem assinou a resposta com "Meu nome" (docs/30 D87): a da equipe aparece sempre; nas outras escolhas, nenhuma. */
+/** A foto de quem assinou a resposta com "Meu nome" (docs/30 D88): a da equipe aparece sempre; nas outras escolhas, nenhuma. */
 export function answerAuthorPhotoUrl(question: Pick<WebinarQuestion, "answerAuthor" | "answeredBy">, webinarId: string, photos: ReadonlyMap<string, AuthorPhoto>): string | null {
   if (question.answerAuthor?.as !== "self" || !question.answeredBy) {
     return null;
@@ -591,7 +591,7 @@ export async function listStudentQuestions(db: WebinarsDb, session: Pick<Webinar
       [
         ...questions.filter((question) => !question.anonymous).map((question) => question.userId),
         ...replies.filter((reply) => !reply.anonymous).map((reply) => reply.userId),
-        // Quem assinou a resposta com "Meu nome" (D87): a foto da equipe.
+        // Quem assinou a resposta com "Meu nome" (D88): a foto da equipe.
         ...questions.filter((question) => question.answerAuthor?.as === "self").map((question) => question.answeredBy)
       ],
       now

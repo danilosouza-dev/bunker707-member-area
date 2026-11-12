@@ -1,5 +1,5 @@
 // Schemas zod da Simulacao completa (fase 4b; docs/30 §2.2, §4.3, §6.6, §8.6 e D10). Modulo puro (sem "server-only",
-// imports relativos; zod v4). O salvar nao pede mais a caixa de §8.6 (decisao do produtor em 12/11/2026, D85): o
+// imports relativos; zod v4). O salvar nao pede mais a caixa de §8.6 (decisao do produtor em 12/11/2026, D86): o
 // servidor monta e grava a frase da decisao; as mensagens passam pela lista PROIBIDAS_WEBINARIO.
 
 import { z } from "zod";
@@ -55,7 +55,7 @@ export type SimulationRulesInput = z.input<typeof simulationRulesSchema>;
 
 /**
  * Algo simulado ligado (o selo, o contador, as entradas ou os avisos de venda). O card Simulacao nao pede mais a caixa
- * (D85); o "Começa quando você entra" (jit-schemas.ts) ainda pede a dele.
+ * (D86); o "Começa quando você entra" (jit-schemas.ts) ainda pede a dele.
  */
 export function simulationNeedsAck(rules: z.infer<typeof simulationRulesSchema>): boolean {
   return rules.showLiveBadge || rules.countRule.mode !== "off" || rules.joins.enabled || (rules.saleNotices.enabled && rules.saleNotices.items.length > 0);
@@ -63,7 +63,7 @@ export function simulationNeedsAck(rules: z.infer<typeof simulationRulesSchema>)
 
 /**
  * saveSessionSimulation [messaging.publish] (docs/30 §5.2): a sessao e as regras. Sem frase nem caixa desde 12/11/2026
- * (decisao do produtor, D85): o servidor monta e grava sozinho a frase da decisao, com o nome de quem salva e a data.
+ * (decisao do produtor, D86): o servidor monta e grava sozinho a frase da decisao, com o nome de quem salva e a data.
  */
 export const saveSessionSimulationSchema = simulationRulesSchema.extend({
     /**
@@ -80,7 +80,7 @@ export const saveSessionSimulationSchema = simulationRulesSchema.extend({
  * 0 e o Tirar), com a frase da mudanca marcada sempre que soma algo, e de onde veio (o console ou o card do editor).
  */
 /**
- * Os participantes simulados a partir de agora (D79). Sem frase nem caixa desde 12/11/2026 (decisao do produtor, D85):
+ * Os participantes simulados a partir de agora (D79). Sem frase nem caixa desde 12/11/2026 (decisao do produtor, D86):
  * o servidor grava sozinho a frase da mudanca no registro (webinar_simulation_changes.ack_text).
  */
 export const saveSimulatedAudienceSchema = z.object({

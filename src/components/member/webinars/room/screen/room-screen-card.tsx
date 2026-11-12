@@ -23,7 +23,7 @@ import { useScreenShownRef, type ScreenWatch } from "./use-room-screen";
 // O cartao: a superficie sobre o video da sala (--room-on-video-*, raio 16), a largura do banner pelo tamanho (clamp em
 // cqw da camada, nunca mais de 40 % do palco nem mais que a celula), a imagem inteira (object-contain, com width e
 // height) e o texto em ate 3 linhas; o botao e uma pilula (roomPillClassName num <a>, com a area de toque de 44 px
-// abaixo de lg); sem texto do botao, o banner inteiro e o link; com "Imagem e botão" (docs/30 D86), o banner e o botao
+// abaixo de lg); sem texto do botao, o banner inteiro e o link; com "Imagem e botão" (docs/30 D87), o banner e o botao
 // abrem o link (dois links irmaos, o botao fora do link do banner); sem link, e so um aviso. O QR Code tem o lado do tamanho
 // (128 / 176 / 232, nunca menos de 3 px por modulo: qrSidePx) e, abaixo, a legenda e sempre o link de texto "Abrir o
 // link" (tambem com a area de 44 px). Altura no maximo a area livre: o resto rola por dentro. Entrada com

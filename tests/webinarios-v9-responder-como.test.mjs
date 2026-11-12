@@ -4,7 +4,7 @@ import "./support/transpile-tsx.mjs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-// "Responder como" (rodada v9, P8; docs/30 D87; docs/18 §2.2), no Node e sem navegador. O produtor (12/11/2026):
+// "Responder como" (rodada v9, P8; docs/30 D88; docs/18 §2.2), no Node e sem navegador. O produtor (12/11/2026):
 // "Quando respondo uma pergunta so aparece que quem respondeu foi a equipe, mas nao tem como aparecer tambem o nome da
 // pessoa que respondeu? ... seria bom ter a opcao de escolher se responde como a pessoa mesmo ou como equipe ou ate
 // mesmo colocar um nome especifico como 'Equipe Bunker 707'". Aqui: a regra pura (as tres opcoes, o nome personalizado,

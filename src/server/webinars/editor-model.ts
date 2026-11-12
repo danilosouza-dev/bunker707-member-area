@@ -281,7 +281,7 @@ export const WEBINAR_ADMIN_COPY = {
       answerLive: "Respondida ao vivo",
       answerPlaceholder: "Escreva a resposta",
       answerWritten: "Responder por escrito",
-      /* Rodada v9 (docs/30 D87): quem assina a resposta, lembrado no navegador. */
+      /* Rodada v9 (docs/30 D88): quem assina a resposta, lembrado no navegador. */
       authorAs: "Responder como",
       authorCustomName: "Nome que aparece na resposta",
       authorCustomPlaceholder: "Equipe Bunker 707",

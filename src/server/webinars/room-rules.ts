@@ -152,7 +152,7 @@ export type StudentQuestionReply = {
   /** Legado: linhas de antes de 10/11/2026 (D64). A resposta de quem perguntou numa pergunta Anonima antiga: sem nome e sem foto. */
   anonymous: boolean;
   /**
-   * Como a resposta da equipe aparece (rodada v9, docs/30 D87): "team" (so o selo Equipe, sem nome e sem foto) ou
+   * Como a resposta da equipe aparece (rodada v9, docs/30 D88): "team" (so o selo Equipe, sem nome e sem foto) ou
    * "custom" (o nome personalizado em `displayName`, sem foto). Ausente ou nula: o nome e a foto de quem escreveu, como
    * sempre (a resposta de antes, "Meu nome" e a do aluno).
    */
@@ -167,7 +167,7 @@ export type StudentQuestionReply = {
 };
 
 export function toStudentReply(reply: QuestionReply, viewerUserId: string | null, avatarUrl: string | null = null): StudentQuestionReply {
-  // "Responder como" (D87) so vale na resposta da equipe: com "Equipe" ou "Outro nome", o nome e a foto de quem
+  // "Responder como" (D88) so vale na resposta da equipe: com "Equipe" ou "Outro nome", o nome e a foto de quem
   // escreveu nunca vao para a turma (em "Outro nome", `displayName` ja e o nome personalizado gravado).
   const authorAs = reply.role !== "student" && (reply.authorAs === "team" || reply.authorAs === "custom") ? reply.authorAs : null;
   return {
@@ -210,7 +210,7 @@ export type StudentQuestion = {
   /** A foto do perfil de quem perguntou, quando ela pode aparecer (room-model.authorPhotoUrl); nunca na Anonima. */
   avatarUrl: string | null;
   /**
-   * Quem assina a resposta escrita (rodada v9, docs/30 D87): com "Meu nome", o nome, o papel e a foto de quem respondeu;
+   * Quem assina a resposta escrita (rodada v9, docs/30 D88): com "Meu nome", o nome, o papel e a foto de quem respondeu;
    * com "Outro nome", so o nome. Nulo: "Equipe" (a escolha Equipe, a resposta de antes) ou o Assistente.
    */
   answerAuthor: StudentAnswerAuthor | null;

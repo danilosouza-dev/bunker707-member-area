@@ -4,7 +4,7 @@ import "./support/transpile-tsx.mjs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-// "O que abre o link" do banner da Na tela (rodada v9, P3; docs/30 D86; docs/18 §2.2), no Node e sem navegador. O
+// "O que abre o link" do banner da Na tela (rodada v9, P3; docs/30 D87; docs/18 §2.2), no Node e sem navegador. O
 // produtor (12/11/2026): "quando tem botao a imagem nao fica clicavel, so o botao; quando nao tem botao a imagem fica
 // clicavel. Nao tem como os dois ficar ou eu pode escolher para ambos ou so um ou so outro?". A escolha: Imagem e
 // botão (o padrao), Só o botão, Só a imagem. Aqui: a regra pura e o zod do salvar, a linha do banco (com e sem a coluna
@@ -125,7 +125,7 @@ test("a copia congelada e o item do aluno: a escolha vai na copia; a copia de an
   assert.equal(model.studentScreenItem(exibicao(copia), ORIGEM).linkTarget, "both");
 
   // A exibicao gravada antes da migracao nao tem a chave: a turma viu so o botao clicavel, e continua assim.
-  const { linkTarget: _fora, ...antiga } = copia;
+  const antiga = Object.fromEntries(Object.entries(copia).filter(([chave]) => chave !== "linkTarget"));
   const lida = schemas.parseScreenSnapshot("banner", antiga);
   assert.ok(lida && !("linkTarget" in lida), "a copia antiga passa no zod sem a chave");
   assert.equal(model.studentScreenItem(exibicao(lida), ORIGEM).linkTarget, "button");

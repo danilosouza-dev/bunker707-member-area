@@ -63,6 +63,7 @@ import { useRoomPlayer } from "./use-room-player";
 import { useRoomPolls } from "./use-room-polls";
 import { RoomPinnedArea, RoomPinnedPills, usePinnedFocus, type PinnedFocusTarget } from "./screen/room-pinned";
 import type { ScreenItemHandlers } from "./screen/room-screen-card";
+import { RoomScreenCommentAnnouncer, RoomScreenCommentLayer } from "./screen/room-screen-comment";
 import { RoomScreenAnnouncer, RoomScreenLayer } from "./screen/room-screen-layer";
 import { screenFocusKey, screenPlacement, screenStripForcedRecorded } from "./screen/room-screen-model";
 import { RoomScreenDock, RoomScreenStrip } from "./screen/room-screen-strip";
@@ -76,6 +77,7 @@ import { VerticalChat } from "./vertical/vertical-chat";
 import { VerticalComposer } from "./vertical/vertical-composer";
 import { VerticalDrawer, type VerticalDrawerTab } from "./vertical/vertical-drawer";
 import { usePanelMotion } from "./use-panel-motion";
+import { screenCommentPlace } from "@/server/webinars/screen-comment-model";
 import { drawerTabFor, roomSkeleton, themeForDesign, verticalBadge, type RoomDesign } from "./vertical/vertical-model";
 import { VerticalTopBar } from "./vertical/vertical-top-bar";
 
@@ -625,6 +627,10 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const screenForced = screenStripForcedRecorded({ hasVideo: session.video !== null, soundCover, stageState });
   const pinnedPillsOn = pinnedShortcuts && (pinnedMessage !== null || pinnedPoll !== null);
   const placement = screenPlacement({ items: screenForced || vertical ? [] : screenItems, offerShown, pinnedPills: !screenForced && pinnedPillsOn });
+  // O comentario ou a pergunta que a equipe trouxe para a tela (rodada v9, docs/30 D89): pelas mesmas regras da Na tela;
+  // a Oferta no palco ocupa o canto de baixo a direita.
+  const screenComment = pinnedOn && !unavailable ? naTela.comment : null;
+  const screenCommentAt = screenCommentPlace(placement.cells.map((cell) => cell.place), offerShown);
   const screenEvents = useRoomScreenEvents({ enabled: !readOnly && pinnedOn, pollOver: stagePoll !== null, sessionId, webinarId });
   const sendScreenEvent = screenEvents.sendEvent;
   const closeScreenItem = naTela.closeItem;
@@ -1121,9 +1127,12 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
                 topLeftExtra={<RoomSimulationSales layout="cell" offsetMs={currentOffsetMs} reducedMotion={reducedMotion} state={simulation} />}
               />
             )}
-            {/* Com o painel fechado, as 2 ultimas mensagens em pilulas sobre o palco (V2-8); com um item embaixo, so no palco estreito. */}
+            {/* O comentario ou a pergunta na tela (docs/30 D89): o cartao no palco de 640 px ou mais; no estreito, na faixa. */}
+            {vertical ? null : <RoomScreenCommentLayer comment={screenComment} forced={screenForced} place={screenCommentAt} />}
+            {/* Com o painel fechado, as 2 ultimas mensagens em pilulas sobre o palco (V2-8); com um item embaixo ou o
+                comentario na tela, so no palco estreito. */}
             {chatPillsShown({ blocked: unavailable, design, offerShown, panelShown, settingsTakeover: false }) ? (
-              <RoomWideHidden hidden={!placement.chatPills}>
+              <RoomWideHidden hidden={!placement.chatPills || screenComment !== null}>
                 <RoomChatPills kind={kind} messages={overlayMessages(translation.messages)} />
               </RoomWideHidden>
             ) : null}
@@ -1174,7 +1183,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
               }
               design={design}
               hidden={drawerVisible}
-              screen={vertical && pinnedOn ? <RoomScreenDock handlers={screenHandlers} items={screenItems} /> : null}
+              screen={vertical && pinnedOn ? <RoomScreenDock comment={screenComment} handlers={screenHandlers} items={screenItems} /> : null}
               offer={
                 <RoomOffer
                   enabled={writable}
@@ -1208,6 +1217,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
           {/* O palco mais estreito (ou com uma capa): as fixadas, o banner e o QR Code em linhas logo abaixo dele, acima da barra. */}
           {pinnedOn && !vertical ? (
             <RoomScreenStrip
+              comment={screenComment}
               forced={screenForced}
               handlers={screenHandlers}
               items={screenItems}
@@ -1215,6 +1225,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
             />
           ) : null}
           {pinnedOn ? <RoomScreenAnnouncer items={screenItems} /> : null}
+          {pinnedOn ? <RoomScreenCommentAnnouncer comment={screenComment} /> : null}
           {barShown ? (
             <RecordedControls
               fullscreenEnabled={fullscreenEnabled}

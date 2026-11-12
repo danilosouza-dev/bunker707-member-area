@@ -91,7 +91,7 @@ export type ScreenFormState = {
   image: { height: number; path: string; width: number } | null;
   imageAlt: string;
   kind: ScreenKind;
-  /** O que abre o link do banner (docs/30 D86). */
+  /** O que abre o link do banner (docs/30 D87). */
   linkTarget: ScreenLinkTarget;
   linkUrl: string;
   name: string;
@@ -567,7 +567,7 @@ export function ConsoleScreenForm({ busy, canShow, initialDevice = "desktop", it
             {text("body", form.texto, SCREEN_LIMITS.body, undefined, true)}
             {text("buttonLabel", form.textoDoBotao, SCREEN_LIMITS.buttonLabel, form.textoDoBotaoDica)}
             {text("linkUrl", form.link, SCREEN_LIMITS.link)}
-            {/* O que abre o link (docs/30 D86): so faz diferenca com o link e o texto do botao escritos. */}
+            {/* O que abre o link (docs/30 D87): so faz diferenca com o link e o texto do botao escritos. */}
             {state.linkUrl.trim() && state.buttonLabel.trim() ? (
               <div className="flex min-w-0 flex-col gap-1.5" data-console-screen-link-target="">
                 <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]" id={`${prefix}-alvo-do-link`}>
