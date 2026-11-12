@@ -123,21 +123,30 @@ const live = await import("../src/components/member/webinars/room/live-room-mode
 const { WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
 const AJUSTES = { allowStudentCamera: true, screenFps: 30, stage: 1080 };
 
-test("o motor sem avisos na sala: notifications vazio e o selo do topo vazio para os 4 papeis; o som da mao sai so para o aluno e a Equipe; o console como antes", () => {
+test("o motor sem avisos na sala: notifications vazio e o selo do topo vazio para os 4 papeis; o som da mao sai so para o aluno e a Equipe; o console so sem o aviso da mao e sem o selo do topo (D95); o dialogo da live encerrada nunca abre (D97)", () => {
   for (const role of ["student", "team", "host", "co_host"]) {
     const config = embed.liveConfigOverwrite(role, AJUSTES, null, "room");
     assert.deepEqual(config.notifications, [], `sala, ${role}: nenhum aviso do motor`);
     assert.deepEqual(config.conferenceInfo, { alwaysVisible: [], autoHide: [] }, `sala, ${role}: sem o "✋ 1" nem o selo de gravacao do motor`);
     const plateia = role === "student" || role === "team";
     assert.deepEqual(config.disabledSounds, plateia ? ["RAISE_HAND_SOUND"] : undefined, `sala, ${role}: o som da mao`);
+    assert.ok(!Object.hasOwn(config, "disabledNotifications"), `sala, ${role}: ja sem aviso nenhum`);
+    assert.equal(config.notifyOnConferenceDestruction, false, `sala, ${role}: a live encerrada mostra a tela da pagina, nunca o dialogo do motor`);
   }
   // No console ninguem ouve o notificationTriggered: quem apresenta continua vendo os avisos do motor (a gravacao que
-  // nao comecou, a tela negada) ate os avisos do console entrarem (V2-A59).
+  // nao comecou, a tela negada) ate os avisos do console entrarem (V2-A59). Sai so o que o console ja mostra por conta
+  // propria (teste do produtor de 12/11/2026, D95): o aviso "{nome} Gostaria de participar." da mao levantada e o selo
+  // do motor no topo do video (o "✋ 1" amarelo). O som da mao continua para todos no console.
+  assert.deepEqual(embed.CONSOLE_DISABLED_NOTIFICATIONS, ["notify.raisedHand"]);
   for (const role of ["student", "team", "host", "co_host"]) {
     const config = embed.liveConfigOverwrite(role, AJUSTES, null, "console");
-    for (const key of ["notifications", "conferenceInfo", "disabledSounds"]) {
+    for (const key of ["notifications", "disabledSounds"]) {
       assert.ok(!Object.hasOwn(config, key), `console, ${role}: sem a chave ${key}`);
     }
+    assert.deepEqual(config.disabledNotifications, ["notify.raisedHand"], `console, ${role}: so o aviso da mao sai`);
+    assert.notEqual(config.disabledNotifications, embed.CONSOLE_DISABLED_NOTIFICATIONS, "uma copia: o motor nao mexe na lista do app");
+    assert.deepEqual(config.conferenceInfo, { alwaysVisible: [], autoHide: [] }, `console, ${role}: sem o selo do motor no topo`);
+    assert.equal(config.notifyOnConferenceDestruction, false, `console, ${role}: sem o dialogo "A chamada foi encerrada"`);
   }
   // A sala ouve o aviso do motor, que nunca vai ao servidor, e o console continua com a lista da sala mais a dele.
   assert.ok(embed.JITSI_LISTENED_EVENTS.includes("notificationTriggered"));

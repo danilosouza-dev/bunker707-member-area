@@ -523,7 +523,7 @@ As pílulas das duas últimas mensagens, na base do palco com o painel fechado (
 
 ### 14.2 O painel com largura máxima e com transição (P10 e P12)
 
-- **Largura**: o painel da sala e o do console eram `clamp(320px, 27,5vw, 514px)`; numa tela de 1920 px davam 514 px, com muito vazio ao lado das mensagens. Agora o teto é 400 px (`lg:w-[clamp(320px,27.5vw,400px)]` na sala; a mesma conta em `console-layout-model.ts`), e o palco fica com o resto. Troca o "painel de 320 px" do V2-7: 320 px continua o mínimo. Conferido com prints em 1280, 1440, 1920 e 2560 px.
+- **Largura**: o painel da sala e o do console eram `clamp(320px, 27,5vw, 514px)`; numa tela de 1920 px davam 514 px, com muito vazio ao lado das mensagens. Agora o teto é 400 px (`lg:w-[clamp(320px,27.5vw,400px)]` na sala; a mesma conta em `console-layout-model.ts`), e o palco fica com o resto. **Desde a rodada v10 (§15.3, `docs/30` D92), o teto de 400 px vale só na sala do aluno; o painel do console voltou a ter até 514 px.** Troca o "painel de 320 px" do V2-7: 320 px continua o mínimo. Conferido com prints em 1280, 1440, 1920 e 2560 px.
 - **Transição**: abrir, fechar e trocar de aba ou de entrada passam a ter transição de 220 ms com `ease-out` (`use-panel-motion.ts`: `PANEL_MOTION_MS`, `usePanelMotion`, `usePanelSwapClass`). Ao abrir, o painel aparece e desliza 12 px; ao fechar, some e desliza, e o palco só cresce quando a saída termina (`motion.laid`), de uma vez: o iframe não é redimensionado a cada quadro. A troca de aba é só um aparecer de 220 ms do conteúdo. Com `prefers-reduced-motion`, nada anima. Na primeira pintura (e no HTML do servidor) também não, para o painel guardado como fechado não piscar.
 
 ### 14.3 O banner: o que abre o link e o botão com largura mínima (P3 e P4)
@@ -548,7 +548,7 @@ O controle **Participantes simulados** (o do console e o do card depois do come�
 
 - **Onde**: o menu **Visão do vídeo** da barra (a partir de 1024 px), na sala da Live ao vivo e no console, ganha um segundo grupo, **Miniaturas**, com as três opções em `menuitemradio`; a marcada é a escolha guardada da pessoa. No celular não há o que escolher: só o vídeo grande aparece (V2-A13).
 - **O que o motor permite** (lido na tag fixada): a coluna ao lado do vídeo, a fileira embaixo (que ele desenha por cima da base do vídeo), a grade e esconder. A fileira em cima não existe. Coluna ou fileira é decidido na montagem do vídeo (`VERTICAL_FILMSTRIP`); esconder e mostrar é por comando (`toggleFilmStrip`).
-- **Como vale**: **Lateral** e **Esconder** na hora. **Embaixo** (e a volta de **Embaixo** para **Lateral**) vale quando o vídeo carrega de novo; enquanto o vídeo na tela foi montado do outro jeito, o grupo mostra "Para as miniaturas mudarem de lugar, recarregue a página.". A página não recarrega o vídeo sozinha: recarregar tira a pessoa da sala por alguns segundos (e, com a sala trancada, o aluno voltaria para a sala de espera), então quem decide a hora é ela.
+- **Como vale**: **Lateral** e **Esconder** na hora. **Embaixo** (e a volta de **Embaixo** para **Lateral**) pede o vídeo carregado de novo, porque o motor decide coluna ou fileira na montagem. **Desde a rodada v10 (§15.1, `docs/30` D96), a página recarrega só o vídeo, sozinha, quando o microfone e a câmera da pessoa estão desligados; com algo no ar, o menu avisa e oferece Recarregar o vídeo agora; com a sala trancada, vale na próxima entrada.** Na rodada v9 o menu só avisava "Para as miniaturas mudarem de lugar, recarregue a página.", e o produtor não viu o aviso.
 - **A fileira embaixo** aparece com 640 px ou mais de vídeo, e o que fica na base do palco sobe a altura dela (144 px: as miniaturas de 120 px mais a margem), pela variável `--room-video-bottom`: o selo de quem apresenta, o do Assistente, as pílulas do chat, o aviso da sala e os cartões da Na tela. Com a fileira, nada é descontado à direita.
 - **Quem apresenta, no console**: continua sem mandar o comando pela largura (V2-A5). Só a escolha dele vale, e só no Palco: com **Esconder**, as miniaturas saem para ele e da gravação, porque o seguir a visão leva a mudança ao gravador; a sala de cada aluno volta sozinha à escolha do aluno. O menu diz: "Escondidas para você e na gravação. Cada aluno escolhe as dele.". O co-apresentador e a Equipe seguem a conta da sala.
 - **A conferir pelo produtor na `dev`**: a fileira embaixo com o motor de verdade (os testes daqui usam a sala falsa): a altura que os selos sobem e a fileira com muitas câmeras.
@@ -566,7 +566,49 @@ O controle **Participantes simulados** (o do console e o do card depois do come�
 | # | Pergunta | Padrão assumido |
 |---|---|---|
 | V2-A68 | O card **Começa quando você entra** também perde a frase e a caixa da Simulação? | não por enquanto: o pedido falou do console e do card Simulação |
-| V2-A69 | **Embaixo** deve recarregar o vídeo sozinho ao ser escolhido? | não: a pessoa recarrega a página quando quiser, para ninguém cair da sala sem querer |
+| V2-A69 | **Embaixo** deve recarregar o vídeo sozinho ao ser escolhido? | **respondida em 12/11/2026 (§15.1, `docs/30` D96)**: sim, quando o microfone e a câmera estão desligados; com algo no ar, pelo menu; com a sala trancada, na próxima entrada |
 | V2-A70 | O comentário na tela deve aparecer também no Replay, no mesmo segundo, e no relatório? | não nesta rodada; a hora de entrada e de saída já ficam gravadas para isso |
 | V2-A71 | Para quem apresenta, **Esconder** deve tirar as miniaturas também da gravação? | sim, é o que o motor faz hoje; o menu avisa |
 | V2-A72 | A resposta do Assistente de IA a uma pergunta também deve sair do chat (`docs/30` D85)? | não nesta rodada: no chat moderado a equipe libera essa mensagem na fila; mudar isso pede outro desenho da moderação do Assistente |
+
+## 15. Rodada v10: o segundo teste do produtor na `dev`, em 12/11/2026
+
+Depois do merge da rodada v9, o produtor testou a `dev` de novo e mandou seis ajustes. As decisões estão no `docs/30` (D92 a D97); aqui fica o desenho de cada um. A migração é a `202611160001` (`docs/21` §9.17), só para o **Marcar como vista**. O que é da folha do motor (§15.5) só chega ao servidor de vídeo pela etapa `deploy-meet`, com o ok do produtor no chat; o resto vale no merge.
+
+### 15.1 Embaixo vale na hora (D96)
+
+O produtor escolheu **Embaixo** e a coluna continuou ao lado. O motor só troca coluna por fileira ao montar o vídeo, e a rodada v9 só avisava para recarregar a página.
+
+- **Com o microfone e a câmera desligados** (o caso de quase todo aluno): a página pede outro token e recarrega só o vídeo, na hora. A pessoa vê "Reconectando…" por alguns segundos e o vídeo volta com as miniaturas no lugar escolhido. A página não recarrega, o chat e as perguntas ficam onde estavam, e o menu não avisa nada.
+- **Com o microfone ou a câmera ligados** (no console, também a tela compartilhada): recarregar desligaria os dois no meio da fala, porque todo vídeo novo entra mudo. O grupo **Miniaturas** mostra "A mudança vale quando o vídeo recarregar. Recarregar agora desliga o seu microfone e a sua câmera por alguns segundos." e ganha o item **Recarregar o vídeo agora** (`role="menuitem"`, com o ícone de recarregar). A pessoa escolhe a hora.
+- **Com a sala trancada**: o aluno que recarregasse o vídeo iria para a sala de espera. O menu mostra "Com a sala trancada, a mudança vale na próxima vez que você entrar." e não oferece o item. Quem está no console nunca passa pela sala de espera.
+- **Como é feito**: `thumbsReloadMode` (`live-room-model.ts`) decide entre `auto`, `manual`, `locked` e nada; a sala usa o mesmo caminho da volta depois de uma queda (`reloadVideo` em `use-live-room.ts`: registra a saída, pede o token, remonta o iframe com o `look` de agora); o console usa o `retry` do palco. A recarga sozinha sai uma vez: assim que começa, a sala deixa de estar "dentro" e, com o vídeo novo, a troca não está mais pendente.
+- **A conferir pelo produtor na `dev`**: a fileira embaixo com o motor de verdade (os testes daqui usam a sala falsa).
+
+### 15.2 Marcar como vista, nas Perguntas do console (D94)
+
+Na pergunta com o selo **Nova resposta do aluno**, a linha de ações ganha **Marcar como vista**, entre **Responder** e **Reabrir**, com a dica "Tira o aviso de nova resposta desta pergunta. Ele volta se o aluno escrever de novo.". O clique tira o selo, devolve a pergunta para junto das respondidas e tira uma unidade do número da aba **Perguntas**; o aviso do console diz "Marcada como vista.". Vale para toda a equipe (fica gravado na pergunta, com quem marcou). Se o aluno escrever de novo no fio, o selo volta sozinho. O botão só aparece onde há o selo e só para quem pode agir na sessão. Nada muda para o aluno.
+
+### 15.3 O painel do console mais largo e a Presença alinhada (D92)
+
+- **Largura**: o painel do console volta a `clamp(320px, 27,5vw, 514px)` (`CONSOLE_PANEL_WIDTH` em `console-layout-model.ts`): 396 px a 1440 px de janela e 514 px a partir de 1870 px. O da sala do aluno continua com no máximo 400 px (§14.2).
+- **Variar sozinho**: os três campos lado a lado, cada um com o rótulo em cima, quebravam em alturas diferentes no painel. Agora é uma linha por regra, com o nome à esquerda e o campo à direita, todos os campos com a mesma largura (80 px): **Varia até (%)**; **Muda a cada (segundos)**, com os dois números e um "a" entre eles (cada número com o rótulo próprio para o leitor de tela); as pílulas **Para mais e para menos**, **Só para mais**, **Só para menos**; a frase de exemplo; o erro de cada campo numa linha própria, embaixo. No cabeçalho do controle, o título e o **Ver no editor** ficam na mesma linha, e a descrição embaixo.
+
+### 15.4 O Responder no fim do fio (D93)
+
+Na aba **Perguntas** da sala, com o fio aberto, o **Responder** de quem perguntou sai da linha de ações da pergunta e vira o último item do fio, logo abaixo da última resposta, alinhado ao texto das respostas e com a mesma curva dos outros itens; o campo abre logo abaixo dele. Com o fio recolhido, ou na pergunta respondida só ao vivo (sem fio), o **Responder** fica na linha de ações da pergunta, como antes. Nunca aparecem os dois. No console, o **Responder** da equipe já ficava na linha da pergunta junto do fio; não mudou.
+
+### 15.5 Os avisos e os diálogos do motor (D95 e D97)
+
+- **No console, o aviso da mão levantada sai**: o cartão "{nome} Gostaria de participar." com **Ver participantes**, e o selo amarelo "✋ 1" no topo do vídeo, eram do motor. O console já mostra as mãos no número da aba **Mãos** e no círculo da barra, então os dois saem pela configuração do iframe (`disabledNotifications` e `conferenceInfo`, lidos na lista permitida da tag fixada). Vale no merge, sem `deploy-meet`. O som da mão continua para quem apresenta.
+- **A live encerrada sem o diálogo do motor**: quando quem apresenta clica em **Encerrar live**, o motor abria "A chamada foi encerrada" com um botão **OK** no meio do palco de cada aluno. Com `notifyOnConferenceDestruction` em falso (lido em `conference/middleware.web.ts` e `conference.js` da tag fixada), ele só desliga e avisa a página, que mostra a tela dela de live encerrada. Vale na sala e no console, no merge, sem `deploy-meet`.
+- **O que ainda pode aparecer do motor** (no console: a gravação que não começou, a tela negada, V2-A59; e algum diálogo de permissão): a folha `infra/jitsi/web/bunker707.css` veste os avisos (`#notifications-container`, pelos papéis `status` e `alert`) como o aviso da área, com o cartão invertido do tema, canto de 12 px, sem a faixa colorida e com o botão sublinhado na cor do texto; e os diálogos (`role="dialog"` com `aria-modal`) com o cartão do tema, canto de 16 px e o botão principal invertido, sem azul. Só ids e papéis, nunca as classes geradas do motor. **Para chegar ao ar**: a etapa `deploy-meet`, com `SEM_LIVE_2H=sim` e o ok do produtor no chat; o `?v=` do carregador mudou junto.
+
+### 15.6 Perguntas novas
+
+| # | Pergunta | Padrão assumido |
+|---|---|---|
+| V2-A81 | O aluno deve responder a uma resposta específica do fio (um fio dentro do fio)? | não: o fio é uma conversa só; o **Responder** fica no fim dele |
+| V2-A82 | O **Marcar como vista** deve valer só para quem marcou? | não: vale para toda a equipe, como o estado da pergunta |
+| V2-A83 | Com o microfone ou a câmera ligados, **Embaixo** deve recarregar sozinho e religar os dois depois? | não: religar a câmera e o microfone sem a pessoa pedir passaria por cima do aviso de gravação; ela usa o item do menu |
+| V2-A84 | O console deve calar todos os avisos do motor, como a sala? | ainda não: só o da mão sai; os outros somem quando o console tiver os próprios avisos (V2-A59) |

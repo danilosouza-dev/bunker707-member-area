@@ -142,11 +142,14 @@ export const SIMULACAO_COPY = {
     variar: {
       titulo: "Variar sozinho",
       dica: "O número sobe e desce sozinho em volta do que você somou, igual para todos os alunos.",
-      ate: "Até (%)",
+      ate: "Varia até (%)",
       direcao: "Para onde varia",
       direcoes: { both: "Para mais e para menos", down: "Só para menos", up: "Só para mais" },
-      aCadaDe: "A cada, de (segundos)",
-      aCadaAte: "Até (segundos)",
+      /* Os dois campos do intervalo numa linha so: "Muda a cada (segundos)  [20] a [60]". */
+      aCada: "Muda a cada (segundos)",
+      aCadaDe: "Muda a cada, de (segundos)",
+      aCadaAte: "Muda a cada, até (segundos)",
+      aCadaEntre: "a",
       exemplo: (numero: number, percentual: number, minimo: number, maximo: number) =>
         `Com +${numero.toLocaleString("pt-BR")} e ${percentual}%, o número fica entre ${minimo.toLocaleString("pt-BR")} e ${maximo.toLocaleString("pt-BR")}.`,
       ritmo: (de: number, ate: number) => (de === ate ? `Muda a cada ${de} s.` : `Muda a cada ${de} a ${ate} s, em horas sorteadas.`),

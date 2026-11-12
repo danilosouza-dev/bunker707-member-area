@@ -32,6 +32,8 @@
   --bunker-speaking: #34d399;
   --bunker-hand: #ffffff;
   --bunker-hand-ink: #141414;
+  --bunker-notice-bg: #f1f1f1;
+  --bunker-notice-ink: #0f0f0f;
 }
 
 html[data-bunker-theme="light"] {
@@ -41,6 +43,8 @@ html[data-bunker-theme="light"] {
   --bunker-speaking: #16a34a;
   --bunker-hand: #141414;
   --bunker-hand-ink: #ffffff;
+  --bunker-notice-bg: #0f0f0f;
+  --bunker-notice-ink: #f1f1f1;
 }
 
 /* O fundo da pagina do iframe e o da area, nos dois temas: na coluna, as miniaturas ficam soltas sobre ele. */
@@ -227,4 +231,85 @@ body {
 #local-video-menu-trigger > button svg,
 #remote-video-menu-trigger > button svg {
   fill: #fff !important;
+}
+
+/*
+ * Os avisos do motor que ainda aparecem no console de quem apresenta (a gravacao que nao comecou, a tela negada; a
+ * pagina da sala do aluno nao mostra nenhum, e o console tira o da mao levantada pela configuracao). Pedido do
+ * produtor de 12/11/2026: o aviso estava no visual do motor (cartao branco com a faixa e o link azuis). Aqui ele
+ * fica como o aviso da area: o cartao invertido do tema (claro no escuro, escuro no claro), canto de 12 px, sem a
+ * faixa colorida, com o icone, o texto, o botao e o X na cor do texto e o botao sublinhado.
+ * NotificationsContainer.tsx poe os avisos em #notifications-container; cada um (Notification.tsx) e o no com
+ * role status ou alert, que tem a faixa como primeiro filho. Os seletores usam so o id e os papeis, nunca o nome das
+ * classes geradas. So cor, canto e sombra: o tamanho e o lugar sao os da tag.
+ */
+#notifications-container [role="status"],
+#notifications-container [role="alert"] {
+  background-color: var(--bunker-notice-bg) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) !important;
+  color: var(--bunker-notice-ink) !important;
+}
+
+#notifications-container [role="status"] > div:first-child,
+#notifications-container [role="alert"] > div:first-child {
+  display: none !important;
+}
+
+#notifications-container [role="status"] span,
+#notifications-container [role="status"] div,
+#notifications-container [role="status"] button,
+#notifications-container [role="alert"] span,
+#notifications-container [role="alert"] div,
+#notifications-container [role="alert"] button {
+  color: var(--bunker-notice-ink) !important;
+}
+
+#notifications-container [role="status"] svg,
+#notifications-container [role="alert"] svg {
+  color: var(--bunker-notice-ink) !important;
+  fill: var(--bunker-notice-ink) !important;
+}
+
+#notifications-container [role="status"] button,
+#notifications-container [role="alert"] button {
+  text-decoration: underline !important;
+  text-underline-offset: 2px;
+}
+
+/*
+ * Os dialogos do motor que ainda podem abrir dentro do palco (o da live encerrada ja nao abre: a configuracao do
+ * iframe manda notifyOnConferenceDestruction em falso). Pedido do produtor de 12/11/2026: o dialogo estava no visual
+ * do motor (cartao cinza com o botao azul). Aqui ele fica como os dialogos da area: o cartao do tema com o canto de
+ * 16 px e o botao principal invertido (claro no escuro, escuro no claro), sem azul.
+ * BaseDialog.tsx desenha o no com role dialog e aria-modal; Dialog.tsx poe o titulo em #dialog-title, o X em
+ * #modal-header-close-button e o botao principal em #modal-dialog-ok-button. So esses, nunca as classes geradas.
+ */
+[role="dialog"][aria-modal="true"] {
+  background-color: var(--bunker-tile) !important;
+  border: 1px solid var(--bunker-tile-border) !important;
+  border-radius: var(--bunker-radius) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45) !important;
+  color: var(--bunker-notice-bg) !important;
+}
+
+[role="dialog"][aria-modal="true"] #dialog-title,
+[role="dialog"][aria-modal="true"] p,
+[role="dialog"][aria-modal="true"] span,
+[role="dialog"][aria-modal="true"] label {
+  color: var(--bunker-notice-bg) !important;
+}
+
+#modal-header-close-button svg {
+  fill: var(--bunker-notice-bg) !important;
+}
+
+#modal-dialog-ok-button {
+  background-color: var(--bunker-notice-bg) !important;
+  border-radius: 999px !important;
+  color: var(--bunker-notice-ink) !important;
+}
+
+#modal-dialog-ok-button span {
+  color: var(--bunker-notice-ink) !important;
 }

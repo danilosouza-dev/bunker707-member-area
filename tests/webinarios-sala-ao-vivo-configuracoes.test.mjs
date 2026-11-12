@@ -1198,9 +1198,10 @@ test("o iframe do console (a superficie console, docs/31 V2-14): quem apresenta 
     assert.deepEqual(embed.liveInterfaceConfigOverwrite(role).SETTINGS_SECTIONS, ["devices"], `${role}: o dialogo de fundo do motor continua so com os aparelhos`);
   }
   for (const role of ["student", "team"]) {
-    // Igual a sala, menos o motor calado da sala (V2-20): no console os avisos do motor continuam (V2-A59).
-    const semAvisos = Object.fromEntries(Object.entries(embed.liveConfigOverwrite(role, qualidade)).filter(([key]) => !["conferenceInfo", "disabledSounds", "notifications"].includes(key)));
-    assert.deepEqual(embed.liveConfigOverwrite(role, qualidade, null, "console"), semAvisos, `${role}: igual a sala, com os avisos do motor`);
+    // Igual a sala, menos o motor calado da sala (V2-20): no console os avisos do motor continuam (V2-A59), menos o da
+    // mao levantada (D95); o selo do motor no topo sai nas duas.
+    const semAvisos = Object.fromEntries(Object.entries(embed.liveConfigOverwrite(role, qualidade)).filter(([key]) => !["disabledSounds", "notifications"].includes(key)));
+    assert.deepEqual(embed.liveConfigOverwrite(role, qualidade, null, "console"), { ...semAvisos, disabledNotifications: ["notify.raisedHand"] }, `${role}: igual a sala, com os avisos do motor menos o da mao`);
   }
 });
 

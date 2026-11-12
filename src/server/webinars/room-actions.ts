@@ -44,6 +44,7 @@ import {
   createReplaySessionSchema,
   deleteQuestionReplySchema,
   launchPollSchema,
+  markQuestionSeenSchema,
   moderateMessageSchema,
   questionStatusSchema,
   removeStudentMessagesSchema,
@@ -68,6 +69,7 @@ import {
   insertChatMessage,
   insertPollRow,
   insertQuestionReplyRow,
+  markQuestionThreadSeen,
   writeQuestionAnswerAuthor,
   insertQuestionRow,
   listPollRows,
@@ -83,7 +85,7 @@ import {
 } from "./chat-store";
 import { takeDownScreenComments } from "./screen-comment-store";
 import { ackSentenceMatches, canEndSession, canOpenSession, canTeamActOn, consoleAckSentence } from "./console-model";
-import { isMissingWebinarSchema, WEBINARS_MIGRATION, WEBINARS_SCREEN_MIGRATION, WEBINARS_V9_MIGRATION, WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
+import { isMissingWebinarSchema, WEBINARS_MIGRATION, WEBINARS_SCREEN_MIGRATION, WEBINARS_V10_MIGRATION, WEBINARS_V9_MIGRATION, WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
 import { roomRoleFor } from "./jitsi-token";
 import {
   CHAT_LIMITS,
@@ -1460,6 +1462,44 @@ export async function setQuestionStatus(input: { questionId: string; status: Web
     invalidateReport();
 
     return { question: questionFromRow(updated) };
+  });
+}
+
+/**
+ * [messaging.write] Marca como visto o fio de uma pergunta respondida (rodada v10, pedido do produtor de 12/11/2026;
+ * docs/30 D94): o aviso "Nova resposta do aluno" e o numero da aba Perguntas saem sem a equipe precisar responder, e
+ * voltam sozinhos quando o aluno escrever de novo. Vale para toda a equipe (fica gravado na pergunta, com quem marcou).
+ * Nada muda para o aluno. A pergunta apagada ou que nao existe: 404. Banco sem a 202611160001: 409 com o aviso dela.
+ */
+export async function markQuestionSeen(input: { questionId: string }): Promise<ActionResult<{ questionId: string; seenAt: string }>> {
+  return runWebinarAction("messaging.write", "atendimento", markQuestionSeenSchema, input, async ({ input: data, user }) => {
+    const db = webinarsDb();
+    const seenAt = new Date().toISOString();
+    const question = await fetchQuestionRow(db, data.questionId);
+
+    if (!question || question.deleted_at) {
+      throw new WebinarError(QUESTION_MISSING_MESSAGE, 404);
+    }
+
+    let marked: boolean;
+    try {
+      marked = await markQuestionThreadSeen(db, { id: question.id, seenAt, seenBy: user.id });
+    } catch (error) {
+      if (isPendingMigrationError(error)) {
+        throw new WebinarError(WEBINAR_COPY.exportar.migracaoPendente(WEBINARS_V10_MIGRATION), 409);
+      }
+      throw error;
+    }
+    if (!marked) {
+      throw new WebinarError(QUESTION_MISSING_MESSAGE, 404);
+    }
+
+    const sessionRow = await fetchSessionRow(db, question.session_id);
+    if (sessionRow) {
+      revalidateConsole(sessionRow.webinar_id);
+    }
+
+    return { questionId: question.id, seenAt };
   });
 }
 

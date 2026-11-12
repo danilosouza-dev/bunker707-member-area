@@ -874,6 +874,11 @@ export type WebinarQuestion = {
    */
   simulated: boolean;
   status: QuestionStatus;
+  /**
+   * Quando a equipe marcou o fio como visto (rodada v10, docs/30 D94): o aviso "Nova resposta do aluno" sai ate o
+   * aluno escrever de novo. So o console le; nunca vai para o aluno. Ausente ou nulo: nunca marcado.
+   */
+  threadSeenAt?: string | null;
   upvotes: number;
   /** Quem perguntou; nulo so na pergunta simulada. */
   userId: string | null;

@@ -66,6 +66,11 @@ type ConsoleQuestionsProps = {
    * (nulo). Nula quando a sessao nao aceita a equipe ou no Replay: o botao nao aparece.
    */
   onScreenComment?: ((questionId: string | null) => void) | null;
+  /**
+   * Rodada v10 (docs/30 D94): "Marcar como vista" na pergunta com o aviso "Nova resposta do aluno"; tira o aviso sem a
+   * equipe responder. Sem a prop, o botao nao aparece.
+   */
+  onSeen?: ((questionId: string) => void) | null;
   /** A pergunta que esta na tela agora (a exibicao de origem pergunta); nula sem nenhuma. */
   screenCommentQuestionId?: string | null;
   onStatus: (questionId: string, status: QuestionStatus) => void;
@@ -194,6 +199,7 @@ export function ConsoleQuestions({
   onDeleteReply = null,
   onReply = null,
   onScreenComment = null,
+  onSeen = null,
   onStatus,
   questions,
   screenCommentQuestionId = null
@@ -407,7 +413,25 @@ export function ConsoleQuestions({
                         {copy.reply}
                       </button>
                     ) : null}
-                    <button className={roomPillClassName({ className: canReply && !replyOpen ? undefined : "-ml-3", size: "s", tone: "text" })} disabled={busy} onClick={() => onStatus(question.id, "open")} type="button">
+                    {/* Tira o aviso "Nova resposta do aluno" sem responder (docs/30 D94); so na pergunta que espera a equipe. */}
+                    {awaitsTeam && onSeen ? (
+                      <button
+                        className={roomPillClassName({ className: canReply && !replyOpen ? undefined : "-ml-3", size: "s", tone: "text" })}
+                        data-console-question-seen=""
+                        disabled={busy}
+                        onClick={() => onSeen(question.id)}
+                        title={copy.markSeenHint}
+                        type="button"
+                      >
+                        {copy.markSeen}
+                      </button>
+                    ) : null}
+                    <button
+                      className={roomPillClassName({ className: (canReply && !replyOpen) || (awaitsTeam && onSeen) ? undefined : "-ml-3", size: "s", tone: "text" })}
+                      disabled={busy}
+                      onClick={() => onStatus(question.id, "open")}
+                      type="button"
+                    >
                       {copy.reopen}
                     </button>
                     {screenButton}

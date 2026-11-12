@@ -396,6 +396,9 @@ export const answerQuestionSchema = z.object({
 
 export const questionStatusSchema = z.object({ questionId: uuidSchema, status: z.enum(QUESTION_STATUSES, { error: CHAT_MESSAGES.invalid }) });
 
+/** Marcar o fio de uma pergunta como visto pela equipe (console; rodada v10, docs/30 D94). */
+export const markQuestionSeenSchema = z.object({ questionId: uuidSchema });
+
 /** A resposta da equipe no fio de uma pergunta ja respondida (console). */
 export const replyQuestionSchema = z.object({
   author: answerAuthorChoiceSchema,

@@ -67,7 +67,7 @@ config.localRecording = { disable: false };
         // O v e o comeco do sha256 da folha (a guarda da infra confere e diz o valor novo): o nginx guarda /css/* por
         // um ano quando a URL tem ?v=, entao uma folha nova chega sempre num endereco novo. Caminho absoluto por
         // clareza (a pagina tem <base href="/">, entao um relativo tambem resolveria).
-        link.href = '/css/bunker707.css?v=56cab5dc';
+        link.href = '/css/bunker707.css?v=33ebf1db';
         (document.head || document.documentElement).appendChild(link);
     } catch (e) {
         // Sem a folha nossa, o motor segue com o visual padrao dele.

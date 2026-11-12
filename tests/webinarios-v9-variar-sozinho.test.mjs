@@ -339,9 +339,17 @@ test("a tela: a caixa Variar sozinho, os campos, o exemplo e a variacao de agora
   assert.match(aberto, /data-simulation-vary="on"/);
   assert.match(aberto, /<input[^>]*checked=""[^>]*id="teste-variar"|<input[^>]*id="teste-variar"[^>]*checked=""/);
   const texto = textOf(aberto);
-  for (const frase of ["Até (%)", "A cada, de (segundos)", "Até (segundos)", "Para mais e para menos", "Só para mais", "Só para menos", "Com +300 e 5%, o número fica entre 285 e 315."]) {
+  for (const frase of ["Varia até (%)", "Muda a cada (segundos)", "Para mais e para menos", "Só para mais", "Só para menos", "Com +300 e 5%, o número fica entre 285 e 315."]) {
     assert.ok(texto.includes(frase), frase);
   }
+  // Uma linha por regra, o nome a esquerda e o campo a direita com a mesma largura (teste do produtor de 12/11/2026,
+  // docs/30 D92: os tres campos lado a lado ficavam desalinhados no painel). Os dois numeros do "Muda a cada" ficam
+  // num grupo com o nome dele, cada um com o rotulo proprio para o leitor de tela.
+  assert.equal((aberto.match(/<div class="w-20[^"]*">\s*<input/g) ?? []).length, 3, "os tres campos com a mesma largura");
+  assert.match(aberto, /role="group"/);
+  assert.match(aberto, /<label class="sr-only" for="teste-variar-de">Muda a cada, de \(segundos\)<\/label>/);
+  assert.match(aberto, /<label class="sr-only" for="teste-variar-ate">Muda a cada, até \(segundos\)<\/label>/);
+  assert.match(aberto, /<label[^>]*for="teste-variar-percentual"[^>]*>Varia até \(%\)<\/label>/);
   assert.match(aberto, /id="teste-variar-percentual"[^>]*value="5"|value="5"[^>]*id="teste-variar-percentual"/);
   assert.equal((aberto.match(/type="radio"/g) ?? []).length, 3, "tres direcoes");
   assert.match(aberto, /aria-live="polite"[^>]*data-simulation-vary-example|data-simulation-vary-example=""[^>]*aria-live="polite"/);

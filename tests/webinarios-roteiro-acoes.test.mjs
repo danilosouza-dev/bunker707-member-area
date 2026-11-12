@@ -391,6 +391,7 @@ test("sem permissão: 403 em toda ação do roteiro e do console, sem tocar no b
     () => roomActions.closePoll({ pollId: randomUUID(), sessionId: SESSAO_NO_AR }),
     () => roomActions.answerQuestion({ answerText: "x", questionId: randomUUID() }),
     () => roomActions.setQuestionStatus({ questionId: randomUUID(), status: "dismissed" }),
+    () => roomActions.markQuestionSeen({ questionId: randomUUID() }),
     () => roomActions.saveSimulation({ sessionId: SESSAO_MARCADA, showLiveBadge: false }),
     () => roomActions.createReplaySession({ webinarId: WEBINAR }),
     () => roomActions.cancelReplaySession({ webinarId: WEBINAR }),
@@ -1170,13 +1171,126 @@ test("banco sem a 202611100001: responder e apagar no fio pela equipe voltam 409
 
   const resposta = await roomActions.replyToQuestion({ body: "E fica no Replay tambem.", questionId: pergunta.id });
   assert.deepEqual([resposta.ok, resposta.status], [false, 409]);
-  // A frase aponta a mais nova dos webinarios (WEBINARS_MIGRATION, hoje a 202611150001 da rodada v9): aplicar ate ela
+  // A frase aponta a mais nova dos webinarios (WEBINARS_MIGRATION, hoje a 202611160001 da rodada v10): aplicar ate ela
   // inclui a do fio.
-  assert.equal(resposta.error, "Esta parte precisa da atualização do banco (migração 202611150001).");
+  assert.equal(resposta.error, "Esta parte precisa da atualização do banco (migração 202611160001).");
   const apagar = await roomActions.deleteQuestionReply({ replyId: randomUUID() });
-  assert.deepEqual([apagar.ok, apagar.status, apagar.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611150001)."]);
+  assert.deepEqual([apagar.ok, apagar.status, apagar.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611160001)."]);
   assert.equal(db.tables.admin_audit_log.length, 0);
   assert.equal(db.tables.notifications.length, 0);
+});
+
+test("Marcar como vista (rodada v10, D94): grava quando e quem viu o fio, nada mais muda na pergunta e nada vai ao chat, ao sino nem a auditoria; a apagada e a que nao existe, 404; banco sem a 202611160001, 409 com a frase dela", async () => {
+  const antes = new Date(Date.now() - 3 * MIN).toISOString();
+  const pergunta = { ...DEFAULTS.webinar_questions, answer_text: "Fica 7 dias.", answered_at: antes, answered_by: HOST, body: "Vai ter replay?", created_at: antes, display_name: "Ana M.", id: randomUUID(), offset_ms: 2_000, session_id: SESSAO_NO_AR, status: "answered", updated_at: antes, user_id: ALUNA };
+  const apagada = { ...pergunta, deleted_at: antes, id: randomUUID() };
+  const db = usar(bancoEmMemoria(cenario({ webinar_questions: [pergunta, apagada] })));
+
+  const inicio = Date.now();
+  const marcada = ok(await roomActions.markQuestionSeen({ questionId: pergunta.id }));
+  assert.equal(marcada.questionId, pergunta.id);
+  const linha = db.tables.webinar_questions.find((row) => row.id === pergunta.id);
+  assert.equal(linha.thread_seen_at, marcada.seenAt, "a hora do servidor");
+  assert.ok(Date.parse(linha.thread_seen_at) >= inicio && Date.parse(linha.thread_seen_at) <= Date.now());
+  assert.equal(linha.thread_seen_by, HOST, "quem marcou");
+  // A pergunta continua respondida, com a resposta e o autor de antes; nada vai ao chat nem ao sino.
+  assert.deepEqual([linha.status, linha.answer_text, linha.answered_at, linha.answered_by], ["answered", "Fica 7 dias.", antes, HOST]);
+  assert.equal(db.tables.webinar_chat_messages.length, 0);
+  assert.equal(db.tables.notifications.length, 0);
+  assert.ok(estado.revalidados.length > 0, "o console recarrega");
+
+  // Marcar de novo so atualiza a hora (o aluno escreveu outra vez e a equipe viu de novo).
+  const deNovo = ok(await roomActions.markQuestionSeen({ questionId: pergunta.id }));
+  assert.ok(Date.parse(deNovo.seenAt) >= Date.parse(marcada.seenAt));
+
+  // A apagada e a que nao existe: 404, sem gravar.
+  for (const questionId of [apagada.id, randomUUID()]) {
+    const result = await roomActions.markQuestionSeen({ questionId });
+    assert.deepEqual([result.ok, result.status], [false, 404], questionId);
+  }
+  assert.equal(db.tables.webinar_questions.find((row) => row.id === apagada.id).thread_seen_at, undefined);
+  const invalido = await roomActions.markQuestionSeen({ questionId: "nao-e-um-id" });
+  assert.equal(invalido.ok, false);
+
+  // O banco sem as colunas (o PostgREST responde PGRST204 ao update): 409 com a frase da migracao, e nada muda.
+  const semColunas = usar(bancoEmMemoria(cenario({ webinar_questions: [pergunta] })));
+  const from = semColunas.from;
+  semColunas.from = (table) => {
+    const query = from(table);
+    if (table !== "webinar_questions") {
+      return query;
+    }
+    const update = query.update;
+    query.update = (payload) => {
+      if (!("thread_seen_at" in payload)) {
+        return update(payload);
+      }
+      const falha = { data: null, error: { code: "PGRST204", message: "Could not find the 'thread_seen_at' column of 'webinar_questions' in the schema cache" } };
+      const self = new Proxy({}, { get: (_target, prop) => (prop === "then" ? (resolve, reject) => Promise.resolve(falha).then(resolve, reject) : () => self) });
+      return self;
+    };
+    return query;
+  };
+  const semMigracao = await roomActions.markQuestionSeen({ questionId: pergunta.id });
+  assert.deepEqual([semMigracao.ok, semMigracao.status, semMigracao.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611160001)."]);
+  assert.equal(semColunas.tables.webinar_questions[0].thread_seen_at, undefined);
+});
+
+test("a leitura das perguntas tolera o banco sem as colunas novas (D94): tenta a lista da v10, depois a da v9, depois a de sempre; a lista que falhou fica de fora por 1 min", async () => {
+  const chatStore = await import("../src/server/webinars/chat-store.ts");
+  const chatRows = await import("../src/server/webinars/chat-rows.ts");
+  const antes = new Date(Date.now() - 3 * MIN).toISOString();
+  const pergunta = { ...DEFAULTS.webinar_questions, answer_text: "Fica 7 dias.", answered_at: antes, answered_by: HOST, body: "Vai ter replay?", created_at: antes, display_name: "Ana M.", id: randomUUID(), offset_ms: 2_000, session_id: SESSAO_NO_AR, status: "answered", thread_seen_at: antes, updated_at: antes, user_id: ALUNA };
+
+  /** O banco em memoria que recusa (42703) o select com uma das colunas em `faltam`, e anota as listas pedidas. */
+  const banco = (faltam) => {
+    const db = bancoEmMemoria(cenario({ webinar_questions: [pergunta] }));
+    const from = db.from;
+    const pedidas = [];
+    db.from = (table) => {
+      const query = from(table);
+      if (table !== "webinar_questions") {
+        return query;
+      }
+      const select = query.select;
+      query.select = (columns, options) => {
+        pedidas.push(columns);
+        const falta = faltam.find((column) => String(columns).includes(column));
+        if (!falta) {
+          return select(columns, options);
+        }
+        const falha = { data: null, error: { code: "42703", message: `column webinar_questions.${falta} does not exist` } };
+        const self = new Proxy({}, { get: (_target, prop) => (prop === "then" ? (resolve, reject) => Promise.resolve(falha).then(resolve, reject) : () => self) });
+        return self;
+      };
+      return query;
+    };
+    return { db, pedidas };
+  };
+  const ler = (db) => chatStore.listQuestionRows(db, { order: "recent", sessionId: SESSAO_NO_AR });
+
+  // Com tudo aplicado: uma leitura so, com a lista mais nova, e a marca chega.
+  chatStore.clearV9ColumnsMemory();
+  const completo = banco([]);
+  const [linha] = await ler(completo.db);
+  assert.deepEqual(completo.pedidas, [chatRows.QUESTION_COLUMNS_V10]);
+  assert.equal(chatRows.questionFromRow(linha).threadSeenAt, antes);
+
+  // Sem a 202611160001: cai para a lista da v9 e as perguntas continuam chegando (so sem a marca de vista).
+  chatStore.clearV9ColumnsMemory();
+  const semV10 = banco(["thread_seen_at"]);
+  assert.equal((await ler(semV10.db)).length, 1);
+  assert.deepEqual(semV10.pedidas, [chatRows.QUESTION_COLUMNS_V10, chatRows.QUESTION_COLUMNS_V9]);
+  // Na leitura seguinte (a consulta de 5 s), a lista que falhou nem e tentada: nenhum erro por consulta.
+  assert.equal((await ler(semV10.db)).length, 1);
+  assert.deepEqual(semV10.pedidas.slice(2), [chatRows.QUESTION_COLUMNS_V9]);
+
+  // Sem a 202611150001 tambem: a lista de sempre.
+  chatStore.clearV9ColumnsMemory();
+  const semV9 = banco(["thread_seen_at", "answer_author"]);
+  assert.equal((await ler(semV9.db)).length, 1);
+  assert.deepEqual(semV9.pedidas, [chatRows.QUESTION_COLUMNS_V10, chatRows.QUESTION_COLUMNS_V9, chatRows.QUESTION_COLUMNS]);
+  chatStore.clearV9ColumnsMemory();
 });
 
 test("D31 na Live ao vivo: a mensagem da equipe nasce na linha mestre (o replay toca o chat da live); a resposta escrita nao e mais mensagem do chat (rodada v9, D85); na Live gravada nao", async () => {

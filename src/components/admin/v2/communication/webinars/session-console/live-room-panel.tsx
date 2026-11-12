@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type Dispatch, type RefObject } from "react";
 import { useJitsiDevices, type UseJitsiDevices } from "@/components/webinars/use-jitsi-devices";
-import { mountedThumbsRow, onStageParticipantOf } from "@/components/member/webinars/room/live-room-model";
+import { mountedThumbsRow, onStageParticipantOf, thumbsPending, thumbsReloadMode } from "@/components/member/webinars/room/live-room-model";
+import type { RoomThumbs } from "@/lib/webinar-room-prefs";
 import { useJitsiMeet, type JitsiMeetApi, type JitsiStatus } from "@/components/webinars/use-jitsi-meet";
 import { deviceEnvironmentOf, deviceSectionReady, deviceSettingsFor, type DeviceKind, type DeviceOption, type DeviceSettings } from "@/lib/jitsi-device-settings";
 import {
@@ -222,6 +223,15 @@ export type LiveRoomHandle = {
   testing: boolean;
   tokenError: TokenState["error"];
 };
+
+/**
+ * Quem recarrega o video do console para a troca entre Lateral e Embaixo valer (docs/30 D96; thumbsReloadMode): a
+ * pagina sozinha quando o microfone, a camera e a tela de quem esta no console estao desligados; senao, a pessoa, pelo
+ * menu. No console ninguem passa pela sala de espera.
+ */
+export function consoleThumbsReload(handle: Pick<LiveRoomHandle, "audioOn" | "joined" | "sharing" | "thumbsRow" | "videoOn">, thumbs: RoomThumbs): "auto" | "locked" | "manual" | null {
+  return thumbsReloadMode({ joined: handle.joined, locked: false, onAir: handle.audioOn || handle.videoOn || handle.sharing, pending: thumbsPending({ row: handle.thumbsRow, thumbs }) });
+}
 
 type UseLiveRoomInput = {
   canPublish: boolean;

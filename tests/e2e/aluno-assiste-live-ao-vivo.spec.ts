@@ -1795,7 +1795,7 @@ test("a Na tela por cima do iframe do motor: no palco largo o banner e o QR Code
   }
 });
 
-test("as miniaturas (rodada v9, docs/30 D91): Esconder e Lateral valem na hora, por comando e sem remontar; Embaixo fica guardado, o menu avisa e a fileira entra quando o video carrega de novo", async ({ page }) => {
+test("as miniaturas (docs/30 D91 e D96): Esconder e Lateral valem na hora, por comando e sem remontar; Embaixo recarrega o video sozinho com o microfone e a camera desligados e a fileira entra na hora; com a camera ligada, o menu avisa e oferece Recarregar o vídeo agora", async ({ page }) => {
   test.setTimeout(120_000);
   const visao = WEBINAR_COPY.salaV2.visao;
   const miniaturas = visao.miniaturas;
@@ -1836,31 +1836,54 @@ test("as miniaturas (rodada v9, docs/30 D91): Esconder e Lateral valem na hora, 
   await sala.disparar("filmstripDisplayChanged", { visible: true });
   await expect.poll(() => margem("--room-video-right")).toBe("222px");
 
-  // Embaixo: fica guardado, nenhum comando e nenhuma remontagem; o menu avisa que vale ao recarregar.
+  // Embaixo, com o microfone e a camera desligados (teste do produtor de 12/11/2026: "quando eu coloco fileira embaixo,
+  // ela não funciona"): a pagina recarrega o video sozinha, sem recarregar a pagina e sem comando; o video novo monta com
+  // a fileira embaixo, a base do palco sobe a altura dela e nada e descontado a direita; o menu nao avisa nada.
   antes = (await sala.comandos()).length;
+  const token = page.waitForResponse((response) => response.url().endsWith("/join-token") && response.request().method() === "POST");
   await botao.click();
   await opcao(miniaturas.opcoes.bottom).click();
-  await botao.click();
-  await expect(opcao(miniaturas.opcoes.bottom)).toHaveAttribute("aria-checked", "true");
-  await expect(menu.getByRole("note")).toHaveText(miniaturas.aoRecarregar);
-  await page.keyboard.press("Escape");
-  expect((await sala.comandos()).slice(antes).some((item) => item.comando === "toggleFilmStrip"), "a troca para Embaixo nao manda comando").toBe(false);
-  expect(await sala.montagens(), "a pagina nao recarrega o video sozinha").toBe(1);
-
-  // Recarregar e entrar de novo: o video monta com a fileira embaixo, a base do palco sobe a altura dela e nada e
-  // descontado a direita; o aviso some do menu.
-  await page.reload();
-  await expect(dialogo).toHaveAttribute("data-room-kind", "live");
-  const token = page.waitForResponse((response) => response.url().endsWith("/join-token") && response.request().method() === "POST");
-  await dialogo.getByRole("button", { exact: true, name: aoVivo.entrarNaSala }).click();
-  expect((await token).status()).toBe(200);
+  expect((await token).status(), "a sala pede outro token para o video novo").toBe(200);
+  await expect.poll(() => sala.montagens(), { timeout: 20_000 }).toBe(2);
   const comFileira = await sala.esperarMontada();
   expect(comFileira.interfaceConfigOverwrite.VERTICAL_FILMSTRIP, "a fileira embaixo").toBe(false);
   await sala.disparar("videoConferenceJoined", { displayName: "Aluna T.", id: PARTICIPANTE, roomName });
   await expect(dialogo.getByRole("button", { exact: true, name: aoVivo.levantarMao })).toBeEnabled();
   await expect.poll(() => margem("--room-video-bottom")).toBe("144px");
   await expect.poll(() => margem("--room-video-right")).toBe("0px");
+  expect((await sala.comandos()).slice(antes).some((item) => item.comando === "toggleFilmStrip"), "a troca para Embaixo nao manda comando").toBe(false);
   await botao.click();
   await expect(opcao(miniaturas.opcoes.bottom)).toHaveAttribute("aria-checked", "true");
   await expect(menu.getByRole("note")).toHaveCount(0);
+  await expect(menu.getByRole("menuitem", { exact: true, name: miniaturas.recarregarAgora })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  expect(await sala.montagens(), "uma recarga so").toBe(2);
+
+  // Com a camera ligada, a pagina nao recarrega o video sozinha (desligaria a camera no meio): o menu avisa e oferece
+  // "Recarregar o vídeo agora"; o clique recarrega, e a coluna volta para o lado.
+  await sala.disparar("videoMuteStatusChanged", { muted: false });
+  await botao.click();
+  await opcao(miniaturas.opcoes.side).click();
+  await botao.click();
+  await expect(opcao(miniaturas.opcoes.side)).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByRole("note")).toHaveText(miniaturas.esperaManual);
+  expect(await sala.montagens(), "com a camera ligada, nada recarrega sozinho").toBe(2);
+  await menu.getByRole("menuitem", { exact: true, name: miniaturas.recarregarAgora }).click();
+  await expect.poll(() => sala.montagens(), { timeout: 20_000 }).toBe(3);
+  const comColuna = await sala.esperarMontada();
+  expect(comColuna.interfaceConfigOverwrite.VERTICAL_FILMSTRIP, "a coluna ao lado de novo").toBe(true);
+  await sala.disparar("videoConferenceJoined", { displayName: "Aluna T.", id: PARTICIPANTE, roomName });
+  await expect(dialogo.getByRole("button", { exact: true, name: aoVivo.levantarMao })).toBeEnabled();
+  await expect.poll(() => margem("--room-video-bottom")).toBe("0px");
+  await expect.poll(() => margem("--room-video-right")).toBe("222px");
+  await botao.click();
+  await expect(menu.getByRole("note")).toHaveCount(0);
+
+  // A escolha fica guardada: Embaixo de novo e, depois de recarregar a pagina, o video ja monta com a fileira.
+  await opcao(miniaturas.opcoes.bottom).click();
+  await expect.poll(() => sala.montagens(), { timeout: 20_000 }).toBe(4);
+  await page.reload();
+  await expect(dialogo).toHaveAttribute("data-room-kind", "live");
+  await dialogo.getByRole("button", { exact: true, name: aoVivo.entrarNaSala }).click();
+  expect((await sala.esperarMontada()).interfaceConfigOverwrite.VERTICAL_FILMSTRIP, "a fileira embaixo, guardada").toBe(false);
 });

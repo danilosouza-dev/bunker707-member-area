@@ -8,14 +8,17 @@ import "./support/transpile-tsx.mjs";
 // - a escolha guardada: Lateral por padrao; Embaixo e Esconder pelo nome; a sala e o console em chaves proprias;
 // - o que a sala pede ao motor: Esconder tira as miniaturas com qualquer largura; a coluna continua pedindo 1013 px;
 //   a fileira embaixo (o iframe montado com ela) nao depende da largura da coluna, so de 640 px; na Grade, nada;
-// - o motor decide coluna ou fileira na montagem: a troca entre Lateral e Embaixo com o video na tela espera a proxima
-//   carga (o menu avisa); o Esconder nunca espera; sem iframe nada espera;
+// - o motor decide coluna ou fileira na montagem: a troca entre Lateral e Embaixo com o video na tela pede outra
+//   carga; o Esconder nunca espera; sem iframe nada espera. Quem recarrega (teste do produtor de 12/11/2026, a tarde:
+//   "quando eu coloco fileira embaixo, ela não funciona"; docs/30 D96): a pagina sozinha quando nada da pessoa esta no
+//   ar; a pessoa, pelo menu, com o microfone, a camera ou a tela ligados; ninguem com a sala trancada;
 // - a fileira embaixo sobe os selos de baixo, as pilulas, o aviso e os cartoes da Na tela (--room-video-bottom), e a
 //   coluna deixa de descontar a direita;
 // - o console: o co-apresentador e a Equipe seguem a conta da sala; o Apresentador so manda o comando pela escolha
 //   dele, no Palco, nunca pela largura (V2-A5);
-// - o menu "Visão do vídeo" ganha o grupo Miniaturas com as tres opcoes, a marcada e a frase do recarregar; no console
-//   de quem apresenta, com o Esconder, a frase da gravacao;
+// - o menu "Visão do vídeo" ganha o grupo Miniaturas com as tres opcoes e a marcada; com a troca esperando, a frase
+//   da espera e, com algo no ar, o item Recarregar o vídeo agora; no console de quem apresenta, com o Esconder, a
+//   frase da gravacao;
 // - o iframe leva a fileira embaixo so com "Embaixo" (VERTICAL_FILMSTRIP falso), e o que valeu na montagem e lido de volta.
 
 const { createElement } = await import("react");
@@ -100,6 +103,28 @@ test("o motor decide na montagem: a troca entre Lateral e Embaixo espera a proxi
   assert.match(hook, /\}, \[container, domain, mountKey, ready, room\]\);/, "a config nao entra nas dependencias da montagem");
 });
 
+test("quem recarrega o video para a troca valer (D96): a pagina sozinha com nada no ar; a pessoa, pelo menu, com algo no ar; ninguem com a sala trancada nem fora da sala", () => {
+  const modo = (parte) => model.thumbsReloadMode({ joined: true, locked: false, onAir: false, pending: true, ...parte });
+  assert.equal(modo({}), "auto", "microfone, camera e tela desligados: recarrega sozinha");
+  assert.equal(modo({ onAir: true }), "manual", "falando ou com a camera ligada: so pelo menu");
+  assert.equal(modo({ locked: true }), "locked", "a sala trancada: recarregar mandaria o aluno para a sala de espera");
+  assert.equal(modo({ locked: true, onAir: true }), "locked");
+  assert.equal(modo({ pending: false }), null, "sem troca esperando, nada");
+  assert.equal(modo({ pending: false, onAir: true }), null);
+  assert.equal(modo({ joined: false }), null, "fora da sala a proxima montagem ja leva a escolha");
+
+  // A sala: o que conta como "no ar" e a sala trancada; a recarga sozinha sai uma vez, fora da renderizacao.
+  const hook = fonte("src/components/member/webinars/room/use-live-room.ts");
+  assert.match(hook, /thumbsReloadMode\(\{ joined: joinedNow, locked: lobby, onAir: signals\.audioOn \|\| signals\.videoOn, pending: thumbsPending\(\{ row: mountedRow, thumbs \}\) \}\)/);
+  assert.match(hook, /if \(thumbsReload !== "auto"\) \{\s*return;\s*\}\s*const id = window\.setTimeout\(\(\) => reloadVideoRef\.current\(\), 0\);/);
+  assert.match(hook, /thumbsWait: thumbsReload === "auto" \? null : thumbsReload/);
+  // O console: ninguem passa pela sala de espera, e a tela compartilhada tambem conta como "no ar".
+  const painel = fonte("src/components/admin/v2/communication/webinars/session-console/live-room-panel.tsx");
+  assert.match(painel, /thumbsReloadMode\(\{ joined: handle\.joined, locked: false, onAir: handle\.audioOn \|\| handle\.videoOn \|\| handle\.sharing, pending: thumbsPending\(\{ row: handle\.thumbsRow, thumbs \}\) \}\)/);
+  const palco = fonte("src/components/admin/v2/communication/webinars/session-console/console-stage.tsx");
+  assert.match(palco, /if \(thumbsReload !== "auto"\) \{\s*return;\s*\}\s*const id = window\.setTimeout\(reloadVideo, 0\);/);
+});
+
 test("a fileira embaixo sobe o que fica na base do palco, e a coluna deixa de descontar a direita", () => {
   assert.equal(model.stageColumnShown(NA_TELA, true), true);
   assert.equal(model.stageColumnShown(NA_TELA, true, false), true);
@@ -144,7 +169,7 @@ test("o console: o co-apresentador e a Equipe seguem a conta da sala; o Apresent
   assert.match(stage, /if \(wantColumn !== null && joined && frameWidth > 0\) \{\s*syncFilmstrip\(\{ visible: filmstripVisible, wanted: wantColumn \}\);/);
 });
 
-test("o menu Visão do vídeo: o grupo Miniaturas com Lateral, Embaixo e Esconder, a marcada e a frase do recarregar; no console, a da gravacao", () => {
+test("o menu Visão do vídeo: o grupo Miniaturas com Lateral, Embaixo e Esconder e a marcada; com a troca esperando, a frase e o Recarregar o vídeo agora; no console, a da gravacao", () => {
   const menu = (props) => renderToStaticMarkup(createElement(RoomViewMenu, { disabled: false, onChoose: noop, onOpenChange: noop, open: true, shown: "stage", ...props }));
 
   // Sem onThumbs (os dubles de antes), o menu de sempre: so Palco e Grade.
@@ -167,20 +192,43 @@ test("o menu Visão do vídeo: o grupo Miniaturas com Lateral, Embaixo e Esconde
   const escondidas = menu({ onThumbs: noop, thumbs: "hidden" });
   assert.match(escondidas, /aria-checked="true"[^>]*data-room-thumbs="hidden"/);
 
-  const espera = menu({ onThumbs: noop, thumbs: "bottom", thumbsPending: true });
-  assert.match(espera, /<p[^>]*data-room-menu-hint=""[^>]*role="note">Para as miniaturas mudarem de lugar, recarregue a página\.<\/p>/);
-  assert.equal((espera.match(/role="menuitem(radio)?"/g) ?? []).length, 5, "a frase nao e opcao (o teclado passa por cima)");
+  // Com algo da pessoa no ar: a frase diz o que recarregar desliga e o menu oferece o item (que nao e uma opcao marcavel).
+  let recarregou = 0;
+  const manual = menu({ onReloadVideo: () => (recarregou += 1), onThumbs: noop, thumbs: "bottom", thumbsWait: "manual" });
+  assert.match(
+    manual,
+    /<p[^>]*data-room-menu-hint=""[^>]*role="note">A mudança vale quando o vídeo recarregar\. Recarregar agora desliga o seu microfone e a sua câmera por alguns segundos\.<\/p>/
+  );
+  assert.equal((manual.match(/role="menuitemradio"/g) ?? []).length, 5, "as cinco opcoes de sempre");
+  assert.match(manual, /<button[^>]*data-room-thumbs-reload=""[^>]*role="menuitem"|<button[^>]*role="menuitem"[^>]*data-room-thumbs-reload=""/);
+  assert.ok(textOf(manual).includes("Recarregar o vídeo agora"));
+  assert.equal(recarregou, 0, "so no clique");
+  // Sem quem recarregue (um duble antigo), so a frase.
+  assert.doesNotMatch(menu({ onThumbs: noop, thumbs: "bottom", thumbsWait: "manual" }), /data-room-thumbs-reload/);
+
+  // A sala trancada: a frase da proxima entrada, sem o item (recarregar mandaria o aluno para a sala de espera).
+  const trancada = menu({ onReloadVideo: noop, onThumbs: noop, thumbs: "bottom", thumbsWait: "locked" });
+  assert.match(trancada, /role="note">Com a sala trancada, a mudança vale na próxima vez que você entrar\.<\/p>/);
+  assert.doesNotMatch(trancada, /data-room-thumbs-reload/);
+
+  // Sem espera (a pagina recarrega o video sozinha), nada a avisar nem a oferecer.
+  const sozinha = menu({ onReloadVideo: noop, onThumbs: noop, thumbs: "bottom", thumbsWait: null });
+  assert.doesNotMatch(sozinha, /data-room-menu-hint|data-room-thumbs-reload/);
 
   const gravacao = menu({ forAll: true, onThumbs: noop, thumbs: "hidden", thumbsNote: COPY.escondidasNaGravacao });
   assert.match(gravacao, /role="note">Escondidas para você e na gravação\. Cada aluno escolhe as dele\.<\/p>/);
-  // A do recarregar vem antes da nota.
-  const duas = menu({ onThumbs: noop, thumbs: "bottom", thumbsNote: COPY.escondidasNaGravacao, thumbsPending: true });
-  assert.ok(textOf(duas).includes(COPY.aoRecarregar) && !textOf(duas).includes(COPY.escondidasNaGravacao));
+  // A da espera vem antes da nota.
+  const duas = menu({ onThumbs: noop, thumbs: "bottom", thumbsNote: COPY.escondidasNaGravacao, thumbsWait: "manual" });
+  assert.ok(textOf(duas).includes(COPY.esperaManual) && !textOf(duas).includes(COPY.escondidasNaGravacao));
+  // A frase antiga ("recarregue a página") saiu: a pessoa nunca precisa recarregar a pagina.
+  assert.equal(COPY.aoRecarregar, undefined);
 
   // A barra do console passa a nota so para quem apresenta com o Esconder.
   const bar = fonte("src/components/admin/v2/communication/webinars/session-console/console-bar.tsx");
   assert.match(bar, /thumbsNote=\{handle\.role === "host" && thumbs === "hidden" \? WEBINAR_COPY\.salaV2\.visao\.miniaturas\.escondidasNaGravacao : null\}/);
-  assert.match(bar, /thumbsPending=\{thumbsPending\(\{ row: handle\.thumbsRow, thumbs \}\)\}/);
+  assert.match(bar, /const thumbsReload = consoleThumbsReload\(handle, thumbs\);\s*const thumbsWait = thumbsReload === "auto" \? null : thumbsReload;/);
+  assert.match(bar, /onReloadVideo=\{handle\.retry\}/);
+  assert.match(bar, /thumbsWait=\{thumbsWait\}/);
   // Nenhuma frase cita o motor de video, e nenhuma usa a palavra proibida.
   assert.doesNotMatch(JSON.stringify(COPY), /jitsi|iframe|personagem/i);
 });
@@ -190,7 +238,8 @@ test("a sala e o console levam a escolha ao iframe na montagem e ao comando na h
   assert.match(sala, /const \[thumbs, setThumbs\] = useRoomThumbs\(\);/);
   assert.match(sala, /layout: thumbsLayout\(thumbs\), theme/);
   assert.match(sala, /onThumbs=\{setThumbs\}/);
-  assert.match(sala, /thumbsPending=\{room\.thumbsPending\}/);
+  assert.match(sala, /thumbsWait=\{room\.thumbsWait\}/);
+  assert.match(sala, /onReloadVideo=\{room\.reloadVideo\}/);
   const hook = fonte("src/components/member/webinars/room/use-live-room.ts");
   assert.match(hook, /columnWanted\(\{ frameWidth, row: thumbsRow, thumbs, view: signals\.viewShown \}\)/);
   const console_ = fonte("src/components/admin/v2/communication/webinars/session-console/session-console.tsx");

@@ -150,7 +150,7 @@ function RoomQuestionReplyComment({ reply, serverNowMs }: { reply: StudentQuesti
   );
 }
 
-/** A pergunta como o comentario do YouTube: o polegar com o numero, a situacao, o Responder (na minha) e o fio. */
+/** A pergunta como o comentario do YouTube: o polegar com o numero, a situacao, o fio e o Responder (na minha) no fim dele. */
 function RoomQuestionComment({ footer, onToggleThread, onVote, question, reply = null, serverNowMs, threadOpen = false }: Omit<RoomQuestionItemProps, "look">) {
   const sala = WEBINAR_COPY.sala;
   const novas = WEBINAR_COPY.salaV2;
@@ -211,6 +211,14 @@ function RoomQuestionComment({ footer, onToggleThread, onVote, question, reply =
       />
     ) : null;
 
+  // O Responder fica onde a pessoa quer responder (teste do produtor de 12/11/2026, docs/30 D93): com o fio aberto, no
+  // fim dele, logo abaixo da ultima resposta, e o campo abre ali; sem fio na tela (recolhido, ou a pergunta respondida
+  // so ao vivo), na linha de acoes da pergunta, como antes. Nunca os dois ao mesmo tempo.
+  const replyInThread = canReply && count > 0 && expanded;
+  const replyButton = (className: string) => (
+    <RoomPill aria-expanded={replying} className={className} data-room-reply-open="" label={novas.perguntas.responder} onClick={() => reply?.onOpen(question.id)} size="s" tone="text" touch44 />
+  );
+
   return (
     <RoomComment
       actions={
@@ -233,9 +241,8 @@ function RoomQuestionComment({ footer, onToggleThread, onVote, question, reply =
           {status ? (
             <span className={cn("text-xs leading-[18px]", status === "live" ? "text-room-success-fg" : "text-room-fg-subtle")}>{status === "live" ? sala.respondidaAoVivo : sala.dispensada}</span>
           ) : null}
-          {canReply ? (
-            <RoomPill aria-expanded={replying} className="ml-1" data-room-reply-open="" label={novas.perguntas.responder} onClick={() => reply?.onOpen(question.id)} size="s" tone="text" touch44 />
-          ) : null}
+          {/* Com o fio aberto, o Responder fica no fim do fio, onde a resposta esta (replyInThread); aqui, so sem fio na tela. */}
+          {canReply && !replyInThread ? replyButton("ml-1") : null}
         </>
       }
       avatar={<RoomCommentAvatar imageSrc={question.avatarUrl} kind={question.anonymous ? "anonymous" : "person"} name={question.displayName} />}
@@ -265,6 +272,14 @@ function RoomQuestionComment({ footer, onToggleThread, onVote, question, reply =
             }}
           >
             {items.map((item, index) => (index === 0 ? item : <RoomThreadItem key={`item-${index}`}>{item}</RoomThreadItem>))}
+            {replyInThread ? (
+              <RoomThreadItem>
+                <div className="flex min-w-0" data-room-reply-row="">
+                  {/* O texto do botao alinhado ao texto das respostas (o avatar de 24 px e o vao de 12). */}
+                  {replyButton("ml-6")}
+                </div>
+              </RoomThreadItem>
+            ) : null}
             {field ? <RoomThreadItem>{field}</RoomThreadItem> : null}
           </RoomCommentThread>
         ) : field ? (

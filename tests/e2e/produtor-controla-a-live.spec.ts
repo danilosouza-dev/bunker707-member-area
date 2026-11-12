@@ -187,8 +187,12 @@ test.describe("produtor", () => {
     // O console continua com os avisos do motor (ninguem la ouve o notificationTriggered, V2-A59) e quem apresenta
     // continua ouvindo a mao.
     expect(montagem.configOverwrite).not.toHaveProperty("notifications");
-    expect(montagem.configOverwrite).not.toHaveProperty("conferenceInfo");
     expect(montagem.configOverwrite).not.toHaveProperty("disabledSounds");
+    // So o aviso da mao levantada e o selo do motor no topo saem (docs/30 D95): o console ja mostra as maos na aba e
+    // na barra. E a live encerrada nao abre o dialogo do motor (D97).
+    expect(montagem.configOverwrite.disabledNotifications).toEqual(["notify.raisedHand"]);
+    expect(montagem.configOverwrite.conferenceInfo).toEqual({ alwaysVisible: [], autoHide: [] });
+    expect(montagem.configOverwrite.notifyOnConferenceDestruction).toBe(false);
     expect(montagem.configOverwrite.participantMenuButtonsWithNotifyClick).toEqual([
       { key: "ask-unmute", preventExecution: true },
       { key: "kick", preventExecution: true }
@@ -756,6 +760,20 @@ test.describe("produtor", () => {
     await expect.poll(margemDosSelos).toBe("222px");
     expect((await sala.comandos()).filter((item) => item.comando === "toggleFilmStrip")).toEqual([]);
     expect(await sala.montagens(), "o mesmo iframe").toBe(1);
+
+    // Embaixo (docs/30 D96): com o microfone, a camera e a tela de quem apresenta desligados, o console recarrega so o
+    // video, sozinho, e o video novo monta com a fileira embaixo; a base do palco sobe a altura dela.
+    const miniaturas = WEBINAR_COPY.salaV2.visao.miniaturas;
+    await barraDe(page).getByRole("button", { exact: true, name: WEBINAR_COPY.consoleV2.visao.palcoParaTodos }).click();
+    await page.getByRole("menuitemradio", { exact: true, name: miniaturas.opcoes.bottom }).click();
+    await expect.poll(() => sala.montagens(), { timeout: 20_000 }).toBe(2);
+    const comFileira = await entrarComoApresentador(sala);
+    expect(comFileira.interfaceConfigOverwrite.VERTICAL_FILMSTRIP, "a fileira embaixo").toBe(false);
+    await expect.poll(() => palco.evaluate((elemento) => (elemento as HTMLElement).style.getPropertyValue("--room-video-bottom").trim())).toBe("144px");
+    await page.waitForTimeout(1_000);
+    expect(await sala.montagens(), "uma recarga so").toBe(2);
+    // A escolha e de quem esta no console: volta para Lateral, para os testes seguintes.
+    await page.evaluate(() => window.localStorage.removeItem("bunker707:webinar-console-miniaturas"));
   });
 
   test("o painel com abas (docs/31 V2-15): Mãos com o numero na barra abre a aba Mãos, Abaixar todas as mãos manda um sinal so, para todos; o microfone da linha pelo participantMuted; Lançar enquete abre o ⋯ › Enquetes; o Gravar por preparar abre o ⋯ › Gravação", async ({ page }) => {

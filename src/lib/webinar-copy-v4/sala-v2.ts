@@ -142,8 +142,14 @@ export const SALA_V2_COPY = {
     miniaturas: {
       rotulo: "Miniaturas",
       opcoes: { bottom: "Embaixo", hidden: "Esconder", side: "Lateral" },
-      /** A troca entre Lateral e Embaixo com o vídeo na tela: o motor só muda quando o vídeo carrega. */
-      aoRecarregar: "Para as miniaturas mudarem de lugar, recarregue a página.",
+      /**
+       * A troca entre Lateral e Embaixo pede o vídeo carregado de novo. Com o microfone e a câmera da pessoa desligados,
+       * a sala recarrega o vídeo sozinha; com algo dela no ar, ela escolhe a hora (docs/30 D96).
+       */
+      esperaManual: "A mudança vale quando o vídeo recarregar. Recarregar agora desliga o seu microfone e a sua câmera por alguns segundos.",
+      /** Com a sala trancada, recarregar mandaria o aluno para a sala de espera. */
+      esperaTrancada: "Com a sala trancada, a mudança vale na próxima vez que você entrar.",
+      recarregarAgora: "Recarregar o vídeo agora",
       /** Só no console de quem apresenta, com o Esconder marcado. */
       escondidasNaGravacao: "Escondidas para você e na gravação. Cada aluno escolhe as dele."
     }

@@ -6,7 +6,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 // A largura maxima e a transicao do painel lateral (rodada v9, pedidos do produtor de 12/11/2026; docs/18 §2.2), no Node
 // e sem navegador. P10: em tela cheia o painel do chat e das perguntas ficava com 514 px e uma faixa vazia ao lado das
-// mensagens; agora o teto e 400 px na sala e no console, e o palco fica com o resto. P12: abrir, fechar e trocar de
+// mensagens; agora o teto e 400 px na sala do aluno, e o palco fica com o resto. No console o teto voltou a 514 px
+// (teste do produtor de 12/11/2026, a tarde, docs/30 D92: quem conduz a live quer o painel com mais espaco). P12: abrir, fechar e trocar de
 // aba eram secos; agora o painel desliza e esmaece em 220 ms, so com transform e opacity (a largura do palco, que e o
 // iframe do motor de video, muda uma vez so: no comeco ao abrir e no fim ao fechar), e nada anima com "reduzir
 // movimento" nem antes da primeira pintura. O que depende do relogio do navegador (o painel sumir depois da saida, o
@@ -63,18 +64,23 @@ const painelDoConsole = (props = {}) =>
     ...props
   });
 
-test("P10: o painel da sala e o do console tem no maximo 400 px; em 1280, 1440, 1920 e 2560 px de janela o palco fica com o resto", () => {
+test("P10 e D92: o painel da sala tem no maximo 400 px e o do console volta a 514 px; em 1280, 1440, 1920 e 2560 px de janela o palco fica com o resto", () => {
   const sala = classesDe(painelDaSala(), /^<aside aria-labelledby="room-panel-title" class="([^"]*)"/);
   const console_ = consoleLayout.consoleSkeleton({ hasStage: true, panelOpen: true }).panel.split(" ");
-  for (const [nome, classes] of [["a sala", sala], ["o console", console_]]) {
-    assert.ok(classes.includes("lg:w-[clamp(320px,27.5vw,400px)]"), `${nome}: ${classes.join(" ")}`);
+  for (const [nome, classes, teto, larguras] of [
+    ["a sala", sala, "lg:w-[clamp(320px,27.5vw,400px)]", [320, 352, 396, 400, 400]],
+    ["o console", console_, consoleLayout.CONSOLE_PANEL_WIDTH, [320, 352, 396, 514, 514]]
+  ]) {
+    assert.ok(classes.includes(teto), `${nome}: ${classes.join(" ")}`);
     assert.ok(classes.includes("lg:flex-none"), `${nome}: a largura e so a do painel, o palco cresce`);
     assert.deepEqual(
       [1024, 1280, 1440, 1920, 2560].map((janela) => Math.round(larguraEm(classes, janela))),
-      [320, 352, 396, 400, 400],
-      `${nome}: antes, 1920 dava 514 px e 2560 tambem`
+      larguras,
+      `${nome}: a largura em cada janela`
     );
   }
+  // O console e a sala so diferem no teto: ate 1440 px de janela os dois paineis tem a mesma largura.
+  assert.equal(consoleLayout.CONSOLE_PANEL_WIDTH, "lg:w-[clamp(320px,27.5vw,514px)]");
 });
 
 test("P12: a fase da transicao e pura: antes da primeira pintura e com reduzir movimento nada anima; abrindo, a entrada; fechando, a saida", () => {
@@ -147,6 +153,6 @@ test("P12 no console: o mesmo no painel do console; o esqueleto segue o painel q
   assert.match(abertura(painelDoConsole({ motion: motion.panelMotionOf(false, "idle"), open: false })), / hidden=""/);
   assert.match(abertura(painelDoConsole({ motion: motion.panelMotionOf(true, "opening") })), /data-console-panel-motion="opening"/);
   // O esqueleto: durante a saida o console passa `laid` (verdadeiro) e o painel guarda a largura; depois, `hidden`.
-  assert.ok(consoleLayout.consoleSkeleton({ hasStage: true, panelOpen: motion.panelMotionOf(false, "closing").laid }).panel.includes("lg:w-[clamp(320px,27.5vw,400px)]"));
+  assert.ok(consoleLayout.consoleSkeleton({ hasStage: true, panelOpen: motion.panelMotionOf(false, "closing").laid }).panel.includes(consoleLayout.CONSOLE_PANEL_WIDTH));
   assert.equal(consoleLayout.consoleSkeleton({ hasStage: true, panelOpen: motion.panelMotionOf(false, "idle").laid }).panel, "hidden");
 });

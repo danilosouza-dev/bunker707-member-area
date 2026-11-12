@@ -317,6 +317,12 @@ export const QUESTION_COLUMNS =
  */
 export const QUESTION_COLUMNS_V9 = `${QUESTION_COLUMNS}, answer_author`;
 
+/**
+ * Mais a coluna da 202611160001 (rodada v10, docs/30 D94): o fio marcado como visto pela equipe. Lida a parte, como as
+ * da v9: sem ela, a leitura cai para QUESTION_COLUMNS_V9 e depois para a lista de sempre.
+ */
+export const QUESTION_COLUMNS_V10 = `${QUESTION_COLUMNS_V9}, thread_seen_at`;
+
 export type QuestionRow = {
   anonymous: boolean;
   /** So com a 202611150001 (QUESTION_COLUMNS_V9); sem a coluna, ausente. */
@@ -335,6 +341,8 @@ export type QuestionRow = {
   offset_ms: number;
   session_id: string;
   status: string;
+  /** So com a 202611160001 (QUESTION_COLUMNS_V10); sem a coluna, ausente. */
+  thread_seen_at?: string | null;
   updated_at: string;
   upvotes: number;
   /** Nulo so na pergunta simulada (source 'scripted', 202611140001; o check do banco liga as duas coisas). */
@@ -359,6 +367,7 @@ export function questionFromRow(row: QuestionRow): WebinarQuestion {
     // A pergunta simulada e a unica sem aluno (o check webinar_questions_author_v8): nenhuma coluna nova na leitura.
     simulated: !row.user_id,
     status: oneOf<QuestionStatus>(QUESTION_STATUSES, row.status, "open"),
+    threadSeenAt: row.thread_seen_at ?? null,
     upvotes: row.upvotes ?? 0,
     userId: row.user_id || null
   };

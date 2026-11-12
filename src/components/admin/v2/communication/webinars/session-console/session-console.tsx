@@ -70,6 +70,7 @@ import {
   closePoll,
   createConsolePoll,
   deleteQuestionReply,
+  markQuestionSeen,
   endSessionNow,
   launchPoll,
   moderateMessage,
@@ -1379,6 +1380,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                       run(`question:${questionId}`, () => replyToQuestion({ author, body, questionId }), () => adminToast.success(WEBINAR_ADMIN_COPY.console.questions.replied))
                     }
                     onScreenComment={canAct && session.kind !== "replay" ? (questionId: string | null) => void screenCommentAction("question", questionId) : null}
+                    onSeen={canAct ? (questionId: string) => void run(`question:${questionId}`, () => markQuestionSeen({ questionId }), () => adminToast.success(WEBINAR_ADMIN_COPY.console.questions.markedSeen)) : null}
                     onStatus={(questionId: string, status: QuestionStatus) => void run(`question:${questionId}`, () => setQuestionStatus({ questionId, status }))}
                     questions={snapshot.questions}
                     screenCommentQuestionId={screenComment?.source === "question" ? screenComment.sourceId : null}

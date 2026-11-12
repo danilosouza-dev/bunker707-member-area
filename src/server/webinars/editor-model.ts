@@ -296,6 +296,10 @@ export const WEBINAR_ADMIN_COPY = {
       deleteReply: (name: string) => `Apagar a resposta de ${name}`,
       dismiss: "Dispensar",
       empty: "Nenhuma pergunta ainda.",
+      /* Rodada v10 (docs/30 D94): tirar o aviso "Nova resposta do aluno" sem responder. */
+      markSeen: "Marcar como vista",
+      markSeenHint: "Tira o aviso de nova resposta desta pergunta. Ele volta se o aluno escrever de novo.",
+      markedSeen: "Marcada como vista.",
       newReply: "Nova resposta do aluno",
       reopen: "Reabrir",
       replied: "Resposta enviada.",

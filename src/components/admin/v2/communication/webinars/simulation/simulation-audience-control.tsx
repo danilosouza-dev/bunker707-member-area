@@ -101,18 +101,19 @@ export function SimulationAudienceControl(props: SimulationAudienceControlProps)
 
   return (
     <section aria-labelledby={titleId} className="flex min-w-0 flex-col gap-3 rounded-lg border border-[var(--border-subtle)] p-3" data-simulation-audience="">
-      <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <h3 className="text-[13px] leading-5 font-semibold text-[var(--text-primary)] outline-none" id={titleId} tabIndex={-1}>
+      {/* O titulo e o atalho na mesma linha; a descricao embaixo, na largura toda (o atalho nao cai para a linha de baixo). */}
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <div className="flex min-w-0 items-baseline justify-between gap-3">
+          <h3 className="min-w-0 text-[13px] leading-5 font-semibold text-[var(--text-primary)] outline-none" id={titleId} tabIndex={-1}>
             {COPY.titulo}
           </h3>
-          <p className="text-xs leading-5 text-[var(--text-secondary)]">{COPY.descricao}</p>
+          {props.link ? (
+            <Link className="shrink-0 text-[13px] leading-5 font-medium text-[var(--text-primary)] underline underline-offset-2" data-simulation-audience-link="" href={props.link.href}>
+              {props.link.label}
+            </Link>
+          ) : null}
         </div>
-        {props.link ? (
-          <Link className="shrink-0 text-[13px] leading-5 font-medium text-[var(--text-primary)] underline underline-offset-2" data-simulation-audience-link="" href={props.link.href}>
-            {props.link.label}
-          </Link>
-        ) : null}
+        <p className="text-xs leading-5 text-[var(--text-secondary)]">{COPY.descricao}</p>
       </div>
 
       <div className="flex min-w-0 flex-wrap items-end justify-between gap-3">
