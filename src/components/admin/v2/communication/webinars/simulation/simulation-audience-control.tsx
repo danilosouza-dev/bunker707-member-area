@@ -10,24 +10,35 @@ import { formatSaoPauloDateTime } from "@/server/communications/campaign-model";
 import {
   AUDIENCE_MIGRATION,
   AUDIENCE_SHORTCUTS,
+  audienceChangeValue,
   audienceChangeWhen,
   audienceCurrentLabel,
   audienceFormState,
+  audienceVaryExample,
+  audienceVaryFormOf,
+  audienceVaryLabel,
   type AudiencePhase,
+  type AudienceVaryForm,
   type SimulationAudienceView
 } from "@/server/webinars/simulation-audience-model";
+import type { SimulatedCountVary } from "@/server/webinars/model";
 import { adminInputClass } from "../../../form";
+import { SimulationVaryFields } from "./simulation-vary-fields";
 
 // O controle "Participantes simulados" (docs/30 D79; pedido do produtor de 11/11/2026: "Quantos eu queria aumentar e
 // tudo mais"), o mesmo no console da sessao (no alto da entrada Presença, aberto tambem pelo selo dos presentes) e no
 // card Simulacao do editor depois do comeco: o numero somado agora ("+300"), a sala chegando nele durante a rampa de
 // 90 s, quem mudou por ultimo e quando, o campo "Somar à plateia" com os atalhos (+50, +100, +300, +500: o campo fica
-// com o numero), a frase da mudanca (a da decisao com o numero novo, a mesma conta do servidor) com a caixa, o Aplicar
-// (so com a caixa marcada quando soma algo) e o Tirar (volta a +0, sem caixa: grava a frase do +0). Sem permissao
+// com o numero), o Aplicar direto e o Tirar (volta a +0). Sem frase nem caixa desde 12/11/2026 (decisao do produtor,
+// docs/30 D86): o servidor grava sozinho a frase da mudanca no registro (quem, quando e o numero). Sem permissao
 // (messaging.publish), com a sessao encerrada ou sem a 202611140002, o numero sem os botoes e a frase do motivo. As
 // mudancas ficam num <details> com a hora, o +N e quem. O link leva ao outro lado (o console leva ao card do editor; o
 // card, ao console). Quem usa faz o pedido (`onApply`) e diz se deu certo (o formulario volta ao vazio). Nenhuma frase
 // escrita aqui; as cores pelos tokens do admin, como o resto do painel do console.
+// "Variar sozinho" (rodada v9, pedido do produtor de 12/11/2026; docs/30 D90): debaixo do campo, a caixa que liga a
+// variacao (ate X %, para onde, a cada Y a Z segundos) com a frase de exemplo; o pedido leva o +N e a variacao. Com o
+// campo do numero vazio, o Aplicar vale para o numero de agora (ligar, mudar ou desligar a variacao sem digitar de
+// novo). Debaixo do numero de agora, a variacao que vale em uma frase; nas mudancas, "+300, varia até 5%".
 
 const COPY = WEBINAR_COPY.simulacao.plateia;
 
@@ -40,16 +51,11 @@ export type SimulationAudienceControlProps = {
   idBase: string;
   /** O atalho para o outro lado: o card do editor (no console) ou o console (no card). */
   link?: { href: string; label: string } | null;
-  live: boolean;
-  /** A hora do servidor na tela (a data da frase). */
-  nowMs: number;
   /** O relogio da Simulacao agora (simulationClockMs): a rampa em curso. */
   offsetMs: number;
-  /** O pedido: o +N e a frase marcada (nula no Tirar). Devolve se deu certo. */
-  onApply: (input: { ackText: string | null; extra: number }) => Promise<boolean>;
+  /** O pedido: o +N (0 no Tirar) e o "Variar sozinho" (nulo: o numero parado). Devolve se deu certo. */
+  onApply: (input: { extra: number; vary: SimulatedCountVary | null }) => Promise<boolean>;
   phase: AudiencePhase;
-  /** O nome de quem esta na tela (o mesmo que o servidor poe na frase). */
-  responsible: string;
   /** O id do titulo (o selo dos presentes leva o foco a ele). */
   titleId?: string;
 };
@@ -57,42 +63,39 @@ export type SimulationAudienceControlProps = {
 export function SimulationAudienceControl(props: SimulationAudienceControlProps) {
   const { audience, idBase } = props;
   const [text, setText] = useState("");
-  const [acknowledged, setAcknowledged] = useState(false);
   const [sending, setSending] = useState(false);
+  // Os campos do "Variar sozinho" comecam no que vale agora (a tela aberta depois de outra pessoa mudar ja mostra).
+  const [vary, setVary] = useState<AudienceVaryForm>(() => audienceVaryFormOf(audience.current.vary));
   const busy = props.busy || sending;
   const state = audienceFormState({
-    acknowledged,
     busy,
     canPublish: props.canPublish,
     current: audience.current,
-    flags: audience.flags,
-    live: props.live,
-    nowMs: props.nowMs,
     pendingMigration: audience.pendingMigration,
     phase: props.phase,
-    responsible: props.responsible,
-    text
+    text,
+    vary
   });
+  const currentVary = audienceVaryLabel(audience.current.mode === "fixed" ? audience.current.vary : null);
   const titleId = props.titleId ?? `${idBase}-titulo`;
   const fieldId = `${idBase}-somar`;
-  const checkboxId = `${idBase}-confirmo`;
   const last = audience.changes[0] ?? null;
   const target = audienceCurrentLabel(audience.current);
   const ramping = props.phase === "on_air" && audience.rampEndsAtMs !== null && Number.isFinite(props.offsetMs) && props.offsetMs < audience.rampEndsAtMs;
   const reason = props.phase === "ended" ? COPY.encerrada : !props.canPublish ? COPY.semPermissao : audience.pendingMigration ? WEBINAR_COPY.simulacao.servidor.precisaMigracaoPlateia(AUDIENCE_MIGRATION) : null;
 
-  const edit = (next: string) => {
-    setText(next);
-    setAcknowledged(false);
-  };
+  const edit = (next: string) => setText(next);
 
-  async function apply(extra: number, ackText: string | null) {
+  async function apply(extra: number, nextVary: SimulatedCountVary | null) {
     setSending(true);
-    const ok = await props.onApply({ ackText, extra });
+    const ok = await props.onApply({ extra, vary: extra > 0 ? nextVary : null });
     setSending(false);
     if (ok) {
       setText("");
-      setAcknowledged(false);
+      // O Tirar desliga a variacao junto (ela so vale com numero maior que zero).
+      if (!(extra > 0)) {
+        setVary((current) => ({ ...current, on: false }));
+      }
     }
   }
 
@@ -135,6 +138,11 @@ export function SimulationAudienceControl(props: SimulationAudienceControlProps)
         ) : null}
       </div>
 
+      {currentVary ? (
+        <p className="text-xs leading-5 text-[var(--text-secondary)]" data-simulation-audience-vary="">
+          {currentVary}
+        </p>
+      ) : null}
       {ramping ? (
         <p aria-live="polite" className="text-xs leading-5 text-[var(--text-secondary)]" data-simulation-audience-ramp="">
           {COPY.subindo(audience.current.mode === "fixed" ? audience.current.base : 0)}
@@ -193,7 +201,7 @@ export function SimulationAudienceControl(props: SimulationAudienceControlProps)
               </p>
             ) : state.same ? (
               <p className="text-xs leading-5 text-[var(--text-secondary)]" id={`${fieldId}-hint`}>
-                {COPY.igual}
+                {state.vary ? COPY.variar.igual : COPY.igual}
               </p>
             ) : (
               <p className="text-xs leading-5 text-[var(--text-secondary)]" id={`${fieldId}-hint`}>
@@ -202,26 +210,14 @@ export function SimulationAudienceControl(props: SimulationAudienceControlProps)
             )}
           </div>
 
-          {state.sentence && state.extra !== null && !state.same ? (
-            <div className="flex min-w-0 flex-col gap-2 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-2)] p-3" data-simulation-audience-confirm="">
-              <p className="text-[13px] leading-5 text-[var(--text-primary)]" data-simulation-audience-sentence="">
-                {state.sentence}
-              </p>
-              {state.needsAck ? (
-                <label className="flex min-w-0 items-start gap-2 text-[13px] leading-5 text-[var(--text-primary)]" htmlFor={checkboxId}>
-                  <input
-                    checked={acknowledged}
-                    className="mt-0.5 size-4 shrink-0 accent-[var(--text-primary)]"
-                    disabled={busy}
-                    id={checkboxId}
-                    onChange={(event) => setAcknowledged(event.target.checked)}
-                    type="checkbox"
-                  />
-                  {COPY.caixa}
-                </label>
-              ) : null}
-            </div>
-          ) : null}
+          <SimulationVaryFields
+            disabled={busy}
+            errors={state.varyErrors}
+            example={audienceVaryExample(state.applyExtra, vary)}
+            form={vary}
+            idBase={idBase}
+            onChange={setVary}
+          />
 
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <Button
@@ -229,15 +225,14 @@ export function SimulationAudienceControl(props: SimulationAudienceControlProps)
               data-simulation-audience-apply=""
               disabled={!state.canApply}
               onClick={() => {
-                if (state.extra !== null) {
-                  void apply(state.extra, state.needsAck ? state.sentence : null);
+                if (state.applyExtra !== null) {
+                  void apply(state.applyExtra, state.vary);
                 }
               }}
               type="button"
             >
               {sending ? COPY.aplicando : COPY.aplicar}
             </Button>
-            {state.needsAck && !acknowledged && state.sentence && !state.same ? <span className="text-xs leading-5 text-[var(--text-secondary)]">{COPY.marqueACaixa}</span> : null}
           </div>
           <p className="text-xs leading-5 text-[var(--text-tertiary)]">{props.phase === "before" ? COPY.antesDoComeco : COPY.noAr}</p>
         </div>
@@ -249,7 +244,7 @@ export function SimulationAudienceControl(props: SimulationAudienceControlProps)
           <ul className="mt-1 flex min-w-0 flex-col gap-0.5">
             {audience.changes.map((change) => (
               <li className="tabular-nums" key={change.id}>
-                {COPY.mudancaLinha(audienceChangeWhen(change.atMs), change.extra === null ? "—" : COPY.valor(change.extra), change.changedByName)}
+                {COPY.mudancaLinha(audienceChangeWhen(change.atMs), audienceChangeValue(change), change.changedByName)}
               </li>
             ))}
           </ul>

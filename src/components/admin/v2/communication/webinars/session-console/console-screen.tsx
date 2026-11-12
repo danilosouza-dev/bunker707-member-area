@@ -45,8 +45,9 @@ const copy = WEBINAR_COPY.naTela;
 const consoleCopy = copy.console;
 
 /** Quantas coisas estao na frente da turma agora (o contador da entrada): a mensagem fixada e o que esta na tela. */
-export function consoleScreenCount(input: { active: readonly Pick<ScreenDisplay, "hiddenAt">[]; pinnedMessageId: string | null }): number {
-  return (input.pinnedMessageId ? 1 : 0) + input.active.filter((display) => display.hiddenAt === null).length;
+export function consoleScreenCount(input: { active: readonly Pick<ScreenDisplay, "hiddenAt">[]; comment?: unknown; pinnedMessageId: string | null }): number {
+  // O comentario ou a pergunta na tela (rodada v9, docs/30 D89) conta como uma coisa na frente da turma.
+  return (input.pinnedMessageId ? 1 : 0) + input.active.filter((display) => display.hiddenAt === null).length + (input.comment ? 1 : 0);
 }
 
 /** Minutos inteiros desde `at` (nulo sem a hora). */
@@ -98,6 +99,8 @@ export type ConsoleScreenProps = {
   onArchive: (itemId: string) => Promise<ActionResult<unknown> | null>;
   /** Tirar da tela, Desafixar: devolvem se deu certo (o foco segue depois). */
   onHide: (displayId: string) => Promise<boolean> | void;
+  /** Tira da tela o comentario ou a pergunta (rodada v9, docs/30 D89); sem a prop, a linha fica sem o botao. */
+  onHideComment?: (() => Promise<boolean> | void) | null;
   onSave: (input: ScreenItemSaveInput, show: boolean) => Promise<ActionResult<SavedScreenItem> | null>;
   onShow: (itemId: string) => void;
   onUnpinMessage: (messageId: string) => Promise<boolean> | void;
@@ -121,6 +124,7 @@ export function ConsoleScreen({
   nowMs,
   onArchive,
   onHide,
+  onHideComment = null,
   onSave,
   onShow,
   onUnpinMessage,
@@ -146,7 +150,8 @@ export function ConsoleScreen({
   const active = screen.active.filter((display) => display.hiddenAt === null);
   const pinnedPoll = active.find((display) => display.kind === "poll") ?? null;
   const cards = active.filter((display) => display.kind !== "poll");
-  const nothing = !pinned && active.length === 0;
+  const comment = screen.comment ?? null;
+  const nothing = !pinned && active.length === 0 && !comment;
   const busy = busyKey !== null;
 
   useEffect(() => {
@@ -228,6 +233,29 @@ export function ConsoleScreen({
                     variant="secondary"
                   >
                     {consoleCopy.desafixar}
+                  </Button>
+                ) : null}
+              </li>
+            ) : null}
+            {comment ? (
+              // O comentario ou a pergunta que a equipe trouxe para a tela (docs/30 D89): quem, o texto e ha quanto tempo.
+              <li className="flex min-w-0 flex-col gap-1 rounded-lg border border-[var(--border-subtle)] px-3 py-2" data-console-screen-now-item="comment" data-display-id={comment.displayId}>
+                <span className="line-clamp-2 text-sm leading-5 text-[var(--text-primary)] [overflow-wrap:anywhere]">{copy.exibicaoComentario[comment.source](comment.name, comment.body)}</span>
+                {minutesSince(comment.shownAt, nowMs) !== null ? (
+                  <time className="text-xs leading-5 text-[var(--text-tertiary)]" dateTime={comment.shownAt} data-console-screen-age="">
+                    {copy.haTempo(minutesSince(comment.shownAt, nowMs) ?? 0)}
+                  </time>
+                ) : null}
+                {canAct && onHideComment ? (
+                  <Button
+                    className="mt-1 h-8! self-start px-2 text-[13px]"
+                    data-console-screen-hide-comment=""
+                    disabled={busy}
+                    onClick={() => void afterAction(onHideComment(), { heading: NOW_TITLE, opener: null })}
+                    type="button"
+                    variant="secondary"
+                  >
+                    {consoleCopy.tirarDaTela}
                   </Button>
                 ) : null}
               </li>

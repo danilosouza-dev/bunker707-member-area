@@ -30,6 +30,8 @@
   --bunker-radius: 16px;
   --bunker-radius-tile: 12px;
   --bunker-speaking: #34d399;
+  --bunker-hand: #ffffff;
+  --bunker-hand-ink: #141414;
 }
 
 html[data-bunker-theme="light"] {
@@ -37,6 +39,8 @@ html[data-bunker-theme="light"] {
   --bunker-tile: #e4e4e7;
   --bunker-tile-border: rgba(0, 0, 0, 0.08);
   --bunker-speaking: #16a34a;
+  --bunker-hand: #141414;
+  --bunker-hand-ink: #ffffff;
 }
 
 /* O fundo da pagina do iframe e o da area, nos dois temas: na coluna, as miniaturas ficam soltas sobre ele. */
@@ -163,6 +167,40 @@ body {
 /* Quem esta falando (Thumbnail.tsx: .dominant-speaker e o anel .active-speaker-indicator): verde, nao azul. */
 .filmstrip__videos .videocontainer.dominant-speaker .active-speaker-indicator {
   box-shadow: inset 0 0 0 2px var(--bunker-speaking) !important;
+}
+
+/*
+ * Os pontos do nivel de audio na lateral da miniatura (AudioLevelIndicator.tsx: span.audioindicator com os
+ * span.audiodot-top, -middle e -bottom; _videolayout_default.scss pinta o ::after de cada um de azul): no verde de
+ * quem fala, como o anel, nos dois temas. So a cor: o tamanho e o lugar sao os da tag.
+ */
+.audioindicator span.audiodot-top::after,
+.audioindicator span.audiodot-middle::after,
+.audioindicator span.audiodot-bottom::after {
+  background: var(--bunker-speaking) !important;
+}
+
+/*
+ * A mao levantada (pedido do produtor de 12/11/2026: o contorno amarelo era o padrao do motor). Thumbnail.tsx poe na
+ * miniatura de quem levantou a mao a classe da regra raisedHand (tss-react, com o nome da regra no fim, por isso o
+ * [class*=]), e ela pinta o contorno .raised-hand-border de amarelo com !important; RaisedHandIndicator.tsx desenha no
+ * topo da miniatura o selo amarelo quadrado com a mao. Aqui, nos dois temas, o contorno e o selo no ativo do design
+ * system (branco no escuro, quase preto no claro, docs/12), com a mao na cor contraria e o selo redondo como o botao do
+ * menu. So cor e canto: a espessura do contorno (2 px) e o tamanho do selo continuam os da tag. O anel verde de quem
+ * fala fica por cima deste (vem depois no DOM), como na tag.
+ */
+.filmstrip__videos .videocontainer[class*="raisedHand"] .raised-hand-border {
+  box-shadow: inset 0 0 0 2px var(--bunker-hand) !important;
+}
+
+.filmstrip__videos .videocontainer [class*="raisedHandIndicator"] {
+  background-color: var(--bunker-hand) !important;
+  border-radius: 9999px !important;
+  color: var(--bunker-hand-ink) !important;
+}
+
+.filmstrip__videos .videocontainer [class*="raisedHandIndicator"] svg {
+  fill: var(--bunker-hand-ink) !important;
 }
 
 /*

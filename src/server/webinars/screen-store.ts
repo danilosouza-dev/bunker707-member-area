@@ -16,6 +16,7 @@ import { assertNoDbError, type WebinarsDb } from "./db";
 import {
   SCREEN_DISPLAY_COLUMNS,
   SCREEN_ITEM_COLUMNS,
+  SCREEN_ITEM_COLUMNS_V9,
   type ScreenDisplayHide,
   type ScreenDisplayInsert,
   type ScreenDisplayRow,
@@ -42,18 +43,49 @@ async function emptyWithoutMigration<T>(read: () => Promise<T>, empty: T): Promi
  * webinar_screen_items
  * ---------------------------------------------------------------------------------------------- */
 
+/** Depois de uma leitura que esbarrou na coluna que nao existe, por quanto tempo o app le so com as colunas de sempre. */
+const ITEM_COLUMNS_RETRY_MS = 60_000;
+let itemColumnsBaseUntil = 0;
+
+/** Esvazia a memoria da coluna ausente (os testes). */
+export function clearScreenItemColumnsMemory() {
+  itemColumnsBaseUntil = 0;
+}
+
+/**
+ * Le os itens com a coluna da 202611150001 (link_target, "O que abre o link"). No banco sem a coluna, de novo so com a
+ * lista de sempre (o item vale "so o botao", como era) e, por 1 min, direto com ela. Sem a tabela (a 202611100002), o
+ * erro da segunda leitura sobe como antes.
+ */
+async function withItemColumns<T>(read: (columns: typeof SCREEN_ITEM_COLUMNS) => Promise<T>): Promise<T> {
+  if (Date.now() >= itemColumnsBaseUntil) {
+    try {
+      // O tipo da lista de sempre (o PostgREST tipa o select pelo texto); a linha tem `link_target` opcional.
+      return await read(SCREEN_ITEM_COLUMNS_V9 as typeof SCREEN_ITEM_COLUMNS);
+    } catch (failure) {
+      if (!isPendingMigrationError(failure)) {
+        throw failure;
+      }
+      itemColumnsBaseUntil = Date.now() + ITEM_COLUMNS_RETRY_MS;
+    }
+  }
+  return read(SCREEN_ITEM_COLUMNS);
+}
+
 function readScreenItemRows(db: WebinarsDb, webinarId: string): Promise<ScreenItemRow[]> {
-  return fetchAll<ScreenItemRow>(
-    (from, to) =>
-      db
-        .from("webinar_screen_items")
-        .select(SCREEN_ITEM_COLUMNS)
-        .eq("webinar_id", webinarId)
-        .is("archived_at", null)
-        .order("created_at", { ascending: true })
-        .order("id", { ascending: true })
-        .range(from, to),
-    "Webinarios: Na tela, itens prontos"
+  return withItemColumns((columns) =>
+    fetchAll<ScreenItemRow>(
+      (from, to) =>
+        db
+          .from("webinar_screen_items")
+          .select(columns)
+          .eq("webinar_id", webinarId)
+          .is("archived_at", null)
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to),
+      "Webinarios: Na tela, itens prontos"
+    )
   );
 }
 
@@ -64,11 +96,15 @@ export async function listScreenItemRows(db: WebinarsDb, webinarId: string): Pro
 
 /** Um item pronto pelo id (arquivado tambem: quem chama decide); nulo sem a linha ou sem a migracao. */
 export async function fetchScreenItemRow(db: WebinarsDb, id: string): Promise<ScreenItemRow | null> {
-  return emptyWithoutMigration(async () => {
-    const { data, error } = await db.from("webinar_screen_items").select(SCREEN_ITEM_COLUMNS).eq("id", id).maybeSingle();
-    assertNoDbError(error, "Webinarios: Na tela, ler item");
-    return (data as ScreenItemRow | null) ?? null;
-  }, null);
+  return emptyWithoutMigration(
+    () =>
+      withItemColumns(async (columns) => {
+        const { data, error } = await db.from("webinar_screen_items").select(columns).eq("id", id).maybeSingle();
+        assertNoDbError(error, "Webinarios: Na tela, ler item");
+        return (data as ScreenItemRow | null) ?? null;
+      }),
+    null
+  );
 }
 
 /** Quantos itens prontos nao arquivados o webinario tem (o limite de 20). */
@@ -78,15 +114,19 @@ export async function countScreenItemRows(db: WebinarsDb, webinarId: string): Pr
   return count ?? 0;
 }
 
+/**
+ * Grava um item. A linha leva o link_target (202611150001): no banco sem a coluna a escrita sobe o
+ * PendingMigrationError e a acao responde com o aviso da migracao (nada e gravado pela metade).
+ */
 export async function insertScreenItemRow(db: WebinarsDb, row: ScreenItemWrite & { created_by: string | null; webinar_id: string }): Promise<ScreenItemRow> {
-  const { data, error } = await db.from("webinar_screen_items").insert(row).select(SCREEN_ITEM_COLUMNS).single();
+  const { data, error } = await db.from("webinar_screen_items").insert(row).select(SCREEN_ITEM_COLUMNS_V9).single();
   assertNoDbError(error, "Webinarios: Na tela, gravar item");
   return data as ScreenItemRow;
 }
 
 /** Edita um item que ainda nao foi arquivado; nulo quando ele sumiu ou foi arquivado. */
 export async function updateScreenItemRow(db: WebinarsDb, id: string, patch: ScreenItemWrite): Promise<ScreenItemRow | null> {
-  const { data, error } = await db.from("webinar_screen_items").update(patch).eq("id", id).is("archived_at", null).select(SCREEN_ITEM_COLUMNS).maybeSingle();
+  const { data, error } = await db.from("webinar_screen_items").update(patch).eq("id", id).is("archived_at", null).select(SCREEN_ITEM_COLUMNS_V9).maybeSingle();
   assertNoDbError(error, "Webinarios: Na tela, editar item");
   return (data as ScreenItemRow | null) ?? null;
 }

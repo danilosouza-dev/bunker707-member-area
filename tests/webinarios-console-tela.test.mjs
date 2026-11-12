@@ -78,7 +78,7 @@ export const loadAssistantEditor = fail; export const saveAssistant = fail; expo
   "@/server/webinars/translation-actions": `${fail}
 export const clearMessageTranslations = fail;`,
   "@/server/webinars/screen-actions": `${fail}
-export const saveScreenItem = fail; export const archiveScreenItem = fail; export const uploadScreenImage = fail; export const showScreenItem = fail; export const hideScreenItem = fail;`,
+export const saveScreenItem = fail; export const archiveScreenItem = fail; export const uploadScreenImage = fail; export const showScreenItem = fail; export const hideScreenItem = fail; export const showScreenComment = fail; export const hideScreenComment = fail;`,
   "@/server/webinars/room-actions": `${fail}
 export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const pinPoll = fail; export const unpinPoll = fail; export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;
 export const createConsolePoll = fail;`
@@ -494,9 +494,13 @@ test("chat (docs/31 V2-15 e §10): as acoes de cada mensagem (Fixar ou Desafixar
   assert.match(textOf(linha("m-sem-aceite")), /Sem consentimento do aluno/, "sem o aceite, o ⋯ diz por que");
   assert.doesNotMatch(textOf(linha("m-sem-aceite")), /Aprovar para as próximas turmas/);
   assert.deepEqual(nomes(linha("m-virou")), ["Fixar: Dani P.", "Apagar: Dani P.", "Mais ações da mensagem de Dani P."], "a que ja virou pergunta fica sem o botao");
-  // A equipe e o roteiro: sem Virar pergunta (a pergunta pede o aluno) e sem o ⋯ (nada para eles la).
-  assert.deepEqual(nomes(linha("m-equipe")), ["Desafixar: Produtor T.", "Apagar: Produtor T."]);
-  assert.deepEqual(nomes(linha("m-roteiro")), ["Fixar: Duda", "Apagar: Duda"]);
+  // A equipe e o roteiro: sem Virar pergunta (a pergunta pede o aluno); o ⋯ so com o "Mostrar na tela" (rodada v9,
+  // docs/30 D89: toda mensagem liberada pode ir para a tela).
+  assert.deepEqual(nomes(linha("m-equipe")), ["Desafixar: Produtor T.", "Apagar: Produtor T.", "Mais ações da mensagem de Produtor T."]);
+  assert.deepEqual(nomes(linha("m-roteiro")), ["Fixar: Duda", "Apagar: Duda", "Mais ações da mensagem de Duda"]);
+  assert.match(textOf(linha("m-roteiro")), /Mostrar na tela/);
+  assert.doesNotMatch(textOf(linha("m-roteiro")), /Aprovar para as próximas turmas|Sem consentimento/);
+  assert.match(textOf(linha("m-com-aceite")), /Mostrar na tela Aprovar para as próximas turmas/, "o Mostrar na tela e o primeiro do ⋯");
   // Cada botao da linha e do card e um ponto de volta do foco (a posicao entre os do item): o ⋯ e o ultimo.
   const marcados = (block) => Array.from(block.matchAll(/<button(?=[^>]*data-console-action="")[^>]*aria-label="([^"]+)"/g)).map((match) => match[1]);
   assert.deepEqual(marcados(linha("m-com-aceite")), nomes(linha("m-com-aceite")));
@@ -768,8 +772,9 @@ test("o painel Presenca (§2.4): presentes agora, pico, mensagens no ultimo minu
 test("Refazer tradução: cada mensagem do chat ganha o item no ⋯ so com a traducao ligada no ambiente", () => {
   const desligada = render({ sessions, snapshot: snapshot(), webinar });
   assert.doesNotMatch(desligada, /Refazer tradução/);
-  // Sem a traducao, a equipe e o roteiro nao tem nada no ⋯; com ela, toda mensagem liberada ganha o ⋯ com o item.
-  assert.doesNotMatch(chatItem(desligada, "m-roteiro"), /Mais ações da mensagem/);
+  // Sem a traducao, o ⋯ da equipe e do roteiro so tem o "Mostrar na tela" (rodada v9); com ela, toda mensagem liberada
+  // ganha tambem o item.
+  assert.doesNotMatch(textOf(chatItem(desligada, "m-roteiro")), /Refazer tradução/);
   const ligada = html(createElement(SessionConsole, { currentUserId: "u-host", data: { sessions, snapshot: snapshot(), webinar }, permissions: both, serverNow: NOW, translationEnabled: true }));
   for (const [id, name] of [["m-sem-aceite", "Aluno 231"], ["m-equipe", "Produtor T."], ["m-roteiro", "Duda"]]) {
     const item = chatItem(ligada, id);

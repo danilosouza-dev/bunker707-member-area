@@ -250,7 +250,9 @@ test("o console usa as regras puras, nao uma copia delas: as abas, o ⋯, o topo
     assert.match(fonte(fonteDe), new RegExp(`\\b${regra}\\(`), `${fonteDe} chama ${regra}`);
   }
   const stage = fonte("console-stage.tsx");
-  assert.match(stage, /\bconsoleColumnPolicy\(/);
+  // A coluna pela regra do papel (consoleColumnPolicy, dentro de consoleThumbsWanted desde a rodada v9, docs/30 D91).
+  assert.match(stage, /\bconsoleThumbsWanted\(/);
+  assert.match(semComentarios(ler("src/server/webinars/console-v2-model.ts")), /consoleColumnPolicy\(input\.role\) === "width"/);
   assert.match(stage, /\bconsoleStageBadgeFor\(/);
   const chat = fonte("console-chat.tsx");
   for (const regra of ["consoleChatQueue", "consoleMessageMeta", "consoleChatFocusAfter"]) {
@@ -467,9 +469,9 @@ test("o fio no console (docs/30 §2.4): o campo de responder que sai com o foco 
   const perguntas = semComentarios(fonte("console-questions.tsx"));
   assert.match(perguntas, /if \(was && !replyingId\) \{\s*returnFocusFromReply\(paneRef\.current, document\.activeElement, document\.body, `\[data-console-question="\$\{was\}"\] \[data-console-reply-open\]`\);/);
   assert.match(perguntas, /data-console-questions-pane="" ref=\{paneRef\}/);
-  assert.match(perguntas, /whileSettling\(\{ key: `reply:\$\{question\.id\}`, set: setSettling, settling, work: \(\) => onReply\(question\.id, text\) \}\)/);
+  assert.match(perguntas, /whileSettling\(\{ key: `reply:\$\{question\.id\}`, set: setSettling, settling, work: \(\) => onReply\(question\.id, text, ready \?\? undefined\) \}\)/);
   assert.match(perguntas, /setReplying\(\(current\) => replyDraftAfterSent\(current, question\.id\)\)/);
-  assert.match(perguntas, /busy=\{busy \|\| settling\.includes\(`reply:\$\{question\.id\}`\)\}/);
+  assert.match(perguntas, /busy=\{busy \|\| authorBlocked \|\| settling\.includes\(`reply:\$\{question\.id\}`\)\}/);
   // A lixeira awaita a acao inteira (o retrato incluso): o console devolve a promessa do run, sem o void.
   assert.match(semComentarios(fonte("session-console.tsx")), /onDeleteReply=\{\(replyId: string\) =>\s*run\(`reply:\$\{replyId\}`/);
 });

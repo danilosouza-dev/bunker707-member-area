@@ -16,7 +16,9 @@ import {
   POLL_OPTION_COLUMNS,
   PRESENCE_COLUMNS,
   QUESTION_COLUMNS,
+  QUESTION_COLUMNS_V9,
   QUESTION_REPLY_COLUMNS,
+  QUESTION_REPLY_COLUMNS_V9,
   REACTION_COLUMNS,
   SCRIPT_ITEM_COLUMNS,
   TRANSCRIPT_COLUMNS,
@@ -611,22 +613,53 @@ export function visibleQuestionFilter(nowIso: string): string {
   return `user_id.not.is.null,created_at.lte."${nowIso}"`;
 }
 
+/** Depois de uma leitura que esbarrou numa coluna da 202611150001 que nao existe, por quanto tempo o app le so com as listas de sempre. */
+const V9_COLUMNS_RETRY_MS = 60_000;
+const v9ColumnsBaseUntil = { questions: 0, replies: 0 };
+
+/** Esvazia a memoria das colunas ausentes (os testes). */
+export function clearV9ColumnsMemory() {
+  v9ColumnsBaseUntil.questions = 0;
+  v9ColumnsBaseUntil.replies = 0;
+}
+
+/**
+ * Le com a coluna da 202611150001 (quem assina a resposta, docs/30 D88). No banco sem a coluna, de novo so com a lista
+ * de sempre (a resposta aparece como "Equipe", como antes) e, por 1 min, direto com ela.
+ */
+async function withV9Columns<C extends string, T>(table: keyof typeof v9ColumnsBaseUntil, base: C, extended: string, read: (columns: C) => Promise<T>): Promise<T> {
+  if (Date.now() >= v9ColumnsBaseUntil[table]) {
+    try {
+      // O tipo da lista de sempre (o PostgREST tipa o select pelo texto); a linha tem a coluna nova opcional.
+      return await read(extended as C);
+    } catch (failure) {
+      if (!isPendingMigrationError(failure)) {
+        throw failure;
+      }
+      v9ColumnsBaseUntil[table] = Date.now() + V9_COLUMNS_RETRY_MS;
+    }
+  }
+  return read(base);
+}
+
 export async function listQuestionRows(
   db: WebinarsDb,
   input: { limit?: number; order: "recent" | "votes"; sessionId: string; statuses?: readonly string[]; visibleAt?: string }
 ): Promise<QuestionRow[]> {
-  let query = db.from("webinar_questions").select(QUESTION_COLUMNS).eq("session_id", input.sessionId).is("deleted_at", null);
-  if (input.statuses?.length) {
-    query = query.in("status", [...input.statuses]);
-  }
-  // Com `visibleAt`, so as que ja apareceram (a simulada do futuro nunca ocupa o lugar das de agora no teto da lista).
-  if (input.visibleAt) {
-    query = query.or(visibleQuestionFilter(input.visibleAt));
-  }
-  query = input.order === "votes" ? query.order("upvotes", { ascending: false }).order("created_at", { ascending: true }) : query.order("created_at", { ascending: false });
-  const { data, error } = await query.limit(Math.min(500, input.limit ?? 200));
-  assertNoDbError(error, "Webinarios: perguntas da sessao");
-  return (data ?? []) as QuestionRow[];
+  return withV9Columns("questions", QUESTION_COLUMNS, QUESTION_COLUMNS_V9, async (columns) => {
+    let query = db.from("webinar_questions").select(columns).eq("session_id", input.sessionId).is("deleted_at", null);
+    if (input.statuses?.length) {
+      query = query.in("status", [...input.statuses]);
+    }
+    // Com `visibleAt`, so as que ja apareceram (a simulada do futuro nunca ocupa o lugar das de agora no teto da lista).
+    if (input.visibleAt) {
+      query = query.or(visibleQuestionFilter(input.visibleAt));
+    }
+    query = input.order === "votes" ? query.order("upvotes", { ascending: false }).order("created_at", { ascending: true }) : query.order("created_at", { ascending: false });
+    const { data, error } = await query.limit(Math.min(500, input.limit ?? 200));
+    assertNoDbError(error, "Webinarios: perguntas da sessao");
+    return (data ?? []) as QuestionRow[];
+  });
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -641,17 +674,19 @@ export async function listQuestionRows(
  */
 export async function listQuestionReplyRows(db: WebinarsDb, input: { sessionId: string }): Promise<QuestionReplyRow[]> {
   try {
-    return await fetchAll<QuestionReplyRow>(
-      (from, to) =>
-        db
-          .from("webinar_question_replies")
-          .select(QUESTION_REPLY_COLUMNS)
-          .eq("session_id", input.sessionId)
-          .is("deleted_at", null)
-          .order("created_at", { ascending: true })
-          .order("id", { ascending: true })
-          .range(from, to),
-      "Webinarios: o fio das perguntas"
+    return await withV9Columns("replies", QUESTION_REPLY_COLUMNS, QUESTION_REPLY_COLUMNS_V9, (columns) =>
+      fetchAll<QuestionReplyRow>(
+        (from, to) =>
+          db
+            .from("webinar_question_replies")
+            .select(columns)
+            .eq("session_id", input.sessionId)
+            .is("deleted_at", null)
+            .order("created_at", { ascending: true })
+            .order("id", { ascending: true })
+            .range(from, to),
+        "Webinarios: o fio das perguntas"
+      )
     );
   } catch (failure) {
     if (isPendingMigrationError(failure)) {
@@ -673,10 +708,18 @@ export async function countQuestionReplyRows(db: WebinarsDb, questionId: string)
   return count;
 }
 
-export type QuestionReplyInsert = Pick<QuestionReplyRow, "anonymous" | "body" | "display_name" | "question_id" | "role" | "session_id" | "user_id">;
+/**
+ * `author_as` (202611150001, docs/30 D88) so vai na linha quando a equipe escolheu como aparecer: sem a chave (o aluno,
+ * a resposta de antes), a escrita nao depende da coluna.
+ */
+export type QuestionReplyInsert = Pick<QuestionReplyRow, "anonymous" | "body" | "display_name" | "question_id" | "role" | "session_id" | "user_id"> & { author_as?: string };
 
 export async function insertQuestionReplyRow(db: WebinarsDb, row: QuestionReplyInsert): Promise<QuestionReplyRow> {
-  const { data, error } = await db.from("webinar_question_replies").insert(row).select(QUESTION_REPLY_COLUMNS).single();
+  const { data, error } = await db
+    .from("webinar_question_replies")
+    .insert(row)
+    .select((row.author_as ? QUESTION_REPLY_COLUMNS_V9 : QUESTION_REPLY_COLUMNS) as typeof QUESTION_REPLY_COLUMNS)
+    .single();
   assertNoDbError(error, "Webinarios: gravar resposta no fio");
   return data as QuestionReplyRow;
 }
@@ -705,6 +748,16 @@ export async function updateQuestionRow(db: WebinarsDb, id: string, patch: Quest
   const { data, error } = await db.from("webinar_questions").update(patch).eq("id", id).select(QUESTION_COLUMNS).maybeSingle();
   assertNoDbError(error, "Webinarios: atualizar pergunta");
   return (data as QuestionRow | null) ?? null;
+}
+
+/**
+ * Grava quem assina a resposta escrita (webinar_questions.answer_author, 202611150001; docs/30 D88). A parte do
+ * atualizar de sempre: no banco sem a coluna sobe o PendingMigrationError, e quem chama decide (com "Equipe", que e o
+ * que a sala ja mostra sem a coluna, segue; com outro nome, responde com o aviso da migracao antes de gravar a resposta).
+ */
+export async function writeQuestionAnswerAuthor(db: WebinarsDb, id: string, author: { as: string; name: string | null; role: string; v: 1 } | null): Promise<void> {
+  const { error } = await db.from("webinar_questions").update({ answer_author: author }).eq("id", id);
+  assertNoDbError(error, "Webinarios: quem assina a resposta");
 }
 
 /** Alterna o voto do aluno; devolve se ficou votado e o total recontado (gravado em upvotes). */

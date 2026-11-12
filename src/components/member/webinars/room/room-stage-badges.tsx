@@ -157,7 +157,7 @@ export function RoomStageBadges({ assistantOn, assistantWideHidden = false, pres
         </div>
       ) : null}
       {presenter ? (
-        <span className={cn(PILL, ON_VIDEO_THEMED, "absolute bottom-2 left-2 z-20 max-w-[calc(100%-3.5rem)] lg:bottom-4 lg:left-4")} data-room-badge="presenter">
+        <span className={cn(PILL, ON_VIDEO_THEMED, "absolute bottom-[calc(0.5rem+var(--room-video-bottom,0px))] left-2 z-20 max-w-[calc(100%-3.5rem)] lg:bottom-[calc(1rem+var(--room-video-bottom,0px))] lg:left-4")} data-room-badge="presenter">
           <Mic aria-hidden="true" />
           <span className="min-w-0 truncate">{presenterRole === undefined ? WEBINAR_COPY.salaV2.selos.apresentador(presenter) : WEBINAR_COPY.consoleV2.palco.selo(presenter, presenterRole)}</span>
         </span>
@@ -172,7 +172,7 @@ export function RoomStageBadges({ assistantOn, assistantWideHidden = false, pres
       ) : null}
       {assistantOn ? (
         <RoomWideHidden hidden={assistantWideHidden}>
-          <span className={cn(PILL, ON_VIDEO_THEMED, "absolute bottom-4 right-[calc(var(--room-video-right)+16px)] z-20 hidden lg:inline-flex")} data-room-badge="assistant">
+          <span className={cn(PILL, ON_VIDEO_THEMED, "absolute bottom-[calc(1rem+var(--room-video-bottom,0px))] right-[calc(var(--room-video-right)+16px)] z-20 hidden lg:inline-flex")} data-room-badge="assistant">
             <Sparkles aria-hidden="true" />
             {WEBINAR_COPY.sala.selos.assistente}
           </span>

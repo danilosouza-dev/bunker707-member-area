@@ -5,7 +5,7 @@
 // do relatorio leem estas linhas; nenhum numero real (D6, M6).
 
 import { CHAT_LIMITS, SIMULATION_CHANGE_SOURCES, type SimulationChangeRecord, type SimulationChangeSource, type SimulationCountChange } from "./model";
-import { simulatedCountRuleOfRow } from "./rows";
+import { simulatedCountRuleOfRow, simulatedCountRuleToRow } from "./rows";
 
 export const SIMULATION_CHANGE_COLUMNS = "id, session_id, at_offset_ms, count_rule, ack_text, changed_by, source, created_at";
 
@@ -57,7 +57,7 @@ export function simulationChangeToRow(input: { ackText: string; atMs: number | n
     ack_text: input.ackText.slice(0, CHAT_LIMITS.simulationAck),
     at_offset_ms: input.atMs === null ? null : Math.max(0, Math.min(CHAT_LIMITS.offsetMaxMs, Math.floor(input.atMs))),
     changed_by: input.changedBy,
-    count_rule: input.rule.mode === "off" ? null : { base: input.rule.base, jitter: input.rule.jitter, mode: input.rule.mode, peak: input.rule.peak },
+    count_rule: simulatedCountRuleToRow(input.rule),
     session_id: input.sessionId,
     source: input.source
   };

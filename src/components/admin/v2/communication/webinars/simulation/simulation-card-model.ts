@@ -20,6 +20,7 @@ import {
   type SimulatedJoins,
   type SimulatedSaleNotices
 } from "../../../../../../server/webinars/model";
+import { audienceVaryFormOf, audienceVaryOfForm, type AudienceVaryForm } from "../../../../../../server/webinars/simulation-audience-model";
 import { normalizeSimulationRules, simulationAckFor, type SimulationRules } from "../../../../../../server/webinars/simulation-model";
 import { SIMULATION_MESSAGES, simulationRulesSchema } from "../../../../../../server/webinars/simulation-schemas";
 
@@ -41,6 +42,10 @@ export type SimulationForm = {
   /** O proximo numero da chave de um aviso novo (as chaves nao mudam quando um aviso sai). */
   seq: number;
   showLiveBadge: boolean;
+  /**
+   * "Variar sozinho" (rodada v9, docs/30 D90), so no "Real + número fixo"; ausente (os formularios de antes), desligado.
+   */
+  vary?: AudienceVaryForm;
 };
 
 /** O que esta gravado na sessao (as regras; o selo vem da sessao). */
@@ -90,7 +95,8 @@ export function simulationFormOf(saved: SimulationSaved | null, showLiveBadge: b
     sales: notices.items.map((item, index) => ({ key: `aviso-${index}`, minute: minuteMarkOf(item.offsetMs), text: item.text })),
     salesEnabled: notices.enabled,
     seq: notices.items.length,
-    showLiveBadge
+    showLiveBadge,
+    vary: audienceVaryFormOf(count.mode === "fixed" ? count.vary : null)
   };
 }
 
@@ -118,6 +124,22 @@ export function simulationRulesOfForm(form: SimulationForm): SimulationFormResul
   if (form.countMode === "fixed") {
     const base = integer("base", form.base, 0, SIMULATION_LIMITS.countMax, SIMULATION_MESSAGES.count);
     countRule = { base, jitter: 0, mode: "fixed", peak: base };
+    // "Variar sozinho" (D90): os erros ficam junto dos campos dele; com o +0 a variacao nao vale e nao e conferida.
+    if (form.vary?.on && base > 0) {
+      const varied = audienceVaryOfForm(form.vary);
+      if (varied.errors.percent) {
+        errors.varyPercent = varied.errors.percent;
+      }
+      if (varied.errors.everyMin) {
+        errors.varyEveryMin = varied.errors.everyMin;
+      }
+      if (varied.errors.everyMax) {
+        errors.varyEveryMax = varied.errors.everyMax;
+      }
+      if (varied.vary) {
+        countRule = { ...countRule, vary: varied.vary };
+      }
+    }
   } else if (form.countMode === "curve") {
     const base = integer("base", form.base, 0, SIMULATION_LIMITS.countMax, SIMULATION_MESSAGES.count);
     const peak = integer("peak", form.peak, 0, SIMULATION_LIMITS.countMax, SIMULATION_MESSAGES.count);

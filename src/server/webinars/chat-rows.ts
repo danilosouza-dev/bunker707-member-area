@@ -2,6 +2,7 @@
 // enquetes, perguntas, aceite, presenca. Modulo puro (sem "server-only", imports relativos) para os testes
 // carregarem os tradutores direto; quem le e grava e chat-store.ts.
 
+import { parseAnswerAuthor, parseAnswerAuthorMode } from "./answer-author-model";
 import {
   CHAT_ROLES,
   CHAT_SOURCES,
@@ -310,8 +311,16 @@ export function pollAnswerFromRow(row: PollAnswerRow): PollAnswer {
 export const QUESTION_COLUMNS =
   "id, session_id, user_id, display_name, anonymous, body, message_id, status, upvotes, answered_by, answer_text, answered_live, answered_at, offset_ms, deleted_at, deleted_reason, created_at, updated_at";
 
+/**
+ * As colunas da 202611150001 (rodada v9, docs/30 D88), lidas a parte: a lista de sempre nao muda, e no banco sem a
+ * migracao a leitura das perguntas cai de volta nela (chat-store.withV9Columns).
+ */
+export const QUESTION_COLUMNS_V9 = `${QUESTION_COLUMNS}, answer_author`;
+
 export type QuestionRow = {
   anonymous: boolean;
+  /** So com a 202611150001 (QUESTION_COLUMNS_V9); sem a coluna, ausente. */
+  answer_author?: unknown;
   answer_text: string | null;
   answered_at: string | null;
   answered_by: string | null;
@@ -335,6 +344,7 @@ export type QuestionRow = {
 export function questionFromRow(row: QuestionRow): WebinarQuestion {
   return {
     anonymous: row.anonymous,
+    answerAuthor: parseAnswerAuthor(row.answer_author),
     answerText: row.answer_text,
     answeredAt: row.answered_at,
     answeredBy: row.answered_by,
@@ -357,8 +367,13 @@ export function questionFromRow(row: QuestionRow): WebinarQuestion {
 /** O fio de uma pergunta (202611100001). */
 export const QUESTION_REPLY_COLUMNS = "id, question_id, session_id, user_id, display_name, role, anonymous, body, deleted_at, deleted_by, deleted_reason, created_at";
 
+/** A coluna da 202611150001 do fio (rodada v9, docs/30 D88), lida a parte como a das perguntas. */
+export const QUESTION_REPLY_COLUMNS_V9 = `${QUESTION_REPLY_COLUMNS}, author_as`;
+
 export type QuestionReplyRow = {
   anonymous: boolean;
+  /** So com a 202611150001 (QUESTION_REPLY_COLUMNS_V9); sem a coluna, ausente. */
+  author_as?: string | null;
   body: string;
   created_at: string;
   deleted_at: string | null;
@@ -375,6 +390,7 @@ export type QuestionReplyRow = {
 export function questionReplyFromRow(row: QuestionReplyRow): QuestionReply {
   return {
     anonymous: row.anonymous,
+    authorAs: parseAnswerAuthorMode(row.author_as),
     body: row.body,
     createdAt: row.created_at,
     displayName: row.display_name,

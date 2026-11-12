@@ -40,9 +40,14 @@ import { persistImageAsset } from "@/server/db/media-assets";
 import { isPendingMigrationError } from "@/server/db/pending-migration";
 import { invalidateWebinars } from "./cache";
 import { canTeamActOn } from "./console-model";
-import { WEBINARS_SCREEN_MIGRATION, WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
+import { chatMessageFromRow, questionFromRow } from "./chat-rows";
+import { fetchChatMessageRow, fetchQuestionRow } from "./chat-store";
+import { WEBINARS_SCREEN_MIGRATION, WEBINARS_V9_MIGRATION, WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
 import { CHAT_LIMITS, type WebinarSession } from "./model";
 import { sessionOffsetMs } from "./room-model";
+import { questionVisibleAt } from "./room-rules";
+import { messageBelongsToSession, messageCanGoOnScreen, questionCanGoOnScreen, type ScreenCommentSource } from "./screen-comment-model";
+import { hideActiveScreenCommentRows, readActiveScreenCommentRow, showScreenCommentRow } from "./screen-comment-store";
 import { sessionFromRow, type SessionRow, type WebinarRow } from "./rows";
 import {
   SCREEN_IMAGE_BUCKET,
@@ -54,11 +59,22 @@ import {
   snapshotOfItem,
   type ScreenItem,
   type ScreenKind,
+  type ScreenLinkTarget,
   type ScreenPlace,
   type ScreenSize
 } from "./screen-model";
 import { screenDisplayFromRow, screenItemFromRow, screenItemWriteOf, type ScreenDisplayHide } from "./screen-rows";
-import { hideScreenItemSchema, parseScreenSnapshot, screenItemIdSchema, screenItemInputSchema, showScreenItemSchema, uploadScreenImageSchema, type ScreenItemInput } from "./screen-schemas";
+import {
+  hideScreenCommentSchema,
+  hideScreenItemSchema,
+  parseScreenSnapshot,
+  screenItemIdSchema,
+  screenItemInputSchema,
+  showScreenCommentSchema,
+  showScreenItemSchema,
+  uploadScreenImageSchema,
+  type ScreenItemInput
+} from "./screen-schemas";
 import {
   archiveScreenItemRow,
   countScreenItemRows,
@@ -245,6 +261,7 @@ export async function saveScreenItem(input: {
   imageAlt?: string | null;
   imagePath?: string | null;
   kind: ScreenKind;
+  linkTarget?: ScreenLinkTarget | null;
   linkUrl?: string | null;
   name?: string | null;
   place?: ScreenPlace | null;
@@ -282,6 +299,7 @@ export async function saveScreenItem(input: {
       closable: data.closable,
       image,
       kind: data.kind,
+      linkTarget: data.linkTarget,
       linkUrl: data.linkUrl,
       name: data.name ?? screenItemDefaultName(data),
       place: data.place,
@@ -517,5 +535,135 @@ export async function hideScreenItem(input: { displayId: string }): Promise<Acti
     invalidateReport();
 
     return { displayId: hidden.id, hidden: true, sessionId: session.id };
+  });
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O comentario ou a pergunta na tela (rodada v9, P11; docs/30 D89)
+ * ---------------------------------------------------------------------------------------------- */
+
+export type ShownScreenComment = { changed: boolean; displayId: string; replaced: number; sessionId: string; source: ScreenCommentSource; sourceId: string };
+export type HiddenScreenComment = { hidden: boolean; sessionId: string };
+
+const COMMENT_MIGRATION_MESSAGE = WEBINAR_COPY.exportar.migracaoPendente(WEBINARS_V9_MIGRATION);
+
+/** Uma leitura ou escrita que esbarra no banco sem a 202611150001 vira 409 com a frase da migracao. */
+async function withCommentTable<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (isPendingMigrationError(error)) {
+      throw new WebinarError(COMMENT_MIGRATION_MESSAGE, 409);
+    }
+    throw error;
+  }
+}
+
+/**
+ * [messaging.write] Mostra na tela, para todos, uma mensagem do chat ou uma pergunta da sessao ("Mostrar na tela" no ⋯
+ * de cada uma, no console): o comentario que estava sai (`replaced`) e o novo entra; o mesmo que ja esta na tela nao
+ * grava nada. So a referencia e gravada: a sala le o nome, a foto e o texto da origem a cada leitura. A mensagem
+ * apagada, a que espera a equipe e a de outra sessao, e a pergunta apagada, dispensada ou de outra sessao: 404. Replay,
+ * sessao encerrada ou cancelada: 409. O carimbo da sessao muda por ultimo (a sala ve em ate cerca de 5 s); auditoria
+ * `webinar.screen_comment_shown`, so com os ids.
+ */
+export async function showScreenComment(input: { messageId?: string; questionId?: string; sessionId: string }): Promise<ActionResult<ShownScreenComment>> {
+  return runWebinarAction("messaging.write", "atendimento", showScreenCommentSchema, input, async ({ input: data, user }) => {
+    const db = webinarsDb();
+    const now = new Date();
+    const { session, webinar } = await loadSession(db, data.sessionId);
+
+    assertScreenSession(session);
+
+    // O que esta na tela antes de gravar: sem a migracao, o aviso e nada nasce.
+    const current = await withCommentTable(() => readActiveScreenCommentRow(db, session.id));
+    const source: ScreenCommentSource = data.messageId ? "chat" : "question";
+    const sourceId = (data.messageId ?? data.questionId) as string;
+
+    if (source === "chat") {
+      const row = await fetchChatMessageRow(db, sourceId);
+      const message = row && !row.deleted_at ? chatMessageFromRow(row) : null;
+
+      if (!message || !messageCanGoOnScreen(message) || !messageBelongsToSession(message, { id: session.id, webinarId: webinar.id })) {
+        throw new WebinarError(ERROS.comentarioSumiu, 404);
+      }
+    } else {
+      const row = await fetchQuestionRow(db, sourceId);
+      const question = row && !row.deleted_at ? questionFromRow(row) : null;
+
+      if (!question || !questionCanGoOnScreen(question, session.id) || !questionVisibleAt(question, now.getTime())) {
+        throw new WebinarError(ERROS.comentarioSumiu, 404);
+      }
+    }
+
+    if (current && (source === "chat" ? current.message_id === sourceId : current.question_id === sourceId)) {
+      return { changed: false, displayId: current.id, replaced: 0, sessionId: session.id, source, sourceId };
+    }
+
+    const shown = await withCommentTable(() =>
+      showScreenCommentRow(
+        db,
+        {
+          message_id: source === "chat" ? sourceId : null,
+          question_id: source === "question" ? sourceId : null,
+          session_id: session.id,
+          shown_at: now.toISOString(),
+          shown_by: user.id,
+          shown_offset_ms: serverOffsetMs(session, now.getTime()),
+          source
+        },
+        { ...screenHide(session, user.id, now, "replaced"), hidden_reason: "replaced" }
+      )
+    );
+
+    if (!shown) {
+      throw new WebinarError(GENERIC_ACTION_ERROR, 409);
+    }
+
+    // O carimbo por ultimo: a sala ve o comentario em ate cerca de 5 s.
+    await touchSessionRow(db, session.id);
+    await recordAudit(db, {
+      action: "webinar.screen_comment_shown",
+      actorId: user.id,
+      entityId: webinar.id,
+      entityType: "webinar",
+      metadata: { display_id: shown.row.id, replaced: shown.replaced.length, session_id: session.id, source, source_id: sourceId }
+    });
+    revalidateConsole(webinar.id);
+
+    return { changed: true, displayId: shown.row.id, replaced: shown.replaced.length, sessionId: session.id, source, sourceId };
+  });
+}
+
+/**
+ * [messaging.write] Tira da tela o comentario que esta na frente da turma (motivo `team`); sem nada na tela, nao muda
+ * nada. Replay, sessao encerrada ou cancelada: 409. O carimbo da sessao muda por ultimo; auditoria
+ * `webinar.screen_comment_hidden`.
+ */
+export async function hideScreenComment(input: { sessionId: string }): Promise<ActionResult<HiddenScreenComment>> {
+  return runWebinarAction("messaging.write", "atendimento", hideScreenCommentSchema, input, async ({ input: data, user }) => {
+    const db = webinarsDb();
+    const now = new Date();
+    const { session, webinar } = await loadSession(db, data.sessionId);
+
+    assertScreenSession(session);
+
+    const hidden = await withCommentTable(() => hideActiveScreenCommentRows(db, session.id, { ...screenHide(session, user.id, now, "team"), hidden_reason: "team" }));
+
+    if (hidden.length === 0) {
+      return { hidden: false, sessionId: session.id };
+    }
+
+    await touchSessionRow(db, session.id);
+    await recordAudit(db, {
+      action: "webinar.screen_comment_hidden",
+      actorId: user.id,
+      entityId: webinar.id,
+      entityType: "webinar",
+      metadata: { display_id: hidden[0].id, session_id: session.id, source: hidden[0].source }
+    });
+    revalidateConsole(webinar.id);
+
+    return { hidden: true, sessionId: session.id };
   });
 }

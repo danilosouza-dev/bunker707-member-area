@@ -19,8 +19,9 @@
 // Os participantes simulados mudados a qualquer momento (docs/30 D79, pedido do produtor de 11/11/2026; reabre o D10 e
 // o D74 so para o numero): saveSimulatedAudience [messaging.publish] muda o +N da gravada e da live antes, durante e
 // depois do comeco, ate o Encerrar, pelo console ou pelo card (o card deixa de travar o numero; as entradas e os avisos
-// de venda continuam travados no ar pelo saveSessionSimulation). Cada mudanca pede de novo a caixa com a frase dela (a
-// da decisao com o numero novo, simulationAudienceAckFor; o Tirar grava a frase do +0 sem caixa), grava uma linha em
+// de venda continuam travados no ar pelo saveSessionSimulation). Cada mudanca grava a frase dela (a da decisao com o
+// numero novo, simulationAudienceAckFor, montada pelo servidor: desde 12/11/2026 a tela nao mostra frase nem pede a
+// caixa, D86; o Tirar grava a frase do +0), grava uma linha em
 // webinar_simulation_changes (antes do comeco sem offset, trocando tambem a regra da sessao; no ar, o offset do relogio
 // da Simulacao, e a sala chega no numero em 90 s) e depois a decisao na sessao (quem, quando e a frase), que muda o
 // carimbo que a sala ja le na consulta de 5 s. Banco sem a 202611140002: 409 com a frase dela, antes de gravar.
@@ -41,26 +42,23 @@ import { isSameVersion } from "@/server/communications/campaign-model";
 import { isPendingMigrationError } from "@/server/db/pending-migration";
 import { invalidateWebinars } from "./cache";
 import { WEBINARS_AUDIENCE_MIGRATION, WEBINARS_OFFERS_MIGRATION, WEBINARS_SCREEN_MIGRATION, WebinarError, WebinarFieldError, isMissingWebinarSchema, webinarsDb } from "./db";
-import { SIMULATION_LIMITS, type SessionSimulation, type SimulationChangeRecord, type WebinarSession } from "./model";
+import { SIMULATION_LIMITS, sameSimulatedCountVary, simulatedCountVaryOf, type SessionSimulation, type SimulationChangeRecord, type WebinarSession } from "./model";
 import { sessionFromRow, type SessionRow } from "./rows";
-import { simulationAudienceViewOf, type SimulationAudienceView } from "./simulation-audience-model";
+import { audienceVaryLabel, simulationAudienceViewOf, type SimulationAudienceView } from "./simulation-audience-model";
 import {
   clampSimulationAck,
   normalizeSimulationRules,
   simulationAckFlags,
   simulationAckFor,
-  simulationAckMatches,
   simulationAudienceAckFor,
-  simulationAudienceAckMatches,
   simulationAudienceExtraOf,
   simulationAudienceFlagsOf,
-  simulationAudienceNeedsAck,
   simulationAudienceRule,
   simulationAudienceRuleAt,
   simulationClockMs,
   simulationSessionStarted
 } from "./simulation-model";
-import { SIMULATION_MESSAGES, saveSessionSimulationSchema, saveSimulatedAudienceSchema, simulationNeedsAck } from "./simulation-schemas";
+import { SIMULATION_MESSAGES, saveSessionSimulationSchema, saveSimulatedAudienceSchema } from "./simulation-schemas";
 import {
   LiveSimulationPendingError,
   SimulationChangedError,
@@ -191,8 +189,8 @@ export async function loadSessionSimulations(input: { webinarId: string }): Prom
 
 /**
  * [messaging.publish] Grava a Simulacao de uma sessao gravada (ou da Live ao vivo, R7): o selo, as regras e a decisao
- * (D10). Com algo simulado ligado, a frase marcada precisa ser a que o servidor monta hoje com o nome de quem decide (a
- * da live na live; senao, erro no campo `acknowledged`); tudo desligado grava a frase de tudo desligado. As regras
+ * (D10). Sem frase nem caixa na tela desde 12/11/2026 (D86): o servidor monta a frase de hoje com o nome de quem
+ * decide (a da live na live; tudo desligado grava a frase de tudo desligado) e a guarda na sessao. As regras
  * gravadas sao as normalizadas (avisos ligados sem nenhum item contam como desligados): a frase confere com o que fica
  * no banco. Na live o selo nunca liga (erro no campo `showLiveBadge`).
  */
@@ -235,15 +233,8 @@ export async function saveSessionSimulation(input: SaveSessionSimulationInput): 
     const webinar = await requireWebinarRow(db, row.webinar_id);
     const rules = normalizeSimulationRules({ countRule: data.countRule, joins: data.joins, saleNotices: data.saleNotices, showLiveBadge: data.showLiveBadge });
     const responsible = getUserDisplayName(user).fullName;
-    const given = data.ackText?.trim() ?? "";
-    const needsAck = simulationNeedsAck(rules);
-    const matches = simulationAckMatches({ ackText: given, live, nowMs, responsible, rules });
-
-    if (needsAck && (!data.acknowledged || !matches)) {
-      throw new WebinarFieldError("acknowledged", COPY.servidor.fraseNaoBate);
-    }
-
-    const ackText = clampSimulationAck(matches ? given : simulationAckFor({ live, nowMs, responsible, rules }));
+    // Sem frase nem caixa na tela (D86, 12/11/2026): o servidor monta a frase da decisao e a grava com quem e quando.
+    const ackText = clampSimulationAck(simulationAckFor({ live, nowMs, responsible, rules }));
     let saved: SessionSimulation;
     try {
       saved = await saveSessionSimulationRows(db, {
@@ -284,7 +275,6 @@ export async function saveSessionSimulation(input: SaveSessionSimulationInput): 
       entityId: webinar.id,
       entityType: "webinar",
       metadata: {
-        acknowledged: data.acknowledged,
         count_base: rules.countRule.base,
         count_jitter: rules.countRule.jitter,
         count_mode: rules.countRule.mode,
@@ -313,9 +303,9 @@ const REAL_PLUS_ZERO = { base: 0, jitter: 0, mode: "fixed", peak: 0 } as const;
 
 /**
  * [messaging.publish] Os participantes simulados da sessao a partir de agora (D79): a gravada e a Live ao vivo, antes,
- * durante e depois do comeco, ate o Encerrar (encerrada, o Replay e a cancelada recusam com 409). Somar pede a caixa
- * com a frase da mudanca (a de hoje, com o numero novo e o nome de quem muda; senao, erro no campo `acknowledged`); o
- * Tirar (+0) grava a frase do +0 sem caixa. O mesmo numero de agora e recusado (nada mudaria). Antes do comeco a linha
+ * durante e depois do comeco, ate o Encerrar (encerrada, o Replay e a cancelada recusam com 409). Sem frase nem caixa
+ * na tela (D86, 12/11/2026): o servidor grava sozinho a frase da mudanca (a de hoje, com o numero novo e o nome de
+ * quem muda) no registro, e o Tirar (+0) grava a do +0. O mesmo numero de agora e recusado (nada mudaria). Antes do comeco a linha
  * fica sem offset e a regra da sessao passa a ser a nova (vale na hora: a espera da live nao tem relogio que ande); no
  * ar, a linha leva o offset do relogio da Simulacao e a sala sobe ou desce em 90 s. Depois, a decisao da sessao (quem,
  * quando, a frase), que muda o carimbo da sala. As entradas e os avisos de venda nao mudam aqui.
@@ -370,19 +360,21 @@ export async function saveSimulatedAudience(input: SaveSimulatedAudienceInput): 
     const session = sessionFromRow(row);
     const started = simulationSessionStarted(session, nowMs);
     const clockMs = simulationClockMs(session, nowMs);
-    const rule = simulationAudienceRule(data.extra);
-    if (simulationAudienceExtraOf(simulationAudienceRuleAt(simulation, started ? clockMs : Number.NaN)) === data.extra) {
-      throw new WebinarFieldError("extra", COPY.servidor.plateiaIgual);
+    // Com o "Variar sozinho" (D90), a regra leva a variacao (so com o numero maior que zero).
+    const rule = simulationAudienceRule(data.extra, data.vary);
+    const vary = simulatedCountVaryOf(rule);
+    const currentRule = simulationAudienceRuleAt(simulation, started ? clockMs : Number.NaN);
+    // O mesmo numero com a mesma variacao: nada mudaria.
+    if (simulationAudienceExtraOf(currentRule) === data.extra && sameSimulatedCountVary(vary, simulatedCountVaryOf(currentRule))) {
+      throw new WebinarFieldError("extra", vary ? COPY.plateia.variar.igual : COPY.servidor.plateiaIgual);
     }
 
     const flags = simulationAudienceFlagsOf({ joins: simulation.joins, saleNotices: simulation.saleNotices, showLiveBadge: row.show_live_badge === true });
     const responsible = getUserDisplayName(user).fullName;
-    const given = data.ackText?.trim() ?? "";
-    const matches = simulationAudienceAckMatches({ ackText: given, extra: data.extra, flags, live, nowMs, responsible });
-    if (simulationAudienceNeedsAck(data.extra) && (!data.acknowledged || !matches)) {
-      throw new WebinarFieldError("acknowledged", COPY.servidor.plateiaFraseNaoBate);
-    }
-    const ackText = clampSimulationAck(matches ? given : simulationAudienceAckFor({ extra: data.extra, flags, live, nowMs, responsible }));
+    // Sem frase nem caixa na tela (D86, 12/11/2026): o servidor monta a frase da mudanca e a grava no registro.
+    // A variacao entra no registro, depois da frase do numero.
+    const varyText = audienceVaryLabel(vary);
+    const ackText = clampSimulationAck([simulationAudienceAckFor({ extra: data.extra, flags, live, nowMs, responsible }), varyText].filter(Boolean).join(" "));
     const atMs = started ? Math.max(0, Math.floor(clockMs)) : null;
     // Antes do comeco, a regra da sessao passa a ser a nova. No ar, a regra de antes do comeco nunca muda, menos o "Só o
     // real", que vira "Real + 0" (o mesmo numero) na primeira mudanca que soma: o resumo do fim e a janela da sala
@@ -415,14 +407,14 @@ export async function saveSimulatedAudience(input: SaveSimulatedAudienceInput): 
       entityId: row.webinar_id,
       entityType: "webinar",
       metadata: {
-        acknowledged: data.acknowledged,
         at_offset_ms: atMs,
         before_start: !started,
         change_id: record.id,
         count_extra: data.extra,
         session_id: row.id,
         session_kind: row.kind,
-        source: data.source
+        source: data.source,
+        ...(vary ? { vary_direction: vary.direction, vary_every_max_seconds: vary.everyMaxSeconds, vary_every_min_seconds: vary.everyMinSeconds, vary_percent: vary.percent } : {})
       }
     });
     revalidatePath(`${LIST_PATH}/${row.webinar_id}`);

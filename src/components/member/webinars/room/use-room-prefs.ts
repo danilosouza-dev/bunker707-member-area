@@ -1,21 +1,26 @@
 "use client";
 
 import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { ANSWER_AUTHOR_DEFAULT, ANSWER_AUTHOR_STORAGE_KEY, parseAnswerAuthorChoice, type AnswerAuthorChoice } from "@/server/webinars/answer-author-model";
 import {
   CONSOLE_PANEL_KEY,
   CONSOLE_THEME_KEY,
-  deferredPollsValue,
+  CONSOLE_THUMBS_KEY,
   ROOM_PANEL_KEY,
   ROOM_POLLS_KEY,
   ROOM_THEME_KEY,
+  ROOM_THUMBS_KEY,
   ROOM_VIEW_KEY,
+  deferredPollsValue,
   storedConsoleTheme,
   storedDeferredPolls,
   storedPanelOpen,
   storedRoomTheme,
+  storedRoomThumbs,
   storedRoomView,
   type DeferredPolls,
   type RoomTheme,
+  type RoomThumbs,
   type RoomView
 } from "@/lib/webinar-room-prefs";
 
@@ -106,8 +111,11 @@ const themeStore = prefStore(ROOM_THEME_KEY);
 const panelStore = prefStore(ROOM_PANEL_KEY);
 const viewStore = prefStore(ROOM_VIEW_KEY);
 const pollsStore = prefStore(ROOM_POLLS_KEY);
+const thumbsStore = prefStore(ROOM_THUMBS_KEY);
+const consoleThumbsStore = prefStore(CONSOLE_THUMBS_KEY);
 const consoleThemeStore = prefStore(CONSOLE_THEME_KEY);
 const consolePanelStore = prefStore(CONSOLE_PANEL_KEY);
+const answerAuthorStore = prefStore(ANSWER_AUTHOR_STORAGE_KEY);
 
 function useStoredValue(store: PrefStore): string | null {
   return useSyncExternalStore(store.subscribe, store.read, serverSnapshot);
@@ -134,6 +142,20 @@ export function useRoomView(): [RoomView, (view: RoomView) => void] {
   return [view, setView];
 }
 
+/** Onde as miniaturas ficam na sala (Lateral por padrao; rodada v9, docs/30 D91). */
+export function useRoomThumbs(): [RoomThumbs, (thumbs: RoomThumbs) => void] {
+  const thumbs = storedRoomThumbs(useStoredValue(thumbsStore));
+  const setThumbs = useCallback((next: RoomThumbs) => thumbsStore.write(next), []);
+  return [thumbs, setThumbs];
+}
+
+/** Onde as miniaturas ficam no console de quem apresenta, na chave propria (como o tema e o painel). */
+export function useConsoleThumbs(): [RoomThumbs, (thumbs: RoomThumbs) => void] {
+  const thumbs = storedRoomThumbs(useStoredValue(consoleThumbsStore));
+  const setThumbs = useCallback((next: RoomThumbs) => consoleThumbsStore.write(next), []);
+  return [thumbs, setThumbs];
+}
+
 /** As enquetes desta sessao deixadas para depois e os resultados ja vistos (outra sessao comeca vazia). */
 export function useDeferredPolls(sessionId: string): [DeferredPolls, (polls: DeferredPolls) => void] {
   const raw = useStoredValue(pollsStore);
@@ -154,4 +176,27 @@ export function useConsolePanelOpen(): [boolean, (open: boolean) => void] {
   const open = storedPanelOpen(useStoredValue(consolePanelStore));
   const setOpen = useCallback((next: boolean) => consolePanelStore.write(next ? "1" : "0"), []);
   return [open, setOpen];
+}
+
+/** A escolha guardada de "Responder como" (o texto do armazenamento conferido; fora da forma, o padrao). */
+export function storedAnswerAuthor(raw: string | null): AnswerAuthorChoice {
+  if (!raw) {
+    return ANSWER_AUTHOR_DEFAULT;
+  }
+  try {
+    return parseAnswerAuthorChoice(JSON.parse(raw));
+  } catch {
+    return ANSWER_AUTHOR_DEFAULT;
+  }
+}
+
+/**
+ * "Responder como" do console (rodada v9, docs/30 D88): Meu nome (o padrao), Equipe ou Outro nome, lembrado no navegador
+ * de quem responde para a proxima resposta e a proxima live.
+ */
+export function useConsoleAnswerAuthor(): [AnswerAuthorChoice, (choice: AnswerAuthorChoice) => void] {
+  const raw = useStoredValue(answerAuthorStore);
+  const choice = useMemo(() => storedAnswerAuthor(raw), [raw]);
+  const setChoice = useCallback((next: AnswerAuthorChoice) => answerAuthorStore.write(JSON.stringify({ as: next.as, name: next.name ?? null })), []);
+  return [choice, setChoice];
 }

@@ -34,7 +34,8 @@ export type RoomMenuItem = {
   radio?: boolean;
 };
 
-export type RoomMenuGroup = { items: RoomMenuItem[]; label?: string };
+/** `hint`: uma frase pequena no fim do grupo (nao e opcao: o teclado passa por cima; o leitor de tela a ouve como nota). */
+export type RoomMenuGroup = { hint?: string | null; items: RoomMenuItem[]; label?: string };
 
 export type RoomMenuProps = {
   /** O lado do botao em que a caixa se alinha. */
@@ -162,7 +163,17 @@ export function RoomMenu({ align, groups, id, label, onClose, open, placement, t
       role="menu"
     >
       {groups.map((group, index) => {
-        const items = group.items.map((item) => <RoomMenuOption item={item} key={item.key} onSelect={select} />);
+        const options = group.items.map((item) => <RoomMenuOption item={item} key={item.key} onSelect={select} />);
+        const items = group.hint ? (
+          <>
+            {options}
+            <p className="max-w-[280px] px-4 pb-1 pt-1.5 text-xs leading-[18px] text-room-fg-subtle" data-room-menu-hint="" role="note">
+              {group.hint}
+            </p>
+          </>
+        ) : (
+          options
+        );
         return (
           <Fragment key={index}>
             {index > 0 ? <div className="my-2 h-px bg-room-divider" role="separator" /> : null}

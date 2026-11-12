@@ -1794,3 +1794,73 @@ test("a Na tela por cima do iframe do motor: no palco largo o banner e o QR Code
     unwrap(await db.from("webinar_screen_displays").delete().eq("session_id", LIVE_AO_VIVO_DE_TESTE.sessaoId), "Tirando a Na tela da live de teste");
   }
 });
+
+test("as miniaturas (rodada v9, docs/30 D91): Esconder e Lateral valem na hora, por comando e sem remontar; Embaixo fica guardado, o menu avisa e a fileira entra quando o video carrega de novo", async ({ page }) => {
+  test.setTimeout(120_000);
+  const visao = WEBINAR_COPY.salaV2.visao;
+  const miniaturas = visao.miniaturas;
+  // A 1920 px com o painel aberto o iframe passa dos 1013 px: a coluna fica na tela pela largura.
+  await page.setViewportSize({ height: 1080, width: 1920 });
+  const { dialogo, montagem, sala } = await entrarNaSala(page);
+  expect(montagem.interfaceConfigOverwrite.VERTICAL_FILMSTRIP, "a coluna ao lado, o padrao").toBe(true);
+  const barra = dialogo.getByRole("group", { name: aoVivo.barra });
+  const palco = dialogo.locator("[data-lesson-player-stage]");
+  const botao = barra.getByRole("button", { exact: true, name: visao.atual(visao.palco) });
+  const menu = dialogo.getByRole("menu", { name: visao.rotulo });
+  const opcao = (nome: string) => menu.getByRole("menuitemradio", { exact: true, name: nome });
+  const margem = (nome: string) => palco.evaluate((elemento, variavel) => (elemento as HTMLElement).style.getPropertyValue(variavel).trim(), nome);
+  await expect.poll(() => margem("--room-video-right")).toBe("222px");
+
+  // O grupo Miniaturas no mesmo menu, com a Lateral marcada; a visao continua com o Palco marcado.
+  await botao.click();
+  await expect(menu.getByRole("group", { name: miniaturas.rotulo })).toBeVisible();
+  await expect(opcao(miniaturas.opcoes.side)).toHaveAttribute("aria-checked", "true");
+  await expect(opcao(visao.palco)).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByRole("note")).toHaveCount(0);
+
+  // Esconder: o comando vai na hora, sem remontar; com o motor confirmando, os selos vao ate a borda.
+  let antes = (await sala.comandos()).length;
+  await opcao(miniaturas.opcoes.hidden).click();
+  await expect(menu).toBeHidden();
+  await sala.esperarComando("toggleFilmStrip", { depoisDe: antes });
+  await sala.disparar("filmstripDisplayChanged", { visible: false });
+  await expect.poll(() => margem("--room-video-right")).toBe("0px");
+  expect(await sala.montagens(), "Esconder e por comando: o iframe e o mesmo").toBe(1);
+
+  // Lateral de volta: outro comando, e a coluna volta.
+  await botao.click();
+  await expect(opcao(miniaturas.opcoes.hidden)).toHaveAttribute("aria-checked", "true");
+  antes = (await sala.comandos()).length;
+  await opcao(miniaturas.opcoes.side).click();
+  await sala.esperarComando("toggleFilmStrip", { depoisDe: antes });
+  await sala.disparar("filmstripDisplayChanged", { visible: true });
+  await expect.poll(() => margem("--room-video-right")).toBe("222px");
+
+  // Embaixo: fica guardado, nenhum comando e nenhuma remontagem; o menu avisa que vale ao recarregar.
+  antes = (await sala.comandos()).length;
+  await botao.click();
+  await opcao(miniaturas.opcoes.bottom).click();
+  await botao.click();
+  await expect(opcao(miniaturas.opcoes.bottom)).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByRole("note")).toHaveText(miniaturas.aoRecarregar);
+  await page.keyboard.press("Escape");
+  expect((await sala.comandos()).slice(antes).some((item) => item.comando === "toggleFilmStrip"), "a troca para Embaixo nao manda comando").toBe(false);
+  expect(await sala.montagens(), "a pagina nao recarrega o video sozinha").toBe(1);
+
+  // Recarregar e entrar de novo: o video monta com a fileira embaixo, a base do palco sobe a altura dela e nada e
+  // descontado a direita; o aviso some do menu.
+  await page.reload();
+  await expect(dialogo).toHaveAttribute("data-room-kind", "live");
+  const token = page.waitForResponse((response) => response.url().endsWith("/join-token") && response.request().method() === "POST");
+  await dialogo.getByRole("button", { exact: true, name: aoVivo.entrarNaSala }).click();
+  expect((await token).status()).toBe(200);
+  const comFileira = await sala.esperarMontada();
+  expect(comFileira.interfaceConfigOverwrite.VERTICAL_FILMSTRIP, "a fileira embaixo").toBe(false);
+  await sala.disparar("videoConferenceJoined", { displayName: "Aluna T.", id: PARTICIPANTE, roomName });
+  await expect(dialogo.getByRole("button", { exact: true, name: aoVivo.levantarMao })).toBeEnabled();
+  await expect.poll(() => margem("--room-video-bottom")).toBe("144px");
+  await expect.poll(() => margem("--room-video-right")).toBe("0px");
+  await botao.click();
+  await expect(opcao(miniaturas.opcoes.bottom)).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByRole("note")).toHaveCount(0);
+});

@@ -138,9 +138,10 @@ test("os schemas zod da fase 4 aceitam o certo e recusam o errado com a frase ce
   const duplicated = offerSchemas.offerDraftSchema.safeParse({ productId: "formacao", status: "active", triggerKind: "manual", variants: [variant, variant] });
   assert.ok(duplicated.error.issues.some((issue) => issue.message === offerSchemas.OFFER_MESSAGES.labelsUnique));
   const simulation = simulationSchemas.saveSessionSimulationSchema.safeParse({ joins: { enabled: true }, sessionId: SESSION });
-  assert.ok(simulation.error.issues.some((issue) => issue.message === simulationSchemas.SIMULATION_MESSAGES.ack), "entradas simuladas pedem a caixa de §8.6");
-  assert.ok(simulationSchemas.saveSessionSimulationSchema.safeParse({ ackText: "Decisão do produtor", acknowledged: true, joins: { enabled: true }, sessionId: SESSION }).success);
-  assert.ok(simulationSchemas.saveSessionSimulationSchema.safeParse({ sessionId: SESSION }).success, "tudo desligado salva sem caixa");
+  assert.ok(simulation.success, "entradas simuladas salvam sem a caixa (D86, 12/11/2026)");
+  assert.equal("acknowledged" in simulation.data || "ackText" in simulation.data, false, "a frase e a caixa nao fazem mais parte do pedido");
+  assert.ok(simulationSchemas.saveSessionSimulationSchema.safeParse({ sessionId: SESSION }).success, "tudo desligado tambem");
+  assert.ok(!simulationSchemas.saveSessionSimulationSchema.safeParse({ joins: { enabled: true } }).success, "sem a sessao, recusa");
   assert.ok(!simulationSchemas.simulationFeedQuerySchema.safeParse({ from: "0", sessao: SESSION, to: String(model.SIMULATION_LIMITS.feedWindowSeconds * 1000 + 1) }).success);
   assert.ok(!assistantSchemas.saveAssistantSchema.safeParse({ items: Array.from({ length: model.ASSISTANT_LIMITS.knowledgeMax + 1 }, () => ({ answer: "a", question: "qq" })), settings: {}, webinarId: WEBINAR }).success);
   assert.ok(jitSchemas.jitSettingsSchema.safeParse({ endHour: 22, everyMinutes: 60, startHour: 8 }).success);

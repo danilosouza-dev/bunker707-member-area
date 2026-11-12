@@ -1063,6 +1063,48 @@ gravada à parte depois da renumeração e conferida.
 
 **Produção (Hetzner)**: nada manual, como na §9.13: o `deploy-membros` roda o `migrate.sh` antes de recriar o app.
 
+### 9.16 Rodada v9 dos webinários: migração `202611150001` antes do merge (12/11/2026)
+
+O link do banner, quem assina a resposta de uma pergunta e o comentário ou a pergunta na tela (`docs/30` D87 a D89, §4.1
+e §4.2; `docs/31` §14) têm uma migração só, que vem **depois** da `202611140002` (§9.15) e não muda as de antes (a guarda
+`tests/webinarios-v9.guard.test.mjs` prende o hash acumulado das 73 anteriores e o do arquivo novo). O **Variar
+sozinho** dos participantes simulados (D90) e as miniaturas (D91) não têm migração.
+
+| Ordem | Arquivo | O que faz | Seções | Nome em `schema_migrations` |
+|---|---|---|---|---|
+| 1 | `202611150001_webinars_v9.sql` | `webinar_screen_items.link_target` (o que abre o link do banner; padrão `both`); `webinar_questions.answer_author` e `webinar_question_replies.author_as` (quem assina a resposta); cria `webinar_screen_comments` (o comentário ou a pergunta na tela, só a referência, um ativo por sessão), com dois índices, RLS e só o `service_role`. Os três checks das tabelas que já existem entram `not valid` e são validados na última seção | 4: o banner; as perguntas; a tabela nova; a validação dos checks | `webinars_v9` |
+
+**Antes do merge na `dev`**: sem a migração o app novo continua de pé. As três colunas ficam fora das listas que o app
+sempre lê; ele as lê à parte e, sem elas, cai de volta na lista de sempre (com memória de 60 s). O banner abre pelo botão
+como antes, a resposta aparece como **Equipe** e nada vai para a tela. Só escolher **O que abre o link**, **Responder
+como** com outra opção que não a de sempre e **Mostrar na tela** voltam 409 com o aviso da migração `202611150001`,
+antes de gravar qualquer coisa. Ela é a mais nova dos webinários, então `WEBINARS_MIGRATION` passa a apontá-la (e
+`WEBINARS_V9_MIGRATION`). A migração sozinha não atrapalha o app de antes: as colunas têm padrão ou são nulas, e a
+tabela é nova.
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: o arquivo inteiro colado no SQL Editor (é idempotente, sem `drop`), ou
+pelo `apply_migration` do MCP do Supabase. Depois, gravar a versão:
+
+```sql
+insert into supabase_migrations.schema_migrations (version, name) values ('202611150001', 'webinars_v9') on conflict (version) do nothing;
+```
+
+Conferência depois de aplicar (uma linha só; a do cabeçalho da migração). O resultado esperado é `9`:
+
+```sql
+select (select count(*) from information_schema.columns where table_schema = 'public' and (table_name, column_name) in (('webinar_screen_items', 'link_target'), ('webinar_questions', 'answer_author'), ('webinar_question_replies', 'author_as'))) + (select count(*) from information_schema.tables where table_schema = 'public' and table_name = 'webinar_screen_comments') + (select count(*) from pg_constraint where conname in ('webinar_screen_items_link_target_v9', 'webinar_questions_answer_author_v9', 'webinar_question_replies_author_as_v9') and convalidated) + (select count(*) from pg_indexes where schemaname = 'public' and indexname in ('webinar_screen_comments_active_idx', 'webinar_screen_comments_session_idx')) as total; -- 9
+```
+
+Estado em 12/11/2026: escrita e aplicada só no Supabase local, onde a integração `tests/integration/webinarios-v9.test.mjs`
+roda contra ela (rodou em 12/11/2026; a conferência deu `9`). **Na nuvem de teste, aplicar antes do merge** da PR da
+rodada v9 na `dev`, pelo produtor, no SQL Editor.
+
+**Produção (Hetzner)**: nada manual, como na §9.13: o `deploy-membros` roda o `migrate.sh` antes de recriar o app.
+
+**O servidor de vídeo**: a folha `infra/jitsi/web/bunker707.css` mudou nesta rodada (a mão levantada e os pontos do nível
+de áudio, `docs/31` §14.8) e o ajuste do ⋯ de 10/11/2026 ainda não tinha chegado ao servidor. Ela só chega pela etapa
+`deploy-meet` (`.github/workflows/infra.yml`), com `SEM_LIVE_2H=sim` e o ok do produtor no chat (`docs/20`).
+
 ## 10. Producao guardada em snapshot (03/11/2026)
 
 **Decisao do produtor (03/11/2026, no chat):** a producao na Hetzner so serve para a equipe testar; ninguem de fora a

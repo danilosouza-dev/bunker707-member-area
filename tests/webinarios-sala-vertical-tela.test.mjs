@@ -242,7 +242,7 @@ test("os lugares do vertical: o aviso de venda no topo (abaixo da barra), a pilu
   // do topo, abaixo dos selos de cima do palco, docs/31 V2-4), por ultimo nela (especificacao de 10/11/2026, §3.2).
   assert.equal(elementWith(normal, 'data-room-slot="sales"'), '<div class="contents" data-room-slot="sales"></div>', "o lugar do vertical fica vazio no desenho normal");
   const area = elementWith(normal, "data-room-screen-area");
-  assert.match(area, /^<div class="absolute left-3 right-\[calc\(var\(--room-video-right,0px\)\+12px\)\] top-14 lg:left-4 bottom-14" data-room-screen-area="">/, "abaixo dos selos de cima do palco (docs/31 V2-4)");
+  assert.match(area, /^<div class="absolute left-3 right-\[calc\(var\(--room-video-right,0px\)\+12px\)\] top-14 lg:left-4 bottom-\[calc\(3\.5rem\+var\(--room-video-bottom,0px\)\)\]" data-room-screen-area="">/, "abaixo dos selos de cima do palco (docs/31 V2-4)");
   const celula = elementWith(area, 'data-room-screen-cell="top_left"');
   assert.match(celula, /data-room-simulation-sale=""/, "o toast na celula de cima a esquerda");
   assert.match(celula, /Carlos acabou de garantir a vaga/);

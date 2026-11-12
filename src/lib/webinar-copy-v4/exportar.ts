@@ -146,6 +146,10 @@ export const EXPORTAR_COPY = {
     mudanca: (quando: string, valor: string, nome: string, origem: string) => `${quando} · ${valor} · ${nome}, ${origem}`,
     antesDoComeco: "antes do começo",
     valor: (n: number | null) => (n === null ? "faixa que varia" : `+${n.toLocaleString("pt-BR")}`),
+    /* "Variar sozinho" (rodada v9, docs/30 D90): o +N que sobe e desce sozinho, dito junto do numero. */
+    valorQueVaria: (valor: string, percentual: number, direcao: string, de: number, ate: number) =>
+      `${valor}, variando até ${percentual}% ${direcao}, a cada ${de === ate ? `${de} s` : `${de} a ${ate} s`}`,
+    direcoesDaVariacao: { both: "para mais e para menos", down: "só para menos", up: "só para mais" },
     origens: { console: "pelo console", editor: "pelo editor" }
   },
   quedas: {

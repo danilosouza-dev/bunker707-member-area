@@ -22,10 +22,13 @@ import {
 } from "./model";
 import { NA_TELA_COPY } from "../../lib/webinar-copy-v4/na-tela";
 import { PESSOAS_COPY as PESSOAS } from "../../lib/webinar-copy-v4/pessoas";
+import { ANSWER_AUTHOR_LIMITS, ANSWER_AUTHOR_MODES, answerAuthorCustomName } from "./answer-author-model";
 import { PERSONA_AVATAR_LIMITS, PERSONA_AVATAR_PATH_PATTERN, personaCleanName, personaNameFits } from "./persona-model";
 
 export const CHAT_MESSAGES = {
   answer: "A resposta pode ter até 1.000 caracteres.",
+  /** Rodada v9 (docs/30 D88): o nome de "Responder como › Outro nome". */
+  authorName: `Escreva o nome que aparece na resposta (de ${ANSWER_AUTHOR_LIMITS.nameMin} a ${ANSWER_AUTHOR_LIMITS.nameMax} caracteres).`,
   body: "Escreva a mensagem.",
   bodyTooLong: "A mensagem pode ter até 1.000 caracteres.",
   consent: "Para participar do chat, aceite as regras uma vez.",
@@ -368,9 +371,26 @@ export const createConsolePollSchema = z.object({ ...pollDraftFields, launch: z.
 export const launchPollSchema = z.object({ pin: z.boolean().default(false), pollId: uuidSchema, sessionId: sessionIdSchema });
 export const closePollSchema = z.object({ pollId: uuidSchema, sessionId: sessionIdSchema, shareResults: z.boolean().default(false) });
 
+/**
+ * "Responder como" (rodada v9, docs/30 D88): o modo e, em "Outro nome", o nome. Ausente (a pagina de antes): quem chama
+ * usa o padrao de sempre (a primeira resposta como "Equipe"; a do fio com o nome de quem escreve).
+ */
+const answerAuthorChoiceSchema = z
+  .object({
+    as: z.enum(ANSWER_AUTHOR_MODES, { error: CHAT_MESSAGES.invalid }),
+    name: z.string().trim().max(ANSWER_AUTHOR_LIMITS.nameMax, CHAT_MESSAGES.authorName).nullish()
+  })
+  .superRefine((value, context) => {
+    if (value.as === "custom" && !answerAuthorCustomName(value.name)) {
+      context.addIssue({ code: "custom", message: CHAT_MESSAGES.authorName, path: ["name"] });
+    }
+  })
+  .optional();
+
 export const answerQuestionSchema = z.object({
   answerText: z.string().trim().max(CHAT_LIMITS.answer, CHAT_MESSAGES.answer).optional(),
   answeredLive: z.boolean().default(false),
+  author: answerAuthorChoiceSchema,
   questionId: uuidSchema
 });
 
@@ -378,6 +398,7 @@ export const questionStatusSchema = z.object({ questionId: uuidSchema, status: z
 
 /** A resposta da equipe no fio de uma pergunta ja respondida (console). */
 export const replyQuestionSchema = z.object({
+  author: answerAuthorChoiceSchema,
   body: z.string().trim().min(1, CHAT_MESSAGES.reply).max(QUESTION_REPLY_LIMITS.teamBody, CHAT_MESSAGES.answer),
   questionId: uuidSchema
 });

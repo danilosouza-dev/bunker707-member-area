@@ -68,6 +68,7 @@ import {
 } from "./room-rules";
 import { loadStudentIdentity, studentDisplayName, type RoomContext, type StudentIdentity } from "./room-queries";
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
+import { takeDownScreenComments } from "./screen-comment-store";
 
 /**
  * Os motivos do 409. Da fase 3: `banned` nas escritas da live (removido desta sessao ou banido de todas), `muted` no
@@ -330,6 +331,8 @@ export async function removeStudentChat(input: { db: WebinarsDb; now?: number; u
   const now = input.now ?? Date.now();
   const nowIso = new Date(now).toISOString();
   const counts = await softDeleteStudentContent(input.db, { nowIso, reason: "consent_revoked", userId: input.userId });
+  // O que era do aluno e estava na tela de alguma sessao sai na hora (rodada v9, docs/30 D89).
+  await takeDownScreenComments(input.db, { nowIso, userId: input.userId });
   await revokeConsentRow(input.db, input.userId, nowIso);
   forgetAuthorPhoto(input.userId);
   return {

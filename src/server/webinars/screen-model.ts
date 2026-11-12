@@ -20,6 +20,7 @@
 import { NA_TELA_COPY } from "../../lib/webinar-copy-v4/na-tela";
 import { linkDomain, safeHttpsUrl } from "../../lib/webinar-links";
 import type { StudentChatMessage, WebinarSession } from "./model";
+import type { StudentScreenComment } from "./screen-comment-model";
 
 /* ------------------------------------------------------------------------------------------------
  * Listas e limites (os checks da 202611100002)
@@ -39,6 +40,20 @@ export type ScreenPlace = (typeof SCREEN_PLACES)[number];
 
 export const SCREEN_SIZES = ["s", "m", "l"] as const;
 export type ScreenSize = (typeof SCREEN_SIZES)[number];
+
+/**
+ * O que abre o link do banner (rodada v9, P3; docs/30 D87; webinar_screen_items.link_target, 202611150001): a imagem e
+ * o botao (o padrao), so o botao ou so a imagem. "A imagem" e o banner em si (a imagem, o titulo e o texto). Sem texto
+ * do botao, o banner inteiro abre o link, qualquer que seja a escolha; no QR Code nao vale nada.
+ */
+export const SCREEN_LINK_TARGETS = ["both", "button", "image"] as const;
+export type ScreenLinkTarget = (typeof SCREEN_LINK_TARGETS)[number];
+export const SCREEN_DEFAULT_LINK_TARGET: ScreenLinkTarget = "both";
+/** A exibicao de antes da 202611150001 (a copia sem `linkTarget`) e o banco sem a coluna: so o botao, como era. */
+export const SCREEN_LEGACY_LINK_TARGET: ScreenLinkTarget = "button";
+
+/** A migracao da rodada v9 (o que abre o link, quem assina a resposta e o comentario na tela), para o aviso do console. */
+export const SCREEN_V9_MIGRATION = "202611150001";
 
 /** Por que uma exibicao saiu: a equipe tirou, outro do mesmo tipo entrou, a enquete fixada foi encerrada sem resultado. */
 export const SCREEN_HIDDEN_REASONS = ["team", "replaced", "poll_closed"] as const;
@@ -148,6 +163,18 @@ export function screenCenterBlocked(input: { closable: boolean; place: ScreenPla
 /** Os tamanhos que o formulario oferece para a posicao e o "pode fechar" escolhidos. */
 export function screenSizesFor(place: ScreenPlace, closable: boolean): readonly ScreenSize[] {
   return SCREEN_SIZES.filter((size) => !screenCenterBlocked({ closable, place, size }));
+}
+
+/**
+ * O que abre o link, do jeito que e gravado: fora do banner com link vale o padrao; "Só a imagem" tira o texto do botao
+ * (um botao que nao abre nada confunde). Pura: o zod do salvar e a Previa do formulario usam a mesma conta.
+ */
+export function screenLinkTargetOf(input: { buttonLabel: string | null; kind: ScreenKind; linkTarget?: ScreenLinkTarget | null; linkUrl: string | null }): { buttonLabel: string | null; linkTarget: ScreenLinkTarget } {
+  if (input.kind !== "banner" || !input.linkUrl) {
+    return { buttonLabel: input.buttonLabel, linkTarget: SCREEN_DEFAULT_LINK_TARGET };
+  }
+  const linkTarget = input.linkTarget ?? SCREEN_DEFAULT_LINK_TARGET;
+  return { buttonLabel: linkTarget === "image" ? null : input.buttonLabel, linkTarget };
 }
 
 /** O que o formulario manda (os textos ja sem espacos nas pontas; vazio = null). */
@@ -310,6 +337,8 @@ export type ScreenItem = {
   id: string;
   image: ScreenImage | null;
   kind: ScreenKind;
+  /** O que abre o link do banner (D87); no QR Code, sempre "both". */
+  linkTarget: ScreenLinkTarget;
   linkUrl: string | null;
   name: string;
   place: ScreenPlace;
@@ -325,6 +354,8 @@ export type ScreenSnapshot = {
   buttonLabel: string | null;
   closable: boolean;
   image: ScreenImage | null;
+  /** O que abre o link (D87). Ausente na copia gravada antes da 202611150001: so o botao, como a turma viu. */
+  linkTarget?: ScreenLinkTarget;
   linkUrl: string | null;
   name: string;
   place: ScreenPlace;
@@ -370,6 +401,8 @@ export function snapshotOfItem(item: ScreenItem): ScreenSnapshot {
     buttonLabel: item.buttonLabel,
     closable: item.closable,
     image: item.image ? { ...item.image } : null,
+    // O item lido de antes da 202611150001 (sem a escolha) congela sem a chave: a copia vale "so o botao", como era.
+    ...(item.linkTarget ? { linkTarget: item.linkTarget } : {}),
     linkUrl: item.linkUrl,
     name: item.name,
     place: item.place,
@@ -399,6 +432,7 @@ export function screenSnapshotMatches(snapshot: ScreenSnapshot | null, item: Scr
     snapshot.body === now.body &&
     snapshot.buttonLabel === now.buttonLabel &&
     snapshot.closable === now.closable &&
+    (snapshot.linkTarget ?? SCREEN_LEGACY_LINK_TARGET) === (now.linkTarget ?? SCREEN_LEGACY_LINK_TARGET) &&
     snapshot.linkUrl === now.linkUrl &&
     snapshot.place === now.place &&
     snapshot.size === now.size &&
@@ -437,6 +471,8 @@ export type StudentScreenItem = {
   displayId: string;
   image: { alt: string; height: number; url: string; width: number } | null;
   kind: ScreenKind;
+  /** O que abre o link do banner (D87). Ausente no servidor de antes: so o botao. */
+  linkTarget?: ScreenLinkTarget;
   linkUrl: string | null;
   place: ScreenPlace;
   shownAt: string;
@@ -454,6 +490,11 @@ export type StudentScreenItem = {
  * seguinte (ate 90 s) nem na espera de 5 min sem nada ligado. Opaco e curto; nunca as regras nem a semente.
  */
 export type StudentScreenState = {
+  /**
+   * O comentario ou a pergunta que a equipe trouxe para a tela (rodada v9, docs/30 D89); ausente sem nada na tela (o
+   * servidor de antes nunca manda a chave).
+   */
+  comment?: StudentScreenComment | null;
   items: StudentScreenItem[];
   pinned: StudentChatMessage | null;
   pinnedPollId: string | null;
@@ -543,11 +584,13 @@ export function studentScreenItem(display: ScreenDisplay, origin: string | null 
 
   return {
     body: display.kind === "qr" ? null : snapshot.body,
-    buttonLabel: display.kind === "qr" || !linkUrl ? null : snapshot.buttonLabel,
+    // "Só a imagem" nao desenha o botao (o texto dele so existe com o botao clicavel).
+    buttonLabel: display.kind === "qr" || !linkUrl || snapshot.linkTarget === "image" ? null : snapshot.buttonLabel,
     closable: snapshot.closable,
     displayId: display.id,
     image: display.kind === "qr" ? null : image,
     kind: display.kind,
+    linkTarget: display.kind === "qr" ? SCREEN_DEFAULT_LINK_TARGET : (snapshot.linkTarget ?? SCREEN_LEGACY_LINK_TARGET),
     linkUrl,
     place: snapshot.place,
     shownAt: display.shownAt,

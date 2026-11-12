@@ -2,12 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useConsolePanelOpen, useConsoleTheme } from "@/components/member/webinars/room/use-room-prefs";
+import { usePanelMotion } from "@/components/member/webinars/room/use-panel-motion";
+import { thumbsLayout } from "@/components/member/webinars/room/live-room-model";
+import { useConsoleAnswerAuthor, useConsolePanelOpen, useConsoleTheme, useConsoleThumbs } from "@/components/member/webinars/room/use-room-prefs";
 import { Button } from "@/components/ui/button";
 import type { ActionResult } from "@/lib/action-result";
 import type { LiveEmbedLook } from "@/lib/jitsi-room-config";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
+import type { AnswerAuthorChoice } from "@/server/webinars/answer-author-model";
 import type { ConsolePollLaunch, ModerationAction } from "@/server/webinars/chat-schemas";
 import {
   CONSOLE_POLL_MS,
@@ -60,7 +63,7 @@ import {
 } from "@/server/webinars/live-actions";
 import { LIVE_CONSOLE_COPY, banLabels, desiredLobby, handRows, liveControlsFor, type LiveConsolePerson } from "@/server/webinars/live-console-model";
 import { NO_BAN } from "@/server/webinars/live-model";
-import type { ChatMode, QuestionStatus, SlowModeSeconds } from "@/server/webinars/model";
+import type { ChatMode, QuestionStatus, SimulatedCountVary, SlowModeSeconds } from "@/server/webinars/model";
 import { LIVE_SCRIPT_LATE_MAX_MS } from "@/server/webinars/persona-model";
 import {
   answerQuestion,
@@ -79,7 +82,7 @@ import {
   unpinPoll
 } from "@/server/webinars/room-actions";
 import { sessionDurationMs } from "@/server/webinars/room-model";
-import { archiveScreenItem, hideScreenItem, saveScreenItem, showScreenItem, uploadScreenImage } from "@/server/webinars/screen-actions";
+import { archiveScreenItem, hideScreenComment, hideScreenItem, saveScreenItem, showScreenComment, showScreenItem, uploadScreenImage } from "@/server/webinars/screen-actions";
 import { screenStageKinds } from "@/server/webinars/screen-model";
 import { deletePersona, savePersona } from "@/server/webinars/persona-actions";
 import type { PersonaDraft, WebinarPersona } from "@/server/webinars/persona-model";
@@ -195,7 +198,10 @@ type Failure = { message: string; status: number };
 
 type SessionConsoleProps = {
   currentUserId: string;
-  /** O nome de quem esta no console, como o servidor poe na frase dos participantes simulados (getUserDisplayName). */
+  /**
+   * O nome completo de quem esta no console. Nao e mais usado aqui desde a rodada v9 (a frase dos participantes simulados
+   * saiu da tela, docs/30 D86; o nome com que a pessoa escreve vem de `data.viewer`); a pagina ainda o passa.
+   */
   currentUserName?: string | null;
   data: SessionConsoleData;
   /** A leitura do retrato na montagem (o teste de tela; o console sempre comeca respondendo). */
@@ -211,7 +217,7 @@ type SessionConsoleProps = {
 
 type BanTarget = { name: string; participantId: string | null; userId: string };
 
-export function SessionConsole({ currentUserId, currentUserName = null, data, initialPoll = CONSOLE_POLL_START, nonce = null, permissions, serverNow, translationEnabled = false }: SessionConsoleProps) {
+export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL_START, nonce = null, permissions, serverNow, translationEnabled = false }: SessionConsoleProps) {
   const router = useRouter();
   const [snapshot, setSnapshot] = useState<ConsoleSnapshot | null>(data.snapshot);
   const [skew] = useState(() => serverNow - Date.now());
@@ -236,10 +242,14 @@ export function SessionConsole({ currentUserId, currentUserName = null, data, in
   const portalRef = useRef<HTMLDivElement | null>(null);
   const [theme, setTheme] = useConsoleTheme();
   const [panelOpen, setPanelOpen] = useConsolePanelOpen();
+  const [answerAuthor, setAnswerAuthor] = useConsoleAnswerAuthor();
   /** A aba ou a entrada do ⋯ escolhida no painel, so na memoria da pagina (o Chat ao abrir). */
   const [panelView, setPanelView] = useState<ConsolePanelView>({ tab: "chat" });
   // O tema do console vai ao iframe na montagem (no hash, para o CSS da instancia); trocar depois nao remonta a sala.
-  const look = useMemo<LiveEmbedLook>(() => ({ layout: "stage", theme }), [theme]);
+  // Onde quem esta no console quer as miniaturas (rodada v9, docs/30 D91), guardado no navegador; a fileira embaixo
+  // entra no iframe na proxima montagem, como o tema.
+  const [thumbs, setThumbs] = useConsoleThumbs();
+  const look = useMemo<LiveEmbedLook>(() => ({ layout: thumbsLayout(thumbs), theme }), [theme, thumbs]);
   const session = snapshot?.session ?? null;
   const sessionId = session?.id ?? null;
   const webinar = data.webinar;
@@ -843,17 +853,36 @@ export function SessionConsole({ currentUserId, currentUserName = null, data, in
   }
 
   /**
-   * O Aplicar e o Tirar dos participantes simulados (D79): saveSimulatedAudience pelo console (a frase marcada so quando
-   * soma algo); o banner na falha; no sucesso, o aviso de que a sala recebe em segundos e o retrato de novo.
+   * O Aplicar e o Tirar dos participantes simulados (D79): saveSimulatedAudience pelo console (sem frase nem caixa, D86);
+   * o banner na falha; no sucesso, o aviso de que a sala recebe em segundos e o retrato de novo.
    */
-  function applyAudience(input: { ackText: string | null; extra: number }): Promise<boolean> {
+  function applyAudience(input: { extra: number; vary: SimulatedCountVary | null }): Promise<boolean> {
     if (!sessionId) {
       return Promise.resolve(false);
     }
     return run(
       "audience",
-      () => saveSimulatedAudience({ ackText: input.ackText ?? undefined, acknowledged: input.ackText !== null, extra: input.extra, sessionId, source: "console" }),
-      () => adminToast.success(plateiaCopy.aplicado(input.extra))
+      // Com o "Variar sozinho" (rodada v9, docs/30 D90), o pedido leva a variacao junto do numero.
+      () => saveSimulatedAudience({ extra: input.extra, sessionId, source: "console", vary: input.vary }),
+      () => adminToast.success(input.vary && input.extra > 0 ? plateiaCopy.variar.aplicado(input.extra, input.vary.percent) : plateiaCopy.aplicado(input.extra))
+    );
+  }
+
+  /**
+   * "Mostrar na tela" e "Tirar da tela" de uma mensagem do chat ou de uma pergunta (rodada v9, docs/30 D89): com o id,
+   * mostra (o que estava sai); sem o id, tira o que esta na tela. O aviso diz que a turma ve em ate 5 s.
+   */
+  function screenCommentAction(source: "chat" | "question" | null, id: string | null): Promise<boolean> {
+    if (!sessionId) {
+      return Promise.resolve(false);
+    }
+    if (!source || !id) {
+      return run("screen-comment", () => hideScreenComment({ sessionId }), () => adminToast.success(naTelaCopy.avisos.comentarioSaiu));
+    }
+    return run(
+      `screen-comment:${id}`,
+      () => showScreenComment(source === "chat" ? { messageId: id, sessionId } : { questionId: id, sessionId }),
+      () => adminToast.success(naTelaCopy.avisos.comentarioNaTela)
     );
   }
 
@@ -945,7 +974,9 @@ export function SessionConsole({ currentUserId, currentUserName = null, data, in
       : [];
   // Sem palco (a gravada e o Replay) o painel nunca fecha: ele e o corpo inteiro.
   const panelShown = live === null || panelOpen;
-  const skeleton = consoleSkeleton({ hasStage: live !== null, panelOpen });
+  // Fechando, o painel continua no lugar ate a saida terminar (rodada v9, P12): o palco muda de tamanho uma vez so.
+  const panelMotion = usePanelMotion(panelShown);
+  const skeleton = consoleSkeleton({ hasStage: live !== null, panelOpen: live === null || panelMotion.laid });
   const tabs = session ? consoleTabsFor({ kind: session.kind }) : [];
   const audience = snapshot?.audience ?? null;
   const entries = session ? consoleMoreEntriesFor({ audience: audience !== null, hasPresence: Boolean(snapshot?.presence), kind: session.kind, webinarKind: webinar.kind }) : [];
@@ -954,8 +985,11 @@ export function SessionConsole({ currentUserId, currentUserName = null, data, in
   const audienceOffsetMs = session ? simulationClockMs(session, nowMs) : Number.NaN;
   const shownView = consolePanelViewOf({ entries, tabs, view: panelView });
   const screen = snapshot?.screen ?? { active: [], items: [], pending: false, stats: {} };
-  const counts = { ...consoleTabCounts({ hands: live ? handRows(room.room, live.people).length : 0, questions: snapshot?.questions ?? [] }), tela: consoleScreenCount({ active: screen.active, pinnedMessageId: snapshot?.pinnedMessageId ?? null }) };
+  const counts = { ...consoleTabCounts({ hands: live ? handRows(room.room, live.people).length : 0, questions: snapshot?.questions ?? [] }), tela: consoleScreenCount({ active: screen.active, comment: screen.comment ?? null, pinnedMessageId: snapshot?.pinnedMessageId ?? null }) };
   const stageKinds = screenStageKinds(screen.active);
+  // O comentario ou a pergunta na tela (rodada v9, docs/30 D89): o que o console marca e a pilula do palco diz.
+  const screenComment = screen.comment ?? null;
+  const stageLabels = [...stageKinds.map((kind) => WEBINAR_COPY.naTela.tipos[kind]), ...(screenComment ? [WEBINAR_COPY.naTela.tipoComentario[screenComment.source]] : [])];
   // R7: a parte simulada do contador vem separada no fim ("· +300 simulados"), so para a equipe.
   const presentLabel = session ? consolePresenceBadge({ peak: snapshot?.presence?.peak?.present ?? null, presentNow: snapshot?.presentNow ?? 0, simulated: snapshot?.simulatedNow ?? null }) : null;
   // O nome do apresentador da pagina (o perfil de quem apresenta, lido no servidor) para o selo de outro moderador no
@@ -1097,9 +1131,10 @@ export function SessionConsole({ currentUserId, currentUserName = null, data, in
                   onPresent={audience ? openAudience : undefined}
                   presentLabel={presentLabel}
                   presenterName={presenterName}
-                  screenLabel={stageKinds.length > 0 ? naTelaCopy.pilulaPalco(stageKinds.map((kind) => WEBINAR_COPY.naTela.tipos[kind])) : null}
+                  screenLabel={stageLabels.length > 0 ? naTelaCopy.pilulaPalco(stageLabels) : null}
                   session={session}
                   stageRef={stageRef}
+                  thumbs={thumbs}
                   topLeft={consoleStageTopLeft({ durationMs, nowMs: tick, session, skewMs: skew })}
                 />
                 <div className={skeleton.bar ?? ""} data-console-slot="bar">
@@ -1113,9 +1148,11 @@ export function SessionConsole({ currentUserId, currentUserName = null, data, in
                     onOpenPanel={openPanel}
                     onRecord={recordNow}
                     onStopRecording={stopRecording}
+                    onThumbs={setThumbs}
                     onTogglePanel={() => setPanelOpen(!panelOpen)}
                     panelOpen={panelOpen}
                     session={session}
+                    thumbs={thumbs}
                   />
                 </div>
               </div>
@@ -1123,6 +1160,7 @@ export function SessionConsole({ currentUserId, currentUserName = null, data, in
             <ConsolePanel
               className={skeleton.panel}
               closable={live !== null}
+              motion={panelMotion}
               rail={skeleton.rail !== null}
               counts={counts}
               entries={entries}
@@ -1207,12 +1245,9 @@ export function SessionConsole({ currentUserId, currentUserName = null, data, in
                           idBase="console-audience"
                           key={session.id}
                           link={{ href: `${webinarAdminHref(webinar.id)}#webinar-card-simulacao`, label: plateiaCopy.verNoEditor }}
-                          live={session.kind === "live"}
-                          nowMs={nowMs}
                           offsetMs={audienceOffsetMs}
                           onApply={applyAudience}
                           phase={audiencePhase}
-                          responsible={currentUserName ?? ""}
                           titleId={AUDIENCE_TITLE_ID}
                         />
                       ) : null}
@@ -1227,6 +1262,7 @@ export function SessionConsole({ currentUserId, currentUserName = null, data, in
                       nowMs={nowMs}
                       onArchive={archiveScreen}
                       onHide={(displayId: string) => run(`screen:${displayId}`, () => hideScreenItem({ displayId }), () => adminToast.success(naTelaCopy.avisos.saiu))}
+                      onHideComment={() => screenCommentAction(null, null)}
                       onSave={saveScreen}
                       onShow={(itemId: string) =>
                         void run(`screen:${itemId}`, () => showScreenItem({ itemId, sessionId: session.id }), () => adminToast.success(naTelaCopy.avisos.naTela))
@@ -1290,6 +1326,8 @@ export function SessionConsole({ currentUserId, currentUserName = null, data, in
                       run(`moderate:${messageId}`, () => editAssistantAnswer({ body, messageId }), () => adminToast.success(WEBINAR_COPY.assistente.console.corrigida))
                     }
                     onModerate={(action: ModerationAction, messageId: string) => run(`moderate:${messageId}`, () => moderateMessage({ action, messageId }))}
+                    onScreenComment={canAct && session.kind !== "replay" ? (messageId: string | null) => void screenCommentAction("chat", messageId) : null}
+                    screenCommentMessageId={screenComment?.source === "chat" ? screenComment.sourceId : null}
                     onRetranslate={
                       translationEnabled
                         ? (messageId: string) =>
@@ -1328,15 +1366,22 @@ export function SessionConsole({ currentUserId, currentUserName = null, data, in
                     currentUserAvatarUrl={data.viewer?.avatarUrl ?? null}
                     currentUserName={data.viewer?.name ?? null}
                     marks={attendance && attendance.sessionId === session.id ? attendance.questionMarks : null}
-                    onAnswer={(questionId: string, answerText: string, answeredLive: boolean) => run(`question:${questionId}`, () => answerQuestion({ answerText: answerText || undefined, answeredLive, questionId }))}
+                    // "Responder como" (rodada v9, docs/30 D88): a escolha lembrada no navegador vai com cada resposta.
+                    author={answerAuthor}
+                    onAnswer={(questionId: string, answerText: string, answeredLive: boolean, author?: AnswerAuthorChoice) =>
+                      run(`question:${questionId}`, () => answerQuestion({ answerText: answerText || undefined, answeredLive, author, questionId }))
+                    }
+                    onAuthor={setAnswerAuthor}
                     onDeleteReply={(replyId: string) =>
                       run(`reply:${replyId}`, () => deleteQuestionReply({ replyId }), () => adminToast.success(WEBINAR_ADMIN_COPY.console.questions.replyDeleted))
                     }
-                    onReply={(questionId: string, body: string) =>
-                      run(`question:${questionId}`, () => replyToQuestion({ body, questionId }), () => adminToast.success(WEBINAR_ADMIN_COPY.console.questions.replied))
+                    onReply={(questionId: string, body: string, author?: AnswerAuthorChoice) =>
+                      run(`question:${questionId}`, () => replyToQuestion({ author, body, questionId }), () => adminToast.success(WEBINAR_ADMIN_COPY.console.questions.replied))
                     }
+                    onScreenComment={canAct && session.kind !== "replay" ? (questionId: string | null) => void screenCommentAction("question", questionId) : null}
                     onStatus={(questionId: string, status: QuestionStatus) => void run(`question:${questionId}`, () => setQuestionStatus({ questionId, status }))}
                     questions={snapshot.questions}
+                    screenCommentQuestionId={screenComment?.source === "question" ? screenComment.sourceId : null}
                   />
                 ),
                 pessoas: live ? <ConsolePeopleTab busyKey={busyKey} canPublish={permissions.canPublish} handle={room} onAction={onPersonAction} onSelfUnmute={selfUnmuteNow} people={live.people} /> : null
