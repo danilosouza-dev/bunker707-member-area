@@ -35,7 +35,8 @@ export async function GET(request: Request, context: RouteContext) {
       return noStore(NextResponse.json({ error: "Sessão inválida." }, { status: 400 }));
     }
 
-    const snapshot = await getConsoleSnapshot(id, sessionId, new Date());
+    // Quem pede vai junto: as curtidas dele nas perguntas e nas respostas voltam marcadas (docs/30 D101).
+    const snapshot = await getConsoleSnapshot(id, sessionId, new Date(), auth.user?.id ?? null);
 
     if (!snapshot) {
       return noStore(NextResponse.json({ error: "Essa sessão não existe mais." }, { status: 404 }));

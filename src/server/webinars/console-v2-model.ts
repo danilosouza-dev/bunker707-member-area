@@ -365,6 +365,16 @@ export function consoleMoreEntriesFor(input: { audience?: boolean; hasPresence: 
 }
 
 /**
+ * As maos que subiram desde a ultima leitura (rodada v11, docs/30 D99): os ids da fila de agora que nao estavam na de
+ * antes, na ordem da fila. O console avisa cada uma ("Ana M. levantou a mão."); a mao que so mudou de lugar (o Pular)
+ * ou que continua levantada nao avisa de novo.
+ */
+export function newRaisedHands(previous: readonly string[], current: readonly string[]): string[] {
+  const before = new Set(previous);
+  return current.filter((id) => !before.has(id));
+}
+
+/**
  * Os numeros das abas (V2-15 e V2-A37): "Perguntas 3" conta so as abertas (a fila que espera a equipe) e "Mãos 2" as
  * maos levantadas (a fila de handRows, o mesmo numero do circulo Mãos da barra). O Chat fica sem numero na aba (o
  * "{n} aguardando" vai no cabecalho dele) e Pessoas tambem.

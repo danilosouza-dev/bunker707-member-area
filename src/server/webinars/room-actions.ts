@@ -44,6 +44,7 @@ import {
   createReplaySessionSchema,
   deleteQuestionReplySchema,
   launchPollSchema,
+  likeQuestionItemSchema,
   markQuestionSeenSchema,
   moderateMessageSchema,
   questionStatusSchema,
@@ -70,6 +71,8 @@ import {
   insertPollRow,
   insertQuestionReplyRow,
   markQuestionThreadSeen,
+  toggleQuestionLike,
+  toggleQuestionVote,
   writeQuestionAnswerAuthor,
   insertQuestionRow,
   listPollRows,
@@ -85,6 +88,7 @@ import {
 } from "./chat-store";
 import { takeDownScreenComments } from "./screen-comment-store";
 import { ackSentenceMatches, canEndSession, canOpenSession, canTeamActOn, consoleAckSentence } from "./console-model";
+import { QUESTION_LIKES_MIGRATION } from "./question-likes-model";
 import { isMissingWebinarSchema, WEBINARS_MIGRATION, WEBINARS_SCREEN_MIGRATION, WEBINARS_V10_MIGRATION, WEBINARS_V9_MIGRATION, WebinarError, WebinarFieldError, webinarsDb, type WebinarsDb } from "./db";
 import { roomRoleFor } from "./jitsi-token";
 import {
@@ -1462,6 +1466,55 @@ export async function setQuestionStatus(input: { questionId: string; status: Web
     invalidateReport();
 
     return { question: questionFromRow(updated) };
+  });
+}
+
+/**
+ * Curtir / Tirar a curtida pela equipe no console (rodada v11, docs/30 D101): a propria pergunta (o mesmo voto do
+ * aluno, em webinar_question_votes, com o total em upvotes), a resposta escrita ou uma resposta do fio (em
+ * webinar_question_likes). Vale para quem atende. A pergunta apagada ou que nao existe, a resposta apagada ou de outra
+ * pergunta e a pergunta sem resposta escrita: 404. Banco sem a 202611170001 (so a resposta e o fio): 409 com o aviso.
+ */
+export async function likeQuestionItem(input: { questionId: string; replyId?: string | null; target: "answer" | "question" | "reply" }): Promise<ActionResult<{ liked: boolean; likes: number; questionId: string; replyId: string | null; target: "answer" | "question" | "reply" }>> {
+  return runWebinarAction("messaging.write", "atendimento", likeQuestionItemSchema, input, async ({ input: data, user }) => {
+    const db = webinarsDb();
+    const question = await fetchQuestionRow(db, data.questionId);
+
+    if (!question || question.deleted_at) {
+      throw new WebinarError(QUESTION_MISSING_MESSAGE, 404);
+    }
+
+    const replyId = data.target === "reply" ? (data.replyId ?? null) : null;
+    let result: { liked: boolean; likes: number };
+
+    if (data.target === "question") {
+      const vote = await toggleQuestionVote(db, { questionId: question.id, userId: user.id });
+      result = { liked: vote.voted, likes: vote.upvotes };
+    } else {
+      try {
+        if (replyId) {
+          const reply = await fetchQuestionReplyRow(db, replyId);
+          if (!reply || reply.question_id !== question.id || reply.deleted_at) {
+            throw new WebinarError(REPLY_MISSING_MESSAGE, 404);
+          }
+        } else if (question.status !== "answered" || !question.answer_text?.trim()) {
+          throw new WebinarError(REPLY_MISSING_MESSAGE, 404);
+        }
+        result = await toggleQuestionLike(db, { questionId: question.id, replyId, sessionId: question.session_id, userId: user.id });
+      } catch (error) {
+        if (isPendingMigrationError(error)) {
+          throw new WebinarError(WEBINAR_COPY.exportar.migracaoPendente(QUESTION_LIKES_MIGRATION), 409);
+        }
+        throw error;
+      }
+    }
+
+    const sessionRow = await fetchSessionRow(db, question.session_id);
+    if (sessionRow) {
+      revalidateConsole(sessionRow.webinar_id);
+    }
+
+    return { ...result, questionId: question.id, replyId, target: data.target };
   });
 }
 

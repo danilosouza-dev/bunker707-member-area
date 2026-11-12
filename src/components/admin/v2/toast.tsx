@@ -29,6 +29,13 @@ export const adminToast = {
   info(message: string) {
     return toast(message, { duration: ADMIN_TOAST_DURATION_MS });
   },
+  /**
+   * Um aviso neutro com uma acao que nao e desfazer (o console: "Ana M. levantou a mão." com Ver fila). O mesmo `id`
+   * troca o aviso no lugar, sem empilhar.
+   */
+  notice(message: string, options: { action?: { label: string; onClick: () => void }; durationMs?: number; id?: string } = {}) {
+    return toast(message, { action: options.action, duration: options.durationMs ?? ADMIN_TOAST_DURATION_MS, id: options.id });
+  },
   dismiss(id?: string | number) {
     toast.dismiss(id);
   }
@@ -54,6 +61,9 @@ export function AdminToaster({ placement = "bottom-right", theme = "dark" }: { p
       position={inConsole ? "top-center" : "bottom-right"}
       theme={theme}
       toastOptions={{
+        // No console, a acao do aviso (Ver fila, Desfazer) e o texto na cor da acao do aviso da sala, sem a caixa do
+        // botao da biblioteca (docs/30 D99).
+        actionButtonStyle: inConsole ? { background: "transparent", color: "var(--room-snackbar-action)", fontSize: "14px", fontWeight: 600, padding: "0 4px" } : undefined,
         // No console, o aviso invertido da sala no estilo do YouTube (docs/31 §10, o RoomSnackbar): o fundo claro no
         // escuro e o escuro no claro, sem contorno, raio 8 e a sombra do aviso; no admin, o cartao de sempre.
         style: inConsole

@@ -122,7 +122,46 @@ test("quem recarrega o video para a troca valer (D96): a pagina sozinha com nada
   const painel = fonte("src/components/admin/v2/communication/webinars/session-console/live-room-panel.tsx");
   assert.match(painel, /thumbsReloadMode\(\{ joined: handle\.joined, locked: false, onAir: handle\.audioOn \|\| handle\.videoOn \|\| handle\.sharing, pending: thumbsPending\(\{ row: handle\.thumbsRow, thumbs \}\) \}\)/);
   const palco = fonte("src/components/admin/v2/communication/webinars/session-console/console-stage.tsx");
+  assert.match(palco, /const reloadVideo = handle\.reloadVideo;/);
   assert.match(palco, /if \(thumbsReload !== "auto"\) \{\s*return;\s*\}\s*const id = window\.setTimeout\(reloadVideo, 0\);/);
+});
+
+test("a recarga sai da sala de video antes de trocar o iframe (D98): sem isso a pessoa aparecia duas vezes nas miniaturas; a frase do palco e a da troca, nunca Reconectando", () => {
+  // O prazo para o iframe avisar a saida; sem aviso, a troca segue.
+  assert.equal(model.LIVE_ROOM_RULES.reloadLeaveMs, 3_000);
+  assert.ok(model.LIVE_ROOM_RULES.reloadLeaveMs < model.LIVE_ROOM_RULES.joinTimeoutMs);
+  assert.equal(COPY.mudando, "Mudando as miniaturas de lugar…");
+  assert.notEqual(COPY.mudando, WEBINAR_COPY.sala.reconectando);
+
+  // A sala: o hangup sai antes do iframe novo, o token e a saida sao esperados juntos, e a saida pedida nao e uma queda
+  // nem vai duas vezes ao historico.
+  const hook = fonte("src/components/member/webinars/room/use-live-room.ts");
+  const recarga = hook.slice(hook.indexOf("const reloadVideo = useCallback(() => {"), hook.indexOf("}, [armJoinTimeout, pushEvent, refuse, sessionId, webinarId]);"));
+  assert.match(recarga, /pushEvent\(toRoomEvent\("videoConferenceLeft"/, "a saida e registrada uma vez, pela sala");
+  assert.match(recarga, /timer = window\.setTimeout\(done, LIVE_ROOM_RULES\.reloadLeaveMs\);\s*reloadLeftRef\.current = done;\s*if \(!commandRef\.current\("hangup"\)\) \{\s*done\(\);/);
+  assert.match(recarga, /Promise\.all\(\[postJoinToken\(webinarId, sessionId\), left\]\)\s*\.then\(\(\[next\]\) => \{[\s\S]*?retryRef\.current\(\);/, "o iframe novo so depois da saida e do token");
+  assert.ok(recarga.indexOf('commandRef.current("hangup")') < recarga.indexOf("retryRef.current()"));
+  assert.match(
+    hook,
+    /if \(reloadLeftRef\.current && \(name === "videoConferenceLeft" \|\| name === "readyToClose"\)\) \{[\s\S]*?reloadLeftRef\.current\(\);\s*return;\s*\}/,
+    "a saida pedida solta a troca e nao segue para a fila nem para a queda"
+  );
+  assert.match(hook, /reloading: reloading && entry === "reconnecting",/);
+  const palcoDaSala = fonte("src/components/member/webinars/room/live-stage.tsx");
+  assert.match(palcoDaSala, /\{reloading \? WEBINAR_COPY\.salaV2\.visao\.miniaturas\.mudando : WEBINAR_COPY\.sala\.reconectando\}/);
+  assert.match(fonte("src/components/member/webinars/room/live-room.tsx"), /reloading=\{room\.reloading\}/);
+
+  // O console: o mesmo, com o retry do palco depois da saida; o palco mostra a frase da troca, nunca o Entrar na sala.
+  const painel = fonte("src/components/admin/v2/communication/webinars/session-console/live-room-panel.tsx");
+  const doConsole = painel.slice(painel.indexOf("const reloadVideo = useCallback(() => {"), painel.indexOf("}, [command, meetRetry]);"));
+  assert.match(doConsole, /if \(reloadLeftRef\.current\) \{\s*return;\s*\}/, "uma troca por vez");
+  assert.match(doConsole, /const done = \(\) => \{\s*window\.clearTimeout\(timer\);\s*reloadLeftRef\.current = null;\s*meetRetry\(\);\s*\};/);
+  assert.match(doConsole, /if \(!command\("hangup"\)\) \{\s*done\(\);/);
+  assert.match(painel, /setSharing\(false\);\s*\/\/ A saida pedida pela troca das miniaturas chegou: o iframe novo ja pode montar\.\s*reloadLeftRef\.current\?\.\(\);/);
+  assert.match(painel, /reloading: reloading && meet\.status !== "joined" && meet\.status !== "failed",/);
+  const palcoDoConsole = fonte("src/components/admin/v2/communication/webinars/session-console/console-stage.tsx");
+  assert.match(palcoDoConsole, /\{handle\.reloading \? \([\s\S]*?data-live-stage-reloading=""[\s\S]*?WEBINAR_COPY\.salaV2\.visao\.miniaturas\.mudando/);
+  assert.match(palcoDoConsole, /\{handle\.frameStatus === "left" && !handle\.reloading \? \(/);
 });
 
 test("a fileira embaixo sobe o que fica na base do palco, e a coluna deixa de descontar a direita", () => {
@@ -227,7 +266,7 @@ test("o menu Visão do vídeo: o grupo Miniaturas com Lateral, Embaixo e Esconde
   const bar = fonte("src/components/admin/v2/communication/webinars/session-console/console-bar.tsx");
   assert.match(bar, /thumbsNote=\{handle\.role === "host" && thumbs === "hidden" \? WEBINAR_COPY\.salaV2\.visao\.miniaturas\.escondidasNaGravacao : null\}/);
   assert.match(bar, /const thumbsReload = consoleThumbsReload\(handle, thumbs\);\s*const thumbsWait = thumbsReload === "auto" \? null : thumbsReload;/);
-  assert.match(bar, /onReloadVideo=\{handle\.retry\}/);
+  assert.match(bar, /onReloadVideo=\{handle\.reloadVideo\}/);
   assert.match(bar, /thumbsWait=\{thumbsWait\}/);
   // Nenhuma frase cita o motor de video, e nenhuma usa a palavra proibida.
   assert.doesNotMatch(JSON.stringify(COPY), /jitsi|iframe|personagem/i);

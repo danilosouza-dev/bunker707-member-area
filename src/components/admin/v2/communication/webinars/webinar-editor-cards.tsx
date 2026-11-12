@@ -648,6 +648,14 @@ export function RoomCard({ disabled, draft, onChange }: CardProps) {
         label={copy.allowStudentCamera}
         onCheckedChange={(allowStudentCamera) => onChange({ allowStudentCamera })}
       />
+      <AdminSwitch
+        checked={room.showPresentCount}
+        description={copy.showPresentCountHint}
+        disabled={disabled}
+        id="webinar-room-showPresentCount"
+        label={copy.showPresentCount}
+        onCheckedChange={(showPresentCount) => setRoom({ showPresentCount })}
+      />
       <AdminSwitch checked={room.waitingRoom} disabled={disabled} id="webinar-room-waitingRoom" label={copy.waitingRoom} onCheckedChange={(waitingRoom) => setRoom({ waitingRoom })} />
       <AdminSwitch
         checked={room.practiceSession}

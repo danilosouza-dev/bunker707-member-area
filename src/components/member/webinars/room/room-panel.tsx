@@ -61,6 +61,8 @@ export type RoomPanelProps = {
   pinned?: ReactNode;
   /** Ha enquete aberta: o ponto na aba Enquetes. */
   pollOpen: boolean;
+  /** As falas novas da equipe nas perguntas do aluno (docs/30 D100): o ponto na aba Perguntas enquanto ela nao e a escolhida. */
+  questionsNew?: number;
   tab: RoomPanelTab;
   /** A acao da aba abaixo de lg, na linha das abas e fora da lista que rola (o "Filtrar e ordenar" das Perguntas). */
   tabAction?: ReactNode;
@@ -178,6 +180,7 @@ export function RoomPanel({
   open,
   pinned = null,
   pollOpen,
+  questionsNew = 0,
   tab,
   tabAction,
   tabs,
@@ -212,7 +215,7 @@ export function RoomPanel({
           onSelect={onTab}
           open={open}
           tab={tab}
-          tabs={tabs.map((value) => ({ dot: value === "enquetes" && pollOpen, label: tabLabel(value, kind), value }))}
+          tabs={tabs.map((value) => ({ dot: (value === "enquetes" && pollOpen) || (value === "perguntas" && questionsNew > 0 && tab !== "perguntas"), label: tabLabel(value, kind), value }))}
         />
         {tabAction}
       </div>

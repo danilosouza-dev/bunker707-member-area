@@ -104,6 +104,24 @@ export const CONSOLE_V2_COPY = {
     maos: (n: number) => (n === 1 ? "1 levantada" : `${n} levantadas`)
   },
 
+  /**
+   * A mao levantada no palco do console (rodada v11, docs/30 D99): o selo com quantas maos estao levantadas, que abre a
+   * fila, e o aviso de quando uma mao sobe, os dois desenhados pela pagina (o selo amarelo e o cartao do motor nao
+   * aparecem).
+   */
+  filaDeMaos: {
+    /** O nome do selo do palco para o leitor de tela e a dica. */
+    selo: (n: number) => (n === 1 ? "1 mão levantada. Abrir a fila." : `${n} mãos levantadas. Abrir a fila.`),
+    /** "Ana M. levantou a mão." e, com mais gente na fila, quantas maos ha. */
+    levantou: (nome: string, naFila: number) => (naFila > 1 ? `${nome} levantou a mão. ${naFila} na fila.` : `${nome} levantou a mão.`),
+    /** A acao do aviso: abre a aba Mãos. */
+    verFila: "Ver fila",
+    /** A frase no alto da fila. */
+    ordem: "Na ordem de quem levantou primeiro.",
+    /** O selo da primeira linha da fila. */
+    proximo: "Próximo"
+  },
+
   /** A aba Pessoas (V2-14 e V2-15) e o Remover do ⋮ da miniatura do video (V2-A29), quando ele nao passa pelo nosso. */
   pessoas: {
     removidoSemRegistro: "A pessoa saiu da sala, mas pode voltar: ela ainda não aparece na lista da sessão.",

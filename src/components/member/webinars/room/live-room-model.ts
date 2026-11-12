@@ -61,6 +61,11 @@ export const LIVE_ROOM_RULES = {
   reconnectBaseMs: 2_000,
   /** Sem a entrada confirmada depois disto, a montagem conta como queda. */
   joinTimeoutMs: 30_000,
+  /**
+   * A troca das miniaturas pede a saida da sala de video antes de trocar o iframe (docs/30 D98): sem o aviso da saida
+   * depois disto, a troca segue assim mesmo.
+   */
+  reloadLeaveMs: 3_000,
   /** As ultimas mensagens em pilulas sobre o palco com o painel do chat fechado (docs/31 V2-8, tambem no computador). */
   overlayMessages: 2,
   /**

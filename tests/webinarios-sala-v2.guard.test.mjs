@@ -48,7 +48,8 @@ test("o balao com Configurações aberto no celular: fecha Configurações e mos
     ["webinar-room", recorded]
   ]) {
     assert.match(fonte, /function onRail\(item: RoomPanelTab\) \{\s*const step = railStep\(\{ closable: barShown, item, panelShown, tab \}\);\s*setTab\(step\.tab\);\s*setPanelOpen\(step\.panelOpen\);/, nome);
-    assert.match(fonte, /<RoomRail kind=\{?[^ ]+ onItem=\{onRail\} panelShown=\{panelShown\} pollOpen=\{openPolls\.length > 0\} tab=\{tab\} tabs=\{tabs\} unread=\{unread\} \/>/, nome);
+    // O trilho leva tambem as respostas novas das perguntas do aluno (rodada v11, docs/30 D100).
+    assert.match(fonte, /<RoomRail kind=\{?[^ ]+ onItem=\{onRail\} panelShown=\{panelShown\} pollOpen=\{openPolls\.length > 0\} questionsNew=\{questionNews\.count\} tab=\{tab\} tabs=\{tabs\} unread=\{unread\} \/>/, nome);
     // O X devolve o foco ao item do trilho da aba que estava aberta.
     assert.match(fonte, /returnFocusFromPanel\(rootRef\.current, document\.activeElement, document\.getElementById\(ROOM_PANEL_ID\), tab\);/, nome);
   }
@@ -86,11 +87,13 @@ test("a gravada: Participantes com quem apresenta e o numero do selo do palco (d
   // D79 (11/11/2026): no "ver como", a aba diz que a simulacao nao aparece na previa (o numero ali e so o real).
   assert.match(
     recorded,
-    /<LiveParticipantsTab note=\{readOnly && kind === "simulated" \? WEBINAR_COPY\.simulacao\.plateia\.previa : null\} presenterKnown=\{[^}]+\} stage=\{panelStageNames\(presenterName\)\} students=\{momentBadge\.showCount \? shownCount : null\} \/>/,
+    /<LiveParticipantsTab note=\{readOnly && kind === "simulated" \? WEBINAR_COPY\.simulacao\.plateia\.previa : null\} presenterKnown=\{[^}]+\} stage=\{panelStageNames\(presenterName\)\} students=\{presentShown\} \/>/,
     "o mesmo numero do selo do palco, pela mesma condicao"
   );
   // O numero de quem assiste: no palco, ao lado do selo do momento (roomPresentBadge), e fora do cabecalho nas duas salas.
-  assert.match(recorded, /const presentBadge = roomPresentBadge\(momentBadge\.showCount \? shownCount : null\);/, "a gravada: o selo do palco");
+  // Um numero so para o selo, a aba e o titulo dela; nulo quando o momento nao mostra ou a equipe escondeu (docs/30 D102).
+  assert.match(recorded, /const presentShown = momentBadge\.showCount && !presentHidden \? shownCount : null;\s*const presentBadge = roomPresentBadge\(presentShown\);/, "a gravada: o selo do palco");
+  assert.match(recorded, /const presentHidden = session\.presentHidden === true;/);
   assert.match(recorded, /<RoomStageBadges[\s\S]*?present=\{presentBadge\}/);
   assert.match(
     room,
@@ -98,7 +101,7 @@ test("a gravada: Participantes com quem apresenta e o numero do selo do palco (d
     "a live: o numero do selo do palco, que some com a live encerrada (no ver como, a frase da previa sem a simulacao, D79)"
   );
   // Com a Simulacao na live (adendo de 10/11/2026, R7): o real mais a parte simulada, como na gravada.
-  assert.match(room, /const presentShown = phase === "ended" \? null : simulation\.displayCount\(presentNow, simulationOffsetMs\);\s*const presentBadge = roomPresentBadge\(presentShown\);/);
+  assert.match(room, /const presentShown = phase === "ended" \|\| session\.presentHidden === true \? null : simulation\.displayCount\(presentNow, simulationOffsetMs\);\s*const presentBadge = roomPresentBadge\(presentShown\);/);
   assert.match(room, /<RoomStageBadges[\s\S]*?present=\{presentBadge\}/);
   for (const [nome, fonte] of [
     ["live-room", room],
@@ -141,7 +144,8 @@ test("a correcao final da fase 1: as duas salas ligadas as regras puras do Esc, 
     assert.match(fonte, /rememberLeaveOpener\(\);\s*setConfirmLeave\(true\);/, nome);
     // A janela no centro (RoomLeaveDialog): o Voltar fecha, o Sair sai, e o Tab fica preso nela enquanto esta aberta.
     assert.match(fonte, /\{confirmLeave \? <RoomLeaveDialog onCancel=\{\(\) => setConfirmLeave\(false\)\} onLeave=\{leave\} \/> : null\}/, nome);
-    assert.match(fonte, /trapRoomFocus\(event, confirmLeave \? \(rootRef\.current\?\.querySelector<HTMLElement>\("\[data-room-confirm\]"\) \?\? rootRef\.current\) : rootRef\.current\);/, nome);
+    // Na live, a janela de live encerrada (docs/30 D104) tambem prende o Tab.
+    assert.match(fonte, /trapRoomFocus\(event, confirmLeave(?: \|\| endedNotice)? \? \(rootRef\.current\?\.querySelector<HTMLElement>\("\[data-room-confirm\]"\) \?\? rootRef\.current\) : rootRef\.current\);/, nome);
   }
   // O chat reaberto vai ao fim (chatListOnShow) nas duas salas; a gaveta do vertical monta de novo a cada abertura.
   assert.match(room, /shown=\{panelShown\}/);

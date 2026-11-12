@@ -33,6 +33,7 @@ import {
   consolePresenceBadge,
   consoleStageTopLeft,
   consoleTabCounts,
+  newRaisedHands,
   consoleTabsFor,
   consoleTopActionsFor,
   type ConsolePanelView,
@@ -70,6 +71,7 @@ import {
   closePoll,
   createConsolePoll,
   deleteQuestionReply,
+  likeQuestionItem,
   markQuestionSeen,
   endSessionNow,
   launchPoll,
@@ -109,7 +111,7 @@ import { ConsolePeopleTab } from "./console-people-tab";
 import type { ConsolePollFormInput } from "./console-poll-form";
 import { ConsolePolls } from "./console-polls";
 import { ConsolePresencePanel } from "./console-presence";
-import { ConsoleQuestions } from "./console-questions";
+import { ConsoleQuestions, type ConsoleLikeInput } from "./console-questions";
 import { ConsoleScreen, consoleScreenCount } from "./console-screen";
 import type { ScreenItemSaveInput } from "./console-screen-form";
 import { ConsoleScript } from "./console-script";
@@ -987,6 +989,31 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   const shownView = consolePanelViewOf({ entries, tabs, view: panelView });
   const screen = snapshot?.screen ?? { active: [], items: [], pending: false, stats: {} };
   const counts = { ...consoleTabCounts({ hands: live ? handRows(room.room, live.people).length : 0, questions: snapshot?.questions ?? [] }), tela: consoleScreenCount({ active: screen.active, comment: screen.comment ?? null, pinnedMessageId: snapshot?.pinnedMessageId ?? null }) };
+  // A mao que sobe avisa quem esta no console, com o desenho da area (rodada v11, docs/30 D99): "Ana M. levantou a
+  // mão." com Ver fila, que abre a aba Mãos. Um aviso por vez (o mesmo id troca no lugar); com a aba Mãos na tela, nada.
+  const handList = live ? handRows(room.room, live.people) : [];
+  const handsKey = handList.map((hand) => hand.id).join(" ");
+  const handsSeenRef = useRef<readonly string[]>([]);
+  const handNoticeRef = useRef<{ list: typeof handList; onFila: () => void; shown: boolean }>({ list: [], onFila: () => undefined, shown: false });
+  useEffect(() => {
+    handNoticeRef.current = { list: handList, onFila: () => openPanel({ tab: "maos" }), shown: panelShown && "tab" in shownView && shownView.tab === "maos" };
+  });
+  useEffect(() => {
+    const { list, onFila, shown } = handNoticeRef.current;
+    const ids = list.map((hand) => hand.id);
+    const fresh = newRaisedHands(handsSeenRef.current, ids);
+    handsSeenRef.current = ids;
+    const last = fresh.at(-1);
+    if (!last || shown) {
+      return;
+    }
+    const name = list.find((hand) => hand.id === last)?.name ?? LIVE_CONSOLE_COPY.equipe;
+    adminToast.notice(WEBINAR_COPY.consoleV2.filaDeMaos.levantou(name, ids.length), {
+      action: { label: WEBINAR_COPY.consoleV2.filaDeMaos.verFila, onClick: onFila },
+      durationMs: 6_000,
+      id: "console-hand-raised"
+    });
+  }, [handsKey]);
   const stageKinds = screenStageKinds(screen.active);
   // O comentario ou a pergunta na tela (rodada v9, docs/30 D89): o que o console marca e a pilula do palco diz.
   const screenComment = screen.comment ?? null;
@@ -1128,7 +1155,9 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                   busy={busyKey !== null}
                   className={skeleton.stage ?? ""}
                   handle={room}
+                  handsCount={counts.maos}
                   live={live}
+                  onHands={() => openPanel({ tab: "maos" })}
                   onPresent={audience ? openAudience : undefined}
                   presentLabel={presentLabel}
                   presenterName={presenterName}
@@ -1380,6 +1409,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                       run(`question:${questionId}`, () => replyToQuestion({ author, body, questionId }), () => adminToast.success(WEBINAR_ADMIN_COPY.console.questions.replied))
                     }
                     onScreenComment={canAct && session.kind !== "replay" ? (questionId: string | null) => void screenCommentAction("question", questionId) : null}
+                    onLike={canAct ? (like: ConsoleLikeInput) => void run(`question:${like.questionId}`, () => likeQuestionItem(like)) : null}
                     onSeen={canAct ? (questionId: string) => void run(`question:${questionId}`, () => markQuestionSeen({ questionId }), () => adminToast.success(WEBINAR_ADMIN_COPY.console.questions.markedSeen)) : null}
                     onStatus={(questionId: string, status: QuestionStatus) => void run(`question:${questionId}`, () => setQuestionStatus({ questionId, status }))}
                     questions={snapshot.questions}

@@ -420,6 +420,8 @@ export type StudentRoomExtras = {
   /** A mensagem fixada (o mesmo que screen.pinned na live e na gravada); continua para a pagina aberta com o codigo de antes. */
   pinned: StudentChatMessage | null;
   polls: StudentPoll[];
+  /** A equipe escolheu nao mostrar aos alunos quantas pessoas estao na sala (docs/30 D102): `presentNow` vai zerado. */
+  presentHidden?: boolean;
   presentNow: number;
   replaySessionId: string | null;
   /**
@@ -450,6 +452,7 @@ export type StudentSessionPayload = {
   live?: LiveRoomInfo | null;
   pinned?: StudentChatMessage | null;
   polls?: StudentPoll[];
+  presentHidden?: boolean;
   presentNow?: number;
   registeredCount: number | null;
   screen?: StudentScreenState;
@@ -521,6 +524,7 @@ export function buildSessionPayload(
     me: { ...base.me, ...room.me },
     pinned: room.pinned,
     polls: room.polls,
+    presentHidden: room.presentHidden === true,
     presentNow: room.presentNow,
     screen: room.screen,
     session: { ...base.session, ...room.session },

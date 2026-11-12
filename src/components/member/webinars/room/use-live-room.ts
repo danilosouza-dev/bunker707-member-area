@@ -327,6 +327,8 @@ export type LiveRoomController = {
    * troca entre Lateral e Embaixo pede. Fora da sala, ou com outra volta em curso, nao faz nada.
    */
   reloadVideo: () => void;
+  /** O video esta recarregando por causa da troca das miniaturas: o palco diz isso, nao "Reconectando…". */
+  reloading: boolean;
   /**
    * A troca entre Lateral e Embaixo que ainda espera o video carregar de novo e nao sai sozinha (thumbsReloadMode):
    * "manual" (algo do aluno no ar: o menu oferece Recarregar o vídeo agora) ou "locked" (a sala trancada). Nula sem
@@ -540,6 +542,10 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     dropRef.current = handleDrop;
   });
   const reloadVideoRef = useRef<() => void>(() => undefined);
+  /** A saida pedida pela troca das miniaturas ainda nao foi avisada pelo iframe (reloadVideo): quem a solta. */
+  const reloadLeftRef = useRef<(() => void) | null>(null);
+  /** O video recarrega por causa da troca das miniaturas (a frase do palco nao e a da queda). */
+  const [reloading, setReloading] = useState(false);
 
   /** Le quem esta no palco pelo getRoomsInfo (o participantJoined nao traz o papel de quem ja era moderador). */
   const readRoomsInfo = useCallback(() => {
@@ -605,6 +611,11 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
       if (leavingRef.current) {
         return;
       }
+      if (reloadLeftRef.current && (name === "videoConferenceLeft" || name === "readyToClose")) {
+        // A saida pedida pela troca das miniaturas: ja foi registrada (reloadVideo) e nao e uma queda.
+        reloadLeftRef.current();
+        return;
+      }
       // O mudo de um iframe antes da entrada dele (o startWithAudioMuted aplicado na chegada, base/media de falso para
       // verdadeiro): nem a barra, nem o pedido do microfone, nem o servidor (toda entrada ja comeca muda).
       const frame = meetApiRef.current?.current ?? null;
@@ -637,6 +648,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
         ownIdRef.current = typeof id === "string" ? id : null;
         everJoinedRef.current = true;
         rejoinedRef.current = true;
+        setReloading(false);
         attemptsRef.current = 0;
         droppingRef.current = false;
         joinedGenerationRef.current = mountGenerationRef.current;
@@ -932,9 +944,27 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     joinedApiRef.current = null;
     droppingRef.current = true;
     rejoinedRef.current = false;
+    setReloading(true);
     setEntry("reconnecting");
-    postJoinToken(webinarId, sessionId)
-      .then((next) => {
+    // A pessoa sai da sala de video antes de o iframe ser trocado (teste do produtor de 12/11/2026, docs/30 D98): sem
+    // isso o servidor de video guardava a entrada de antes por cerca de um minuto e a pessoa aparecia duas vezes nas
+    // miniaturas de todos. O `hangup` avisa a saida (videoConferenceLeft ou readyToClose); se o iframe nao responder
+    // (ja tinha caido), o prazo solta a troca.
+    const left = new Promise<void>((resolve) => {
+      let timer = 0;
+      const done = () => {
+        window.clearTimeout(timer);
+        reloadLeftRef.current = null;
+        resolve();
+      };
+      timer = window.setTimeout(done, LIVE_ROOM_RULES.reloadLeaveMs);
+      reloadLeftRef.current = done;
+      if (!commandRef.current("hangup")) {
+        done();
+      }
+    });
+    Promise.all([postJoinToken(webinarId, sessionId), left])
+      .then(([next]) => {
         if (leavingRef.current) {
           return;
         }
@@ -947,12 +977,13 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
         if (leavingRef.current) {
           return;
         }
+        setReloading(false);
         const failure = joinFailureOf(error);
         if (failure !== "error") {
           refuse(failure);
           return;
         }
-        // Sem rede: o iframe de antes continua montado; vale o caminho da queda (as tentativas de voltar).
+        // Sem rede: vale o caminho da queda (as tentativas de voltar).
         droppingRef.current = false;
         dropRef.current();
       });
@@ -1211,6 +1242,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     toggleSound,
     reloadVideo,
     thumbsRow,
+    reloading: reloading && entry === "reconnecting",
     thumbsWait: thumbsReload === "auto" ? null : thumbsReload,
     view,
     viewShown: signals.viewShown

@@ -612,3 +612,58 @@ Na aba **Perguntas** da sala, com o fio aberto, o **Responder** de quem pergunto
 | V2-A82 | O **Marcar como vista** deve valer só para quem marcou? | não: vale para toda a equipe, como o estado da pergunta |
 | V2-A83 | Com o microfone ou a câmera ligados, **Embaixo** deve recarregar sozinho e religar os dois depois? | não: religar a câmera e o microfone sem a pessoa pedir passaria por cima do aviso de gravação; ela usa o item do menu |
 | V2-A84 | O console deve calar todos os avisos do motor, como a sala? | ainda não: só o da mão sai; os outros somem quando o console tiver os próprios avisos (V2-A59) |
+
+## 16. Rodada v11: o terceiro teste do produtor na `dev`, em 12/11/2026
+
+Depois do merge da rodada v10, o produtor testou a `dev` outra vez e mandou seis pontos. As decisões estão no `docs/30` (D98 a D104); aqui fica o desenho. A migração é a `202611170001` (`docs/21` §9.18), só para as curtidas. O que é da folha do motor continua esperando a etapa `deploy-meet`, com o ok do produtor no chat; o resto vale no merge.
+
+### 16.1 Trocar as miniaturas sem duplicar a pessoa (D98)
+
+A cada troca entre **Lateral** e **Embaixo**, quem trocava aparecia mais uma vez nas miniaturas de todos, por cerca de um minuto, e o palco dizia "Reconectando…". O vídeo era trocado sem a pessoa sair da sala de vídeo, e o servidor guardava a entrada de antes até o prazo dele.
+
+- **Agora**: a página manda a saída (`hangup`), espera o aviso dela (ou 3 s, se o vídeo já tinha caído) e só então monta o vídeo novo. Na sala do aluno, o token novo é pedido ao mesmo tempo.
+- **A frase do palco**: "Mudando as miniaturas de lugar…", com o ícone girando. "Reconectando…" continua só para a queda de verdade. No console, a frase toma o lugar do **Entrar na sala** que apareceria com a saída.
+- **O histórico**: a saída é registrada uma vez, pela página; o aviso que chega do vídeo não conta de novo nem dispara as tentativas de voltar.
+
+### 16.2 O aviso de resposta nova para quem perguntou (D100)
+
+- **Onde**: no item **Perguntas** do trilho (a partir de 1024 px), o contador vermelho com o número das falas novas, e o nome "Perguntas, 2 respostas novas". Abaixo de 1024 px, um ponto na aba **Perguntas** do painel. Nos dois, o aviso da sala "Responderam a sua pergunta." com **Ver**, que abre o painel na aba.
+- **O que conta**: a resposta da equipe a uma pergunta do aluno (escrita ou ao vivo) e cada resposta da equipe no fio dela. A resposta do próprio aluno não conta. O que já estava respondido quando ele abriu a sala também não.
+- **Quando zera**: com a aba **Perguntas** na tela.
+- **Como chega**: com a aba fora da tela, a sala relê as perguntas a cada 20 s, só para quem já perguntou algo nesta sessão. Uma leitura por aluno, 3 s depois de a sala abrir, descobre isso.
+
+### 16.3 Curtir a pergunta e as respostas (D101)
+
+- **Na sala**: a resposta escrita e cada resposta do fio ganham o polegar com o número, igual ao da pergunta: cheio quando a curtida é do aluno, e o total ao lado. O toque muda a tela na hora; se o servidor recusar, volta. No "ver como" e na gaveta do vertical o fio fica só de leitura.
+- **No console**: o "5 votos" da pergunta vira o polegar com o total, e a resposta escrita e cada resposta do fio ganham o mesmo polegar pequeno. O nome do botão diz o total ("Curtir, 3 curtidas"). Sem poder agir (a sessão encerrada, sem a permissão), a pergunta mostra "5 votos" como antes e o fio fica sem polegar.
+- **Quem curtiu** não aparece para a turma; fica guardado para o relatório.
+
+### 16.4 A mão levantada no palco do console e a fila (D99)
+
+- **O selo**: no alto à direita do palco, antes do "{n} presentes", uma pílula com o ícone da mão e o número. Aparece com uma mão levantada ou mais; o toque abre a aba **Mãos**. O nome diz "2 mãos levantadas. Abrir a fila.".
+- **O aviso**: quando uma mão sobe, "Ana M. levantou a mão." (com "3 na fila." quando há mais gente), com **Ver fila**. Um por vez: a mão seguinte troca o aviso no lugar. Com a aba **Mãos** na tela, sem aviso. O som da mão do motor continua para quem apresenta.
+- **A fila**: a aba **Mãos** diz "Na ordem de quem levantou primeiro." e marca a primeira linha com **Próximo** (com duas mãos ou mais). O resto é o de sempre: **Liberar**, **Abaixar a mão**, **Pular** e **Abaixar todas as mãos**.
+- **O que é do motor** e continua desligado no console: o selo amarelo no topo do vídeo e o cartão "Gostaria de participar." (D95). O contorno e o selo da mão em cada miniatura continuam do motor, vestidos pela folha (§14.8).
+
+### 16.5 Mostrar quantas pessoas estão na sala (D102)
+
+No card **Sala** do editor, a chave **Mostrar quantas pessoas estão na sala**, ligada por padrão, com a dica "Desligado, os alunos não veem o número de pessoas na sala. Você continua vendo no console.". Desligada, somem na sala do aluno: o selo com o número ao lado do selo do momento, no palco; a linha "{n} alunos na sala" e o número no título da aba **Participantes**; e o "{n} assistindo" do vertical. O console não muda.
+
+### 16.6 Os avisos e os diálogos do motor (D103)
+
+O produtor viu, ao abrir a live, cartões do motor (aparelho novo conectado e outros) ainda com o visual dele. A regra: nada do motor é tirado sem ter o nosso equivalente; o que continua aparecendo é vestido pela folha `infra/jitsi/web/bunker707.css` (§15.5), que já está escrita desde a rodada v10 e **ainda não chegou ao servidor de vídeo**. Ela chega pela etapa `deploy-meet`, com `SEM_LIVE_2H=sim` e o ok do produtor no chat.
+
+### 16.7 A janela "A live foi encerrada" (D104)
+
+O diálogo do motor ("A chamada foi encerrada", com o botão azul) continua desligado (§15.5). No lugar dele, quando a live acaba com o aluno na sala, a página abre a janela dela: no centro, sobre o véu que cobre a sala, com o mesmo cartão do **Sair da sala?** (o fundo do menu, o canto de 12 px, a sombra da sala). O título "A live foi encerrada", o texto "Obrigado por participar. Você já pode sair da sala." e um botão só, **OK**, que recebe o foco. O **OK**, o Esc e o clique no véu fecham a janela, e a tela de live encerrada fica atrás. Quem abre a página de uma live que já tinha acabado vê só essa tela, sem janela.
+
+### 16.8 Perguntas novas
+
+| # | Pergunta | Padrão assumido |
+|---|---|---|
+| V2-A85 | As curtidas devem entrar no relatório da sessão (as respostas mais curtidas, quem mais curtiu)? | sim, numa próxima rodada; os dados já ficam gravados |
+| V2-A86 | Curtir também as mensagens do chat? | não nesta rodada: pede tabela própria e o desenho do polegar na mensagem |
+| V2-A87 | O aviso de resposta nova deve chegar também ao sino, para quem saiu da sala? | o sino já avisa a resposta escrita da equipe; as respostas do fio, não por enquanto |
+| V2-A88 | A chave de mostrar o número de pessoas deve ter um botão no console, para trocar no meio da live? | não por enquanto: fica no editor e vale em até 1 min |
+| V2-A89 | A fila das mãos deve mostrar há quanto tempo cada um espera? | não por enquanto: a ordem e o **Próximo** bastam |
+| V2-A90 | A janela **A live foi encerrada** deve trazer o botão **Ver replay** quando o Replay já existe? | não por enquanto: só o **OK**; o Replay continua na página do webinário |

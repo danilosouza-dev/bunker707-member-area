@@ -40,7 +40,7 @@ export async function POST(request: Request, context: RouteContext) {
     const room = await loadCachedRoomContext(guarded.userId, guarded.webinarId, body.data.sessionId.toLowerCase(), now);
     const result = await recordStudentHeartbeat({
       body: body.data,
-      context: { durationMs: room.durationMs, recordingId: room.recording?.id ?? null, session: room.session },
+      context: { durationMs: room.durationMs, recordingId: room.recording?.id ?? null, session: room.session, showPresentCount: room.webinar.roomSettings.showPresentCount },
       db: webinarsDb(),
       now,
       userAgent: request.headers.get("user-agent"),

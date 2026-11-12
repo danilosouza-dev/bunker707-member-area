@@ -9,7 +9,7 @@
 // banner e do QR Code (POST .../screen-events; o "viu" pelo fetch keepalive, o clique e o fechar pelo sendBeacon).
 
 import type { RoomEventItem } from "@/lib/jitsi-room-config";
-import { roomApiPath, questionReplyPath, questionVotePath, type ChatCursor } from "@/lib/webinar-room-client";
+import { roomApiPath, questionLikePath, questionReplyPath, questionVotePath, type ChatCursor } from "@/lib/webinar-room-client";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { JoinTokenReply } from "@/server/webinars/live-model";
 import type { ChatMode, Reaction, StudentChatMessage } from "@/server/webinars/model";
@@ -158,6 +158,11 @@ export function postQuestion(webinarId: string, body: QuestionPostBody) {
 
 export function postQuestionVote(webinarId: string, questionId: string, sessionId: string) {
   return sendJson<{ upvotes: number; voted: boolean }>(questionVotePath(webinarId, questionId), "POST", { sessionId }, GENERIC);
+}
+
+/** Curtir / Tirar a curtida da resposta escrita da pergunta (`replyId` nulo) ou de uma resposta do fio (docs/30 D101). */
+export function postQuestionLike(webinarId: string, questionId: string, body: { replyId: string | null; sessionId: string }) {
+  return sendJson<{ liked: boolean; likes: number }>(questionLikePath(webinarId, questionId), "POST", body, GENERIC);
 }
 
 export type QuestionReplyBody = Pick<ChatPostBody, "consent" | "consentVersion"> & { body: string; sessionId: string };

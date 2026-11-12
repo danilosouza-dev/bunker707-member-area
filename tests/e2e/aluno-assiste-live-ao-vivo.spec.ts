@@ -1845,6 +1845,15 @@ test("as miniaturas (docs/30 D91 e D96): Esconder e Lateral valem na hora, por c
   await opcao(miniaturas.opcoes.bottom).click();
   expect((await token).status(), "a sala pede outro token para o video novo").toBe(200);
   await expect.poll(() => sala.montagens(), { timeout: 20_000 }).toBe(2);
+  // A aluna saiu da sala de video antes de o video recarregar (D98: sem isso ela aparecia duas vezes nas miniaturas): o
+  // pedido de saida foi para o video de antes (os comandos da sala falsa sao por montagem).
+  const saiuAntes = await page.evaluate((indice) => {
+    const sala = (window as unknown as { __salaFalsa?: { montagens: { comandos: { comando: string }[] }[] } }).__salaFalsa;
+    return sala?.montagens[indice]?.comandos.some((item) => item.comando === "hangup") ?? false;
+  }, 0);
+  expect(saiuAntes, "o hangup no video de antes").toBe(true);
+  // O palco diz o que esta acontecendo, nunca "Reconectando…".
+  await expect(palco.locator("[data-live-reloading]")).toHaveText(miniaturas.mudando);
   const comFileira = await sala.esperarMontada();
   expect(comFileira.interfaceConfigOverwrite.VERTICAL_FILMSTRIP, "a fileira embaixo").toBe(false);
   await sala.disparar("videoConferenceJoined", { displayName: "Aluna T.", id: PARTICIPANTE, roomName });
@@ -1886,4 +1895,39 @@ test("as miniaturas (docs/30 D91 e D96): Esconder e Lateral valem na hora, por c
   await expect(dialogo).toHaveAttribute("data-room-kind", "live");
   await dialogo.getByRole("button", { exact: true, name: aoVivo.entrarNaSala }).click();
   expect((await sala.esperarMontada()).interfaceConfigOverwrite.VERTICAL_FILMSTRIP, "a fileira embaixo, guardada").toBe(false);
+});
+
+test("a live acaba com a aluna na sala (docs/30 D104): a janela da area avisa 'A live foi encerrada' com o OK em foco, sem o dialogo do motor; o OK fecha e a tela de encerrada fica", async ({ page }) => {
+  test.setTimeout(90_000);
+  const encerrada = WEBINAR_COPY.salaV2.encerrada;
+  const db = createLocalAdminClient();
+  const { dialogo, montagem, sala } = await entrarNaSala(page);
+  // O motor nao abre o dialogo dele quando a sala e encerrada: a pagina avisa.
+  expect(montagem.configOverwrite.notifyOnConferenceDestruction).toBe(false);
+  const janela = dialogo.locator("[data-room-ended-dialog]");
+  await expect(janela).toHaveCount(0);
+
+  try {
+    // Quem apresenta encerra a live: a sessao acaba no banco e o motor avisa que a sala fechou.
+    unwrap(await db.from("webinar_sessions").update({ ended_at: new Date().toISOString(), status: "ended" }).eq("id", LIVE_AO_VIVO_DE_TESTE.sessaoId), "Encerrando a live de teste");
+    await sala.disparar("readyToClose", {});
+
+    await expect(janela).toBeVisible({ timeout: 30_000 });
+    await expect(janela).toHaveAttribute("role", "alertdialog");
+    await expect(janela.getByRole("heading", { name: encerrada.titulo })).toBeVisible();
+    await expect(janela.getByText(encerrada.texto)).toBeVisible();
+    const ok = janela.getByRole("button", { exact: true, name: encerrada.ok });
+    await expect(ok).toBeFocused();
+    // Nenhuma tentativa de voltar para uma live que acabou.
+    await expect(dialogo.getByText(aoVivo.naoConseguimosVoltar)).toHaveCount(0);
+
+    // O OK so fecha a janela: a sala fica na tela de live encerrada.
+    await ok.click();
+    await expect(janela).toHaveCount(0);
+    await expect(dialogo.locator('[data-room-stage="ended"]')).toBeVisible();
+    await expect.poll(() => dialogo.evaluate((elemento) => elemento.contains(document.activeElement))).toBe(true);
+  } finally {
+    // Os testes seguintes do arquivo (a ordem pode mudar) encontram a live no ar de novo.
+    unwrap(await db.from("webinar_sessions").update({ ended_at: null, status: "live" }).eq("id", LIVE_AO_VIVO_DE_TESTE.sessaoId), "Voltando a live de teste para o ar");
+  }
 });

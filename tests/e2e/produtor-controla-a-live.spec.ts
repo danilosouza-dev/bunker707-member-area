@@ -767,7 +767,17 @@ test.describe("produtor", () => {
     await barraDe(page).getByRole("button", { exact: true, name: WEBINAR_COPY.consoleV2.visao.palcoParaTodos }).click();
     await page.getByRole("menuitemradio", { exact: true, name: miniaturas.opcoes.bottom }).click();
     await expect.poll(() => sala.montagens(), { timeout: 20_000 }).toBe(2);
+    // Quem esta no console saiu da sala de video antes de o video recarregar (D98: sem isso aparecia duas vezes): o
+    // pedido de saida foi para o video de antes (os comandos da sala falsa sao por montagem).
+    const saiuAntes = await page.evaluate((indice) => {
+      const sala = (window as unknown as { __salaFalsa?: { montagens: { comandos: { comando: string }[] }[] } }).__salaFalsa;
+      return sala?.montagens[indice]?.comandos.some((item) => item.comando === "hangup") ?? false;
+    }, 0);
+    expect(saiuAntes, "o hangup no video de antes").toBe(true);
+    await expect(palco.locator("[data-live-stage-reloading]")).toHaveText(miniaturas.mudando);
+    await expect(palco.locator("[data-live-stage-left]")).toHaveCount(0);
     const comFileira = await entrarComoApresentador(sala);
+    await expect(palco.locator("[data-live-stage-reloading]")).toHaveCount(0);
     expect(comFileira.interfaceConfigOverwrite.VERTICAL_FILMSTRIP, "a fileira embaixo").toBe(false);
     await expect.poll(() => palco.evaluate((elemento) => (elemento as HTMLElement).style.getPropertyValue("--room-video-bottom").trim())).toBe("144px");
     await page.waitForTimeout(1_000);
@@ -802,6 +812,12 @@ test.describe("produtor", () => {
     const maos = barra.getByRole("button", { exact: true, name: consoleV2.barra.maos(1) });
     await expect(maos).toBeVisible();
     await expect(maos.locator("[data-console-hands-count]")).toHaveText("1");
+    // A mao levantada no palco, com o desenho da area (docs/30 D99): o selo com quantas maos e o aviso com Ver fila.
+    const seloDasMaos = page.locator('[data-console-hands-open="stage"]');
+    await expect(seloDasMaos).toHaveText("1");
+    await expect(seloDasMaos).toHaveAccessibleName(consoleV2.filaDeMaos.selo(1));
+    await expect(page.getByText(/levantou a mão\.$/)).toBeVisible();
+    await expect(page.getByRole("button", { exact: true, name: consoleV2.filaDeMaos.verFila })).toBeVisible();
     await maos.click();
     // No computador as abas sao o trilho (docs/31 §10): o item Mãos aberto, com o numero no nome, e o foco nele.
     const abaMaos = page.locator('[data-console-rail="maos"]');

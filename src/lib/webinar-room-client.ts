@@ -328,6 +328,11 @@ export function questionVotePath(webinarId: string, questionId: string): string 
   return `/api/webinars/${encodeURIComponent(webinarId)}/questions/${encodeURIComponent(questionId)}/vote`;
 }
 
+/** A curtida da resposta escrita de uma pergunta ou de uma resposta do fio (docs/30 D101). */
+export function questionLikePath(webinarId: string, questionId: string): string {
+  return `/api/webinars/${encodeURIComponent(webinarId)}/questions/${encodeURIComponent(questionId)}/like`;
+}
+
 /** O fio de uma pergunta (a resposta de quem perguntou). */
 export function questionReplyPath(webinarId: string, questionId: string): string {
   return `/api/webinars/${encodeURIComponent(webinarId)}/questions/${encodeURIComponent(questionId)}/replies`;

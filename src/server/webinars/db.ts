@@ -50,8 +50,10 @@ export type WebinarsDb = SupabaseClient;
  * Rodada v9 (docs/30 D87 a D89, 12/11/2026): a 202611150001 (o que abre o link do banner, quem assina a resposta e o
  * comentario na tela) passa a ser a mais nova, entao o aviso a aponta. Nenhuma coluna dela entra nas listas que o app
  * sempre le: sem ela a sala e o console seguem como antes, e so as escritas novas voltam 409 com o aviso (docs/21 §9.16).
+ * Rodada v11 (docs/30 D101, 12/11/2026): a 202611170001 (webinar_question_likes, as curtidas da resposta e do fio) e a
+ * mais nova; sem ela a leitura das curtidas devolve vazio e so curtir volta 409 com o aviso (docs/21 §9.18).
  */
-export const WEBINARS_MIGRATION = "202611160001";
+export const WEBINARS_MIGRATION = "202611170001";
 
 /** 4a: webinar_panel (os paineis Lives ao vivo e Lives gravadas e os numeros da lista). */
 export const WEBINARS_PANELS_MIGRATION = "202610300002";
@@ -145,7 +147,6 @@ export const WEBINARS_V9_MIGRATION = "202611150001";
 /**
  * Rodada v10 (docs/30 D94; 12/11/2026): webinar_questions.thread_seen_at e thread_seen_by (o fio de uma pergunta
  * marcado como visto pela equipe). Nenhuma leitura de sempre depende dela: sem as colunas, o aviso "Nova resposta do
- * aluno" so sai com a resposta da equipe, como antes, e o Marcar como vista volta 409 com o aviso desta. E a mais nova
- * dos webinarios (WEBINARS_MIGRATION).
+ * aluno" so sai com a resposta da equipe, como antes, e o Marcar como vista volta 409 com o aviso desta.
  */
 export const WEBINARS_V10_MIGRATION = "202611160001";
