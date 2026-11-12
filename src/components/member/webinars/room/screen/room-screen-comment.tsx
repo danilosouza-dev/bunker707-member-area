@@ -116,7 +116,7 @@ export function RoomScreenCommentLayer({ comment, engineBar = false, forced, pla
   }
   return (
     <div className="@container/tela pointer-events-none absolute inset-0 z-20" data-room-screen-comment-layer="">
-      <div className={cn("absolute left-3 right-[calc(var(--room-video-right,0px)+12px)] top-14 lg:left-4", engineBar ? "bottom-24" : "bottom-14")}>
+      <div className={cn("absolute left-3 right-[calc(var(--room-video-right,0px)+12px)] top-14 lg:left-4", engineBar ? "bottom-[calc(6rem+var(--room-video-bottom,0px))]" : "bottom-[calc(3.5rem+var(--room-video-bottom,0px))]")}>
         <div className={cn("absolute inset-x-0 flex", SCREEN_COMMENT_PLACE_CLASSES[place])} data-room-screen-comment-place={place}>
           {/* A chave e a exibicao: outro comentario no lugar toca a entrada de novo. */}
           <RoomScreenCommentCard className={cn(SCREEN_COMMENT_WIDTH[place], SCREEN_WIDE_ONLY)} comment={comment} key={comment.displayId} />

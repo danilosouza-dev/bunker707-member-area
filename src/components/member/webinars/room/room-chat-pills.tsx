@@ -86,7 +86,7 @@ export function RoomChatPills({ kind, messages }: { kind: RoomKind; messages: re
   const replay = kind === "replay";
   return (
     <div
-      className={cn("pointer-events-none absolute left-0 right-[var(--room-video-right)] z-20 flex justify-center px-3", replay ? "bottom-[calc(5rem+var(--room-snackbar-offset,0px))]" : "bottom-[calc(3.5rem+var(--room-snackbar-offset,0px))]")}
+      className={cn("pointer-events-none absolute left-0 right-[var(--room-video-right)] z-20 flex justify-center px-3", replay ? "bottom-[calc(5rem+var(--room-snackbar-offset,0px))]" : "bottom-[calc(3.5rem+var(--room-snackbar-offset,0px)+var(--room-video-bottom,0px))]")}
       data-testid="room-chat-pills"
     >
       <ol aria-label={replay ? WEBINAR_COPY.sala.abas.chatDaLive : WEBINAR_COPY.sala.abas.chat} aria-live="polite" className="flex w-full min-w-0 max-w-[380px] flex-col gap-1.5" role="log">

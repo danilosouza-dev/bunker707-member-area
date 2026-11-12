@@ -250,7 +250,9 @@ test("o console usa as regras puras, nao uma copia delas: as abas, o ⋯, o topo
     assert.match(fonte(fonteDe), new RegExp(`\\b${regra}\\(`), `${fonteDe} chama ${regra}`);
   }
   const stage = fonte("console-stage.tsx");
-  assert.match(stage, /\bconsoleColumnPolicy\(/);
+  // A coluna pela regra do papel (consoleColumnPolicy, dentro de consoleThumbsWanted desde a rodada v9, docs/30 D91).
+  assert.match(stage, /\bconsoleThumbsWanted\(/);
+  assert.match(semComentarios(ler("src/server/webinars/console-v2-model.ts")), /consoleColumnPolicy\(input\.role\) === "width"/);
   assert.match(stage, /\bconsoleStageBadgeFor\(/);
   const chat = fonte("console-chat.tsx");
   for (const regra of ["consoleChatQueue", "consoleMessageMeta", "consoleChatFocusAfter"]) {

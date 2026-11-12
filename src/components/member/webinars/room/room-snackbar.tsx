@@ -309,7 +309,7 @@ const SNACKBAR_PLACE: Record<SnackbarPlacement, string> = {
   screen: "fixed inset-x-2 bottom-[calc(env(safe-area-inset-bottom)+8px)] z-[61]",
   sheet: "fixed inset-x-2 bottom-[calc(var(--room-composer-h,0px)+8px)] z-[61]",
   side: "fixed right-2 w-[272px] bottom-[calc(var(--room-composer-h,0px)+8px)] z-[61]",
-  stage: "absolute bottom-[42px] left-2 z-30 max-w-[calc(100%-1rem)] lg:bottom-14 lg:left-4 lg:max-w-[calc(100%-2rem)]"
+  stage: "absolute bottom-[calc(42px+var(--room-video-bottom,0px))] left-2 z-30 max-w-[calc(100%-1rem)] lg:bottom-[calc(3.5rem+var(--room-video-bottom,0px))] lg:left-4 lg:max-w-[calc(100%-2rem)]"
 };
 
 /**

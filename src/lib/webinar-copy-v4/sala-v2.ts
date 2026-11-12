@@ -137,6 +137,15 @@ export const SALA_V2_COPY = {
     atual: (nome: string) => `Visão do vídeo: ${nome}`,
     grade: "Grade",
     palco: "Palco",
-    rotulo: "Visão do vídeo"
+    rotulo: "Visão do vídeo",
+    /* As miniaturas das cameras onde a pessoa escolher (rodada v9, pedido do produtor de 12/11/2026; docs/30 D91). */
+    miniaturas: {
+      rotulo: "Miniaturas",
+      opcoes: { bottom: "Embaixo", hidden: "Esconder", side: "Lateral" },
+      /** A troca entre Lateral e Embaixo com o vídeo na tela: o motor só muda quando o vídeo carrega. */
+      aoRecarregar: "Para as miniaturas mudarem de lugar, recarregue a página.",
+      /** Só no console de quem apresenta, com o Esconder marcado. */
+      escondidasNaGravacao: "Escondidas para você e na gravação. Cada aluno escolhe as dele."
+    }
   }
 } as const;

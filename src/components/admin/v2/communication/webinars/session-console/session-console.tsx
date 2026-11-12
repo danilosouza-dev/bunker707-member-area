@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePanelMotion } from "@/components/member/webinars/room/use-panel-motion";
-import { useConsoleAnswerAuthor, useConsolePanelOpen, useConsoleTheme } from "@/components/member/webinars/room/use-room-prefs";
+import { thumbsLayout } from "@/components/member/webinars/room/live-room-model";
+import { useConsoleAnswerAuthor, useConsolePanelOpen, useConsoleTheme, useConsoleThumbs } from "@/components/member/webinars/room/use-room-prefs";
 import { Button } from "@/components/ui/button";
 import type { ActionResult } from "@/lib/action-result";
 import type { LiveEmbedLook } from "@/lib/jitsi-room-config";
@@ -245,7 +246,10 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   /** A aba ou a entrada do ⋯ escolhida no painel, so na memoria da pagina (o Chat ao abrir). */
   const [panelView, setPanelView] = useState<ConsolePanelView>({ tab: "chat" });
   // O tema do console vai ao iframe na montagem (no hash, para o CSS da instancia); trocar depois nao remonta a sala.
-  const look = useMemo<LiveEmbedLook>(() => ({ layout: "stage", theme }), [theme]);
+  // Onde quem esta no console quer as miniaturas (rodada v9, docs/30 D91), guardado no navegador; a fileira embaixo
+  // entra no iframe na proxima montagem, como o tema.
+  const [thumbs, setThumbs] = useConsoleThumbs();
+  const look = useMemo<LiveEmbedLook>(() => ({ layout: thumbsLayout(thumbs), theme }), [theme, thumbs]);
   const session = snapshot?.session ?? null;
   const sessionId = session?.id ?? null;
   const webinar = data.webinar;
@@ -1130,6 +1134,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                   screenLabel={stageLabels.length > 0 ? naTelaCopy.pilulaPalco(stageLabels) : null}
                   session={session}
                   stageRef={stageRef}
+                  thumbs={thumbs}
                   topLeft={consoleStageTopLeft({ durationMs, nowMs: tick, session, skewMs: skew })}
                 />
                 <div className={skeleton.bar ?? ""} data-console-slot="bar">
@@ -1143,9 +1148,11 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                     onOpenPanel={openPanel}
                     onRecord={recordNow}
                     onStopRecording={stopRecording}
+                    onThumbs={setThumbs}
                     onTogglePanel={() => setPanelOpen(!panelOpen)}
                     panelOpen={panelOpen}
                     session={session}
+                    thumbs={thumbs}
                   />
                 </div>
               </div>

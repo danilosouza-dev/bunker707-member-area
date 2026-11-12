@@ -26,6 +26,9 @@ export function useRoomHydrated() {
 }
 export function useRoomTheme() {
   return ["dark", () => undefined];
+}
+export function useRoomThumbs() {
+  return ["side", () => undefined];
 }`;
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -324,7 +327,8 @@ test("as pilulas do palco sao botoes, so com 640 px ou mais de palco (a camada d
   }
   // A area segura: 56 px em cima (os selos), 12 px a esquerda (16 px a partir de lg).
   const area = elementWith(html, "data-room-screen-area");
-  for (const classe of ["top-14", "left-3", "lg:left-4", "bottom-14"]) {
+  // Embaixo, 56 px mais a fileira de miniaturas quando ela esta na base do video (--room-video-bottom; rodada v9, D91).
+  for (const classe of ["top-14", "left-3", "lg:left-4", "bottom-[calc(3.5rem+var(--room-video-bottom,0px))]"]) {
     assert.ok(classesDe(area.slice(0, area.indexOf(">") + 1)).includes(classe), `${classe} na area`);
   }
   const celula = elementWith(html, 'data-room-screen-cell="top_left"');
@@ -681,7 +685,7 @@ test("a area segura com a barra do motor (96 px embaixo) e a coluna de miniatura
   const placement = screenModel.screenPlacement({ items, offerShown: false, pinnedPills: false });
   const motor = render(layerModule.RoomScreenLayer, { engineBar: true, forced: false, fullscreen: false, items, pinned: null, placement });
   const area = classesDe(abertura(elementWith(motor, "data-room-screen-area")));
-  assert.ok(area.includes("bottom-24") && !area.includes("bottom-14"), "96 px embaixo");
+  assert.ok(area.includes("bottom-[calc(6rem+var(--room-video-bottom,0px))]") && !area.includes("bottom-[calc(3.5rem+var(--room-video-bottom,0px))]"), "96 px embaixo (mais a fileira de miniaturas, quando ha)");
   assert.ok(area.includes("right-[calc(var(--room-video-right,0px)+12px)]"), "a coluna de miniaturas fica livre");
   assert.doesNotMatch(motor, /data-room-screen-compact=/, "fora da tela cheia, sem a linha compacta");
   const cheia = render(layerModule.RoomScreenLayer, { forced: false, fullscreen: true, items, pinned: null, placement });

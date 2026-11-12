@@ -137,8 +137,8 @@ test("a camada no palco: o proprio recipiente @container/tela, na area segura da
   const camada = (extra = {}) => render(commentModule.RoomScreenCommentLayer, { comment: cartao(), forced: false, place: "bottom_center", ...extra });
   const html = camada();
   assert.match(html, /^<div class="@container\/tela pointer-events-none absolute inset-0 z-20" data-room-screen-comment-layer="">/);
-  assert.match(html, /<div class="absolute left-3 right-\[calc\(var\(--room-video-right,0px\)\+12px\)\] top-14 lg:left-4 bottom-14">/, "a mesma area segura do banner");
-  assert.match(camada({ engineBar: true }), /top-14 lg:left-4 bottom-24">/, "com a barra do motor, 96 px embaixo");
+  assert.match(html, /<div class="absolute left-3 right-\[calc\(var\(--room-video-right,0px\)\+12px\)\] top-14 lg:left-4 bottom-\[calc\(3\.5rem\+var\(--room-video-bottom,0px\)\)\]">/, "a mesma area segura do banner");
+  assert.match(camada({ engineBar: true }), /top-14 lg:left-4 bottom-\[calc\(6rem\+var\(--room-video-bottom,0px\)\)\]">/, "com a barra do motor, 96 px embaixo");
   const lugar = (place) => classesDe(camada({ place }).match(/<div class="[^"]*" data-room-screen-comment-place="[a-z_]+">/)[0]);
   assert.ok(["bottom-[var(--room-snackbar-offset,0px)]", "justify-center"].every((classe) => lugar("bottom_center").includes(classe)), "embaixo no meio, subindo com o aviso da sala");
   assert.ok(lugar("bottom_left").includes("justify-start"));

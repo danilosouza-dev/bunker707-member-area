@@ -181,6 +181,24 @@ export function consoleColumnPolicy(role: ConsoleRoomRole): "engine" | "width" {
   return role === "host" ? "engine" : "width";
 }
 
+/**
+ * As miniaturas que o console quer no iframe agora (rodada v9, pedido do produtor de 12/11/2026; docs/30 D91), ou nulo
+ * quando ele nao mexe (o motor decide). `byWidth` e a conta da sala do aluno (columnWanted com a largura, a fileira
+ * embaixo e o Esconder). O co-apresentador e a Equipe seguem essa conta, como o aluno. O Apresentador continua sem
+ * mandar nada pela largura (V2-A5); so a escolha dele vale, e so no Palco: com Esconder as miniaturas saem (o seguir a
+ * visao leva isso ao gravador, e a sala de cada aluno volta a escolha do aluno), e com Lateral ou Embaixo elas voltam
+ * se ele as tinha escondido. Na Grade ele nao manda nada (a grade para todos fica como esta).
+ */
+export function consoleThumbsWanted(input: { byWidth: boolean; role: ConsoleRoomRole; thumbs: "bottom" | "hidden" | "side"; view: "grid" | "stage" }): boolean | null {
+  if (consoleColumnPolicy(input.role) === "width") {
+    return input.byWidth;
+  }
+  if (input.view !== "stage") {
+    return null;
+  }
+  return input.thumbs !== "hidden";
+}
+
 /* ------------------------------------------------------------------------------------------------
  * A barra de quem apresenta (V2-14)
  * ---------------------------------------------------------------------------------------------- */

@@ -321,7 +321,8 @@ test("o card do editor antes do comeco: o numero fixo com a variacao vira a regr
   assert.equal(card.simulationRulesOfForm({ ...form, base: "0", vary: { ...form.vary, percent: "70" } }).rules.countRule.vary, undefined);
   assert.equal(card.simulationRulesOfForm({ ...form, countMode: "curve", peak: "400" }).rules.countRule.vary, undefined);
   // O formulario de antes (sem a chave) continua valendo.
-  const { vary: _semVariar, ...antigo } = form;
+  const antigo = { ...form };
+  delete antigo.vary;
   assert.deepEqual(card.simulationRulesOfForm(antigo).rules.countRule, { base: 300, jitter: 0, mode: "fixed", peak: 300 });
 });
 

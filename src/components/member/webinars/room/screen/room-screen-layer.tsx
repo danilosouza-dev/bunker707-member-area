@@ -49,7 +49,7 @@ export function RoomScreenLayer({ engineBar = false, forced, fullscreen, handler
   const compact = fullscreen && items.length > 0;
   return (
     <div className="@container/tela pointer-events-none absolute inset-0 z-20" data-room-screen-layer="" data-tela={forced ? "faixa" : undefined}>
-      <div className={cn("absolute left-3 right-[calc(var(--room-video-right,0px)+12px)] top-14 lg:left-4", engineBar ? "bottom-24" : "bottom-14")} data-room-screen-area="">
+      <div className={cn("absolute left-3 right-[calc(var(--room-video-right,0px)+12px)] top-14 lg:left-4", engineBar ? "bottom-[calc(6rem+var(--room-video-bottom,0px))]" : "bottom-[calc(3.5rem+var(--room-video-bottom,0px))]")} data-room-screen-area="">
         {SCREEN_PLACES.map((place) => {
           const cell = placement.cells.find((candidate) => candidate.place === place);
           const extra = place === "top_left" ? topLeftExtra : null;

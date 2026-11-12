@@ -16,7 +16,7 @@ import type { DeviceKind } from "../../../../lib/jitsi-device-settings";
 import { FILMSTRIP_COLUMN_MIN_FRAME, LOWER_HAND_SIGNAL, RECONNECT_ATTEMPTS, RECORDING_SIGNAL, tokenRefreshDelayMs, type LiveRoomRole, type RoomEventItem } from "../../../../lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../../../lib/webinar-copy";
 import { roomAccessLost } from "../../../../lib/webinar-room-client";
-import type { RoomView } from "../../../../lib/webinar-room-prefs";
+import type { RoomThumbs, RoomView } from "../../../../lib/webinar-room-prefs";
 import { saoPauloTime } from "../../../../lib/webinar-time";
 import type { JoinTokenReply, LiveBanState, LiveRoomInfo } from "../../../../server/webinars/live-model";
 import type { SessionStatus } from "../../../../server/webinars/model";
@@ -1436,8 +1436,47 @@ export function viewOnJoin(stored: RoomView): ["setTileView", true] | null {
  * grade) e com o iframe de FILMSTRIP_COLUMN_MIN_FRAME (1013 px) ou mais, a largura em que o motor da a coluna inteira
  * sem estreitar as miniaturas nem as deixar flutuar sobre o video. No celular (o iframe de cerca de 374 px) ela some.
  */
-export function columnWanted(input: { frameWidth: number; view: RoomView }): boolean {
-  return input.view === "stage" && Number.isFinite(input.frameWidth) && input.frameWidth >= FILMSTRIP_COLUMN_MIN_FRAME;
+export function columnWanted(input: { frameWidth: number; row?: boolean; thumbs?: RoomThumbs; view: RoomView }): boolean {
+  // Esconder (rodada v9, docs/30 D91): a pessoa nao quer as miniaturas, com qualquer largura.
+  if (input.thumbs === "hidden" || input.view !== "stage") {
+    return false;
+  }
+  if (!Number.isFinite(input.frameWidth)) {
+    return false;
+  }
+  // A fileira embaixo (o iframe montado com ela) flutua sobre a base do video: nao precisa da largura da coluna, so
+  // de um video em que ela caiba sem tapar tudo (FILMSTRIP_ROW_MIN_FRAME).
+  return input.frameWidth >= (input.row ? FILMSTRIP_ROW_MIN_FRAME : FILMSTRIP_COLUMN_MIN_FRAME);
+}
+
+/* As miniaturas onde a pessoa escolheu (rodada v9, pedido do produtor de 12/11/2026; docs/30 D91). */
+
+/** A menor largura do iframe em que a fileira de miniaturas embaixo aparece (abaixo dela, so o video grande). */
+export const FILMSTRIP_ROW_MIN_FRAME = 640;
+
+/** O layout que o iframe pede ao motor na montagem: a fileira embaixo so com "Embaixo"; senao, o Palco com a coluna. */
+export function thumbsLayout(thumbs: RoomThumbs): "stage" | "stage_bottom" {
+  return thumbs === "bottom" ? "stage_bottom" : "stage";
+}
+
+/**
+ * O iframe de agora foi montado com a fileira embaixo? Lido do interfaceConfigOverwrite da montagem
+ * (useJitsiMeet.mountedInterfaceConfig): VERTICAL_FILMSTRIP falso e a fileira; nulo sem iframe.
+ */
+export function mountedThumbsRow(mounted: Readonly<Record<string, unknown>> | null | undefined): boolean | null {
+  return mounted ? mounted.VERTICAL_FILMSTRIP === false : null;
+}
+
+/**
+ * A escolha so vale quando o video carregar de novo: o motor decide coluna ou fileira na montagem, entao trocar entre
+ * Lateral e Embaixo com o video ja na tela espera a proxima carga (o menu avisa). Esconder nunca espera (e por
+ * comando), e sem iframe nao ha o que esperar (a proxima montagem ja leva a escolha).
+ */
+export function thumbsPending(input: { row: boolean | null; thumbs: RoomThumbs }): boolean {
+  if (input.row === null || input.thumbs === "hidden") {
+    return false;
+  }
+  return (input.thumbs === "bottom") !== input.row;
 }
 
 /**
@@ -1453,8 +1492,17 @@ export function filmstripStep(input: { visible: boolean; wanted: boolean }): "to
  * dentro do iframe (`joined`), com o motor no Palco (o ultimo tileViewChanged, nunca a escolha guardada) e com a coluna
  * visivel (o ultimo filmstripDisplayChanged). Antes de entrar, fora do iframe e na Grade, nenhuma coluna.
  */
-export function stageColumnShown(signals: Pick<LiveSignalState, "filmstripVisible" | "viewShown">, joined: boolean): boolean {
-  return joined && signals.viewShown === "stage" && signals.filmstripVisible;
+export function stageColumnShown(signals: Pick<LiveSignalState, "filmstripVisible" | "viewShown">, joined: boolean, row = false): boolean {
+  // Com a fileira embaixo nao ha coluna a descontar a direita (quem desconta e a base, stageRowShown).
+  return joined && !row && signals.viewShown === "stage" && signals.filmstripVisible;
+}
+
+/**
+ * A fileira de miniaturas esta na base do video agora (o que os selos de baixo, as pilulas e os cartoes da Na tela
+ * sobem, --room-video-bottom): o iframe montado com a fileira, dentro da sala, no Palco e com as miniaturas visiveis.
+ */
+export function stageRowShown(signals: Pick<LiveSignalState, "filmstripVisible" | "viewShown">, joined: boolean, row: boolean): boolean {
+  return joined && row && signals.viewShown === "stage" && signals.filmstripVisible;
 }
 
 /**

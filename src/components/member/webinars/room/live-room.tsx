@@ -41,6 +41,8 @@ import {
   presenterBadgeFor,
   screenBlocksRoom,
   stageColumnShown,
+  stageRowShown,
+  thumbsLayout,
   stageNames,
   usesOurBar,
   viewMenuFocusLost,
@@ -74,6 +76,7 @@ import {
   roomMobileLine,
   roomPresentBadge,
   roomPanelShown,
+  stageVideoBottomPx,
   stageVideoRightPx,
   unpinnedPolls,
   type RoomPanelTab
@@ -104,7 +107,7 @@ import { RoomScreenStrip } from "./screen/room-screen-strip";
 import { RoomWideHidden } from "./screen/room-wide-hidden";
 import { useRoomScreen, useRoomScreenEvents } from "./screen/use-room-screen";
 import { useRoomSimulation } from "./use-room-simulation";
-import { useDeferredPolls, useRoomHydrated, useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
+import { useDeferredPolls, useRoomHydrated, useRoomPanelOpen, useRoomTheme, useRoomThumbs } from "./use-room-prefs";
 import { usePanelMotion } from "./use-panel-motion";
 import { useStageGeometry } from "./use-stage-geometry";
 import { screenCommentPlace } from "@/server/webinars/screen-comment-model";
@@ -327,8 +330,11 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const geometry = useStageGeometry(frameRef);
   const desktop = useSyncExternalStore(subscribeDesktop, readDesktop, () => false);
   const [theme, setTheme] = useRoomTheme();
-  // O tema que o iframe recebe na proxima montagem (o guardado ja vale no primeiro Entrar na sala).
-  const look = useMemo<LiveEmbedLook>(() => ({ layout: "stage", theme }), [theme]);
+  // Onde a pessoa quer as miniaturas (rodada v9, docs/30 D91): Lateral, Embaixo ou Esconder, guardado no navegador.
+  const [thumbs, setThumbs] = useRoomThumbs();
+  // O tema e o layout que o iframe recebe na proxima montagem (os guardados ja valem no primeiro Entrar na sala): a
+  // fileira embaixo so com "Embaixo"; senao, o Palco com a coluna.
+  const look = useMemo<LiveEmbedLook>(() => ({ layout: thumbsLayout(thumbs), theme }), [theme, thumbs]);
 
   const info = liveInfoOf(session);
   const status = local.ended ? "ended" : info.status;
@@ -384,6 +390,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     onCameraConsentEnded,
     onRefused,
     sessionId,
+    thumbs,
     settingsOpen,
     webinarId
   });
@@ -663,7 +670,9 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const mobileLine = roomMobileLine(presenterName);
   // A coluna de miniaturas do iframe a direita do video, quando o motor a mostra (o Palco, com a coluna na tela pela
   // largura do iframe, V2-A5): os selos de baixo e as pilulas param antes dela. Fora do iframe, nenhuma coluna.
-  const videoRightPx = stageVideoRightPx({ columnShown: stageColumnShown(room.signals, joined), touch: geometry.touch });
+  const videoRightPx = stageVideoRightPx({ columnShown: stageColumnShown(room.signals, joined, room.thumbsRow), touch: geometry.touch });
+  // A fileira de miniaturas embaixo (D91): o que fica na base do palco sobe a altura dela.
+  const videoBottomPx = stageVideoBottomPx({ rowShown: stageRowShown(room.signals, joined, room.thumbsRow) });
   // O selo de cima a esquerda do palco: no ar, o tempo; na espera com a sala aberta, "Aguardando o apresentador".
   const stageMoment = liveStageMoment({ phase, screen });
   // As fixadas com o painel fechado: as pilulas no palco largo e as linhas abaixo do palco estreito.
@@ -1152,6 +1161,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               sessionId={sessionId}
               stageRef={stageRef}
               title={session.webinar.title}
+              videoBottomPx={videoBottomPx}
               videoRightPx={videoRightPx}
             >
               {/* Os selos ficam com a sala de pe, como a barra: a live encerrada, removido ou banido os tiram. */}
@@ -1247,6 +1257,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               onTogglePanel={togglePanel}
               onToggleReactions={toggleReactions}
               onToggleSettings={toggleSettings}
+              onThumbs={setThumbs}
               onView={room.setView}
               onViewMenu={setViewMenu}
               panelFirstFocus={firstFocus === "panel-toggle"}
@@ -1271,6 +1282,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               selfUnmute={live.selfUnmute === true}
               soundOn={room.soundOn}
               videoOn={room.signals.videoOn}
+              thumbs={thumbs}
+              thumbsPending={room.thumbsPending}
               viewMenuOpen={viewMenuShown}
               viewShown={room.viewShown}
             />

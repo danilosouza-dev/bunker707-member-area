@@ -14,7 +14,7 @@
 // de uma linha da pilula, a dica do corte de 3 (ou 2) linhas antes da medida, o aviso "A equipe fixou uma mensagem."
 // so na chegada de uma fixada nova com o painel fechado e o botao de enquete do chat da sala vertical.
 
-import { FILMSTRIP_COLUMN_WIDTH } from "../../../../lib/jitsi-room-config";
+import { FILMSTRIP_COLUMN_WIDTH, THUMBNAIL_HEIGHT } from "../../../../lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../../../lib/webinar-copy";
 import { newMessageCount, type RoomMessage } from "../../../../lib/webinar-room-client";
 import { formatWebinarDayLong, saoPauloTime } from "../../../../lib/webinar-time";
@@ -106,6 +106,18 @@ export function stageVideoRightPx(input: { columnShown: boolean; touch?: boolean
     return 0;
   }
   return FILMSTRIP_COLUMN_WIDTH + (input.touch ? FILMSTRIP_HANDLE_PX.touch : FILMSTRIP_HANDLE_PX.mouse);
+}
+
+/** A folga da fileira de miniaturas embaixo: a margem do motor em volta dela (acima e abaixo). */
+const FILMSTRIP_ROW_PAD_PX = 24;
+
+/**
+ * Quanto a fileira de miniaturas ocupa na base do palco (a variavel --room-video-bottom; rodada v9, docs/30 D91): a
+ * altura das miniaturas (120 px) mais a margem; sem a fileira, 0. Os selos de baixo, as pilulas do chat, o aviso da
+ * sala e os cartoes da Na tela sobem esse valor para nunca ficar por cima das miniaturas.
+ */
+export function stageVideoBottomPx(input: { rowShown: boolean }): number {
+  return input.rowShown ? THUMBNAIL_HEIGHT + FILMSTRIP_ROW_PAD_PX : 0;
 }
 
 /* ------------------------------------------------------------------------------------------------

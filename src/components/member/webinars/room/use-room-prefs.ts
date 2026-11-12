@@ -5,18 +5,22 @@ import { ANSWER_AUTHOR_DEFAULT, ANSWER_AUTHOR_STORAGE_KEY, parseAnswerAuthorChoi
 import {
   CONSOLE_PANEL_KEY,
   CONSOLE_THEME_KEY,
-  deferredPollsValue,
+  CONSOLE_THUMBS_KEY,
   ROOM_PANEL_KEY,
   ROOM_POLLS_KEY,
   ROOM_THEME_KEY,
+  ROOM_THUMBS_KEY,
   ROOM_VIEW_KEY,
+  deferredPollsValue,
   storedConsoleTheme,
   storedDeferredPolls,
   storedPanelOpen,
   storedRoomTheme,
+  storedRoomThumbs,
   storedRoomView,
   type DeferredPolls,
   type RoomTheme,
+  type RoomThumbs,
   type RoomView
 } from "@/lib/webinar-room-prefs";
 
@@ -107,6 +111,8 @@ const themeStore = prefStore(ROOM_THEME_KEY);
 const panelStore = prefStore(ROOM_PANEL_KEY);
 const viewStore = prefStore(ROOM_VIEW_KEY);
 const pollsStore = prefStore(ROOM_POLLS_KEY);
+const thumbsStore = prefStore(ROOM_THUMBS_KEY);
+const consoleThumbsStore = prefStore(CONSOLE_THUMBS_KEY);
 const consoleThemeStore = prefStore(CONSOLE_THEME_KEY);
 const consolePanelStore = prefStore(CONSOLE_PANEL_KEY);
 const answerAuthorStore = prefStore(ANSWER_AUTHOR_STORAGE_KEY);
@@ -134,6 +140,20 @@ export function useRoomView(): [RoomView, (view: RoomView) => void] {
   const view = storedRoomView(useStoredValue(viewStore));
   const setView = useCallback((next: RoomView) => viewStore.write(next), []);
   return [view, setView];
+}
+
+/** Onde as miniaturas ficam na sala (Lateral por padrao; rodada v9, docs/30 D91). */
+export function useRoomThumbs(): [RoomThumbs, (thumbs: RoomThumbs) => void] {
+  const thumbs = storedRoomThumbs(useStoredValue(thumbsStore));
+  const setThumbs = useCallback((next: RoomThumbs) => thumbsStore.write(next), []);
+  return [thumbs, setThumbs];
+}
+
+/** Onde as miniaturas ficam no console de quem apresenta, na chave propria (como o tema e o painel). */
+export function useConsoleThumbs(): [RoomThumbs, (thumbs: RoomThumbs) => void] {
+  const thumbs = storedRoomThumbs(useStoredValue(consoleThumbsStore));
+  const setThumbs = useCallback((next: RoomThumbs) => consoleThumbsStore.write(next), []);
+  return [thumbs, setThumbs];
 }
 
 /** As enquetes desta sessao deixadas para depois e os resultados ja vistos (outra sessao comeca vazia). */

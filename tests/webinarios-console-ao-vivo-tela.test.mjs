@@ -377,7 +377,7 @@ test("palco do console (docs/31 V2-4 e V2-13): Ao vivo e Gravando em cima a esqu
   assert.match(stage, /data-room-badges="top-right"><span[^>]*data-room-badge="present"/);
   assert.equal(presentes(stage), "3 presentes · pico 5");
   // Antes de entrar no iframe nenhuma coluna na tela: os selos vao ate a borda.
-  assert.match(markup, /data-console-slot="stage"[^>]*style="--room-video-right:0px"/);
+  assert.match(markup, /data-console-slot="stage"[^>]*style="--room-video-bottom:0px;--room-video-right:0px"/);
   // Sem o motor dizendo quem esta no video grande, nenhum selo de baixo (nunca um nome por palpite).
   assert.doesNotMatch(stage, /data-room-badge="presenter"/);
 

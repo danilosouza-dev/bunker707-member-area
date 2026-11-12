@@ -1067,7 +1067,7 @@ test("a Previa pelo componente do aluno: no Computador, a camada do palco (@cont
   // (screenPlacement), com a largura do Medio (30 % do palco) e o X do aluno.
   const camada = block(desktop, "data-room-screen-layer", "div");
   assert.match(camada, /^<div class="@container\/tela pointer-events-none absolute inset-0 z-20" data-room-screen-layer="">/);
-  assert.match(camada, /<div class="absolute left-3 right-\[calc\(var\(--room-video-right,0px\)\+12px\)\] top-14 lg:left-4 bottom-14" data-room-screen-area="">/, "a margem segura da sala");
+  assert.match(camada, /<div class="absolute left-3 right-\[calc\(var\(--room-video-right,0px\)\+12px\)\] top-14 lg:left-4 bottom-\[calc\(3\.5rem\+var\(--room-video-bottom,0px\)\)\]" data-room-screen-area="">/, "a margem segura da sala");
   const celula = block(camada, 'data-room-screen-cell="bottom_right"', "div");
   const cartao = block(celula, 'data-room-screen-card="banner"', "section");
   assert.match(cartao, /^<section aria-label="Banner da equipe: Garanta sua vaga" class="[^"]*\bw-\[clamp\(240px,30cqw,380px\)\][^"]*@min-\[640px\]\/tela:flex"/, "Medio: 30 % do palco, so no palco de 640 px ou mais (o da Previa tem 1280)");

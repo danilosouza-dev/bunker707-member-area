@@ -157,7 +157,7 @@ test("a gravada: a capa Ativar som pela regra pura e a tela cheia da caixa do pa
 
 test("a live: o selo do apresentador, a coluna so dentro do iframe, o Microfone ligado e o pedido do microfone pelas regras puras", () => {
   assert.match(room, /presenterName=\{phase === "live" \? presenterBadgeFor\(\{ joined, presenterName, signals: room\.signals \}\) : null\}/);
-  assert.match(room, /stageColumnShown\(room\.signals, joined\)/);
+  assert.match(room, /stageColumnShown\(room\.signals, joined, room\.thumbsRow\)/);
   // Com o microfone sozinho (docs/31 caminho A), o Microfone fica tambem sem o Liberar.
   assert.match(room, /const micShown = barShown && ourBar && \(room\.signals\.micAllowed \|\| room\.signals\.audioOn \|\| live\.selfUnmute === true\);/, "o mesmo criterio de liveBarItems");
   // O onEvent: o iframe novo volta ao padrao do motor no primeiro sinal; o video grande pelo id lido do IFrame API; o

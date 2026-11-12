@@ -616,7 +616,7 @@ test("no ar: o palco 16:9 com 'Ao vivo · 00:42:10', o selo de quem assiste agor
   assert.ok(palco.indexOf('data-testid="room-on-air"') < palco.indexOf('data-testid="room-present"') && palco.indexOf('data-testid="room-present"') < palco.indexOf('data-testid="live-recording"'), "o Ao vivo, quem assiste e o Gravando, nessa ordem");
   assert.equal((html.match(/data-testid="room-present"/g) ?? []).length, 1, "o numero uma vez so, no palco");
   // Antes de entrar nao ha iframe, nem a coluna de miniaturas dele (docs/31 V2-A5): os selos e as pilulas vao ate a borda.
-  assert.match(html, /data-room-stage="idle" role="region" style="--room-video-right:0px"/);
+  assert.match(html, /data-room-stage="idle" role="region" style="--room-video-bottom:0px;--room-video-right:0px"/);
   assert.doesNotMatch(html, /data-room-badge="assistant"/, "o Assistente desligado (o servidor ainda nao leu o estado)");
   assert.doesNotMatch(sala(), /Gravando/, "sem gravador, sem o selo");
 
@@ -821,7 +821,7 @@ test("a aba Participantes mostra quem esta no palco e o numero de alunos, nunca 
   const caixa = (pilulas.match(/^<div class="([^"]*)" data-testid="room-chat-pills">/)?.[1] ?? "").split(" ");
   // Centradas entre a borda esquerda do video e a coluna de miniaturas do iframe, a 56 px da base (mais a altura do aviso
   // da sala no palco, --room-snackbar-offset); nada recebe o toque.
-  for (const classe of ["pointer-events-none", "absolute", "left-0", "right-[var(--room-video-right)]", "bottom-[calc(3.5rem+var(--room-snackbar-offset,0px))]", "justify-center"]) {
+  for (const classe of ["pointer-events-none", "absolute", "left-0", "right-[var(--room-video-right)]", "bottom-[calc(3.5rem+var(--room-snackbar-offset,0px)+var(--room-video-bottom,0px))]", "justify-center"]) {
     assert.ok(caixa.includes(classe), `${classe} em ${caixa.join(" ")}`);
   }
   assert.ok(!caixa.includes("lg:hidden"), "tambem no computador");
@@ -833,7 +833,7 @@ test("a aba Participantes mostra quem esta no palco e o numero de alunos, nunca 
   // No Replay, acima da barra de controles da Bunny, e com o nome da aba do painel ("Chat da live").
   const doReplay = render(pillsModule.RoomChatPills, { kind: "replay", messages: overlayMessages(mensagens) });
   assert.match(doReplay, /^<div class="[^"]* bottom-\[calc\(5rem\+var\(--room-snackbar-offset,0px\)\)\]" data-testid="room-chat-pills"><ol aria-label="Chat da live"/);
-  assert.match(render(pillsModule.RoomChatPills, { kind: "simulated", messages: overlayMessages(mensagens) }), /^<div class="[^"]* bottom-\[calc\(3\.5rem\+var\(--room-snackbar-offset,0px\)\)\]" data-testid="room-chat-pills"><ol aria-label="Chat"/);
+  assert.match(render(pillsModule.RoomChatPills, { kind: "simulated", messages: overlayMessages(mensagens) }), /^<div class="[^"]* bottom-\[calc\(3\.5rem\+var\(--room-snackbar-offset,0px\)\+var\(--room-video-bottom,0px\)\)\]" data-testid="room-chat-pills"><ol aria-label="Chat"/);
   assert.equal(render(pillsModule.RoomChatPills, { kind: "live", messages: [] }), "", "sem mensagem, nada no palco");
 });
 
