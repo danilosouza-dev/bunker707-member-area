@@ -1096,8 +1096,8 @@ select (select count(*) from information_schema.columns where table_schema = 'pu
 ```
 
 Estado em 12/11/2026: escrita e aplicada só no Supabase local, onde a integração `tests/integration/webinarios-v9.test.mjs`
-roda contra ela (rodou em 12/11/2026; a conferência deu `9`). **Na nuvem de teste, aplicar antes do merge** da PR da
-rodada v9 na `dev`, pelo produtor, no SQL Editor.
+roda contra ela (rodou em 12/11/2026; a conferência deu `9`). **Na nuvem de teste, aplicada em 12/11/2026** pelo
+produtor, no SQL Editor, com o `insert` da versão, antes do merge da PR #176 na `dev`: a conferência deu `9`.
 
 **Produção (Hetzner)**: nada manual, como na §9.13: o `deploy-membros` roda o `migrate.sh` antes de recriar o app.
 
