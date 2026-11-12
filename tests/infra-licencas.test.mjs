@@ -575,6 +575,18 @@ test("a conta do produtor no Painel (conta-do-produtor.sh): so quando nao existe
   assert.equal(deploy.status, 0, deploy.stdout + deploy.stderr);
   assert.ok(sshCmds(conta.calls()).some((c) => c.command.endsWith("conta-do-produtor.sh --novo-link --mostrar-link-se-falhar")));
 
+  // A conta pronta e so o e-mail parado (o script sai com 3): o aviso diz isso, nunca que a conta nao foi criada.
+  const semEmail = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas(), storageBox: { name: "bunker707-backups", username: "u100", server: "u100.your-storagebox.de" }, records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false), record(INTERNO, "A", IP, false)] });
+  const parado = semEmail.runScript("licencas.sh", { ...PAINEL_ENV, GITHUB_TOKEN: "ghs_x", LICENCAS_RAIZES: RAIZES, PUBLICO_TENTATIVAS: "1", SSH_SHIM_REPLIES: JSON.stringify([{ contem: "conta-do-produtor.sh", codigo: 3 }]) }, ["deploy"]);
+  assert.equal(parado.status, 0, parado.stdout + parado.stderr);
+  assert.match(parado.stdout + parado.stderr, /A conta do produtor existe no Painel, mas o e-mail com o link de senha nao saiu/);
+  assert.doesNotMatch(parado.stdout + parado.stderr, /nao foi criada agora/);
+  // Outro erro do script continua dizendo que a conta nao ficou pronta.
+  const quebrado = setup({ servers: [servidorLicencas()], firewalls: firewallLicencas(), storageBox: { name: "bunker707-backups", username: "u100", server: "u100.your-storagebox.de" }, records: [record(PAINEL, "A", IP, true), record(API, "A", IP, false), record(INTERNO, "A", IP, false)] });
+  const falhou = quebrado.runScript("licencas.sh", { ...PAINEL_ENV, GITHUB_TOKEN: "ghs_x", LICENCAS_RAIZES: RAIZES, PUBLICO_TENTATIVAS: "1", SSH_SHIM_REPLIES: JSON.stringify([{ contem: "conta-do-produtor.sh", codigo: 1 }]) }, ["deploy"]);
+  assert.equal(falhou.status, 0, falhou.stdout + falhou.stderr);
+  assert.match(falhou.stdout + falhou.stderr, /A conta do produtor no Painel nao foi criada agora/);
+
   // O script de verdade, com um docker de mentira no lugar do compose do Emissor (o bin/painel.ts e a fila de e-mail).
   const dir = mkdtempSync(join(tmpdir(), "bunker707-conta-painel-"));
   try {
