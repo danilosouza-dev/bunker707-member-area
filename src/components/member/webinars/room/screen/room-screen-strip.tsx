@@ -49,7 +49,8 @@ function rowAction(item: StudentScreenItem): { href: string; label: string; targ
     return { href, label: abrir, target: "qr_link" };
   }
   const action = screenBannerAction(item);
-  return action === "button" && item.buttonLabel ? { href, label: item.buttonLabel, target: "button" } : { href, label: abrir, target: "card" };
+  // A linha tem uma acao so: com o botao clicavel ("Só o botão" ou "Imagem e botão"), o texto dele; senao, "Abrir o link".
+  return (action === "button" || action === "both") && item.buttonLabel ? { href, label: item.buttonLabel, target: "button" } : { href, label: abrir, target: "card" };
 }
 
 /** A miniatura da linha: a imagem do banner (decorativa: o nome da secao ja diz o que e) ou o icone do tipo. */

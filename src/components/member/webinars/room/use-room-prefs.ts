@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { ANSWER_AUTHOR_DEFAULT, ANSWER_AUTHOR_STORAGE_KEY, parseAnswerAuthorChoice, type AnswerAuthorChoice } from "@/server/webinars/answer-author-model";
 import {
   CONSOLE_PANEL_KEY,
   CONSOLE_THEME_KEY,
@@ -108,6 +109,7 @@ const viewStore = prefStore(ROOM_VIEW_KEY);
 const pollsStore = prefStore(ROOM_POLLS_KEY);
 const consoleThemeStore = prefStore(CONSOLE_THEME_KEY);
 const consolePanelStore = prefStore(CONSOLE_PANEL_KEY);
+const answerAuthorStore = prefStore(ANSWER_AUTHOR_STORAGE_KEY);
 
 function useStoredValue(store: PrefStore): string | null {
   return useSyncExternalStore(store.subscribe, store.read, serverSnapshot);
@@ -154,4 +156,27 @@ export function useConsolePanelOpen(): [boolean, (open: boolean) => void] {
   const open = storedPanelOpen(useStoredValue(consolePanelStore));
   const setOpen = useCallback((next: boolean) => consolePanelStore.write(next ? "1" : "0"), []);
   return [open, setOpen];
+}
+
+/** A escolha guardada de "Responder como" (o texto do armazenamento conferido; fora da forma, o padrao). */
+export function storedAnswerAuthor(raw: string | null): AnswerAuthorChoice {
+  if (!raw) {
+    return ANSWER_AUTHOR_DEFAULT;
+  }
+  try {
+    return parseAnswerAuthorChoice(JSON.parse(raw));
+  } catch {
+    return ANSWER_AUTHOR_DEFAULT;
+  }
+}
+
+/**
+ * "Responder como" do console (rodada v9, docs/30 D87): Meu nome (o padrao), Equipe ou Outro nome, lembrado no navegador
+ * de quem responde para a proxima resposta e a proxima live.
+ */
+export function useConsoleAnswerAuthor(): [AnswerAuthorChoice, (choice: AnswerAuthorChoice) => void] {
+  const raw = useStoredValue(answerAuthorStore);
+  const choice = useMemo(() => storedAnswerAuthor(raw), [raw]);
+  const setChoice = useCallback((next: AnswerAuthorChoice) => answerAuthorStore.write(JSON.stringify({ as: next.as, name: next.name ?? null })), []);
+  return [choice, setChoice];
 }

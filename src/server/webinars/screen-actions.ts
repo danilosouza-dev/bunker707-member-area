@@ -54,6 +54,7 @@ import {
   snapshotOfItem,
   type ScreenItem,
   type ScreenKind,
+  type ScreenLinkTarget,
   type ScreenPlace,
   type ScreenSize
 } from "./screen-model";
@@ -245,6 +246,7 @@ export async function saveScreenItem(input: {
   imageAlt?: string | null;
   imagePath?: string | null;
   kind: ScreenKind;
+  linkTarget?: ScreenLinkTarget | null;
   linkUrl?: string | null;
   name?: string | null;
   place?: ScreenPlace | null;
@@ -282,6 +284,7 @@ export async function saveScreenItem(input: {
       closable: data.closable,
       image,
       kind: data.kind,
+      linkTarget: data.linkTarget,
       linkUrl: data.linkUrl,
       name: data.name ?? screenItemDefaultName(data),
       place: data.place,

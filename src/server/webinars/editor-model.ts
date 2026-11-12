@@ -281,6 +281,17 @@ export const WEBINAR_ADMIN_COPY = {
       answerLive: "Respondida ao vivo",
       answerPlaceholder: "Escreva a resposta",
       answerWritten: "Responder por escrito",
+      /* Rodada v9 (docs/30 D87): quem assina a resposta, lembrado no navegador. */
+      authorAs: "Responder como",
+      authorCustomName: "Nome que aparece na resposta",
+      authorCustomPlaceholder: "Equipe Bunker 707",
+      authorHints: {
+        custom: "A turma vê o nome que você escrever, sem a sua foto.",
+        self: "A turma vê o seu nome, o seu papel e a sua foto.",
+        team: "A turma vê só Equipe, sem nome e sem foto."
+      },
+      authorNameInvalid: (min: number, max: number) => `Escreva o nome que aparece na resposta (de ${min} a ${max} caracteres) para responder.`,
+      authorModes: { custom: "Outro nome", self: (name: string | null) => (name ? `Meu nome (${name})` : "Meu nome"), team: "Equipe" },
       /* O fio (10/11/2026): a conversa depois da primeira resposta, com o aluno que perguntou. */
       deleteReply: (name: string) => `Apagar a resposta de ${name}`,
       dismiss: "Dispensar",

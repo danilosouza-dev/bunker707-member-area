@@ -145,6 +145,14 @@ export const NA_TELA_COPY = {
     texto: "Texto",
     textoDoBotao: "Texto do botão",
     textoDoBotaoDica: "Sem texto do botão, o banner inteiro abre o link.",
+    /* Rodada v9 (P3, docs/30 D86): o que abre o link do banner. */
+    oQueAbreOLink: "O que abre o link",
+    alvosDoLink: { both: "Imagem e botão", button: "Só o botão", image: "Só a imagem" },
+    alvoDoLinkDica: {
+      both: "O aluno abre o link clicando no banner ou no botão.",
+      button: "Só o botão abre o link; o resto do banner não é clicável.",
+      image: "O banner inteiro abre o link e o botão não aparece."
+    },
     link: "Link",
     linkExemplo: "https://…",
     linkPronto: "Usar um link pronto",
@@ -180,6 +188,7 @@ export const NA_TELA_COPY = {
     qrLink: "Para o QR Code, use um link de até 240 caracteres.",
     imagemOuTitulo: "Coloque uma imagem ou um título.",
     botaoSemLink: "O botão precisa de um link.",
+    soBotaoSemTexto: "Escreva o texto do botão ou escolha outra opção em O que abre o link.",
     descricao: "Descreva a imagem para quem usa leitor de tela.",
     meioGrande: "No meio e sem fechar, só nos tamanhos Pequeno e Médio.",
     curto: (max: number) => `Use até ${max} caracteres.`,

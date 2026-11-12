@@ -1298,3 +1298,34 @@ test("Live gravada: o ⋯ da mensagem de aluno com Silenciar 5/15/60 min, até o
   assert.ok(!itensDo(replay, "m-ana").some((item) => silenciar.includes(item) || item === vivo.banir || item === vivo.removerDaSala));
   assert.doesNotMatch(replay, /data-console-chat-barred|data-console-person-badge/);
 });
+
+test("rodada v9 (P3, docs/30 D86): o formulario do banner oferece 'O que abre o link' so com o link e o texto do botao escritos; o padrao e Imagem e botão; a Previa segue a escolha", () => {
+  const { screenFormInput, screenFormPreview, screenFormStart, screenFormErrors } = screenForm;
+  // O banner novo: sem link nem texto do botao, a escolha nao aparece (nao faria diferenca).
+  assert.doesNotMatch(html(createElement(ConsoleScreenForm, formProps())), /data-console-screen-link-target/);
+  const novo = screenFormStart("banner");
+  assert.equal(novo.linkTarget, "both", "o padrao do pedido do produtor");
+  assert.equal(screenFormInput(novo, WEBINAR).linkTarget, "both");
+  assert.equal(screenFormInput(screenFormStart("qr"), WEBINAR).linkTarget, null, "o QR Code nao tem a escolha");
+
+  // Editando um banner com link e botao: as tres opcoes como radios, a escolhida marcada e a frase dela embaixo.
+  const item = itemPronto({ linkTarget: "button" });
+  const formulario = block(html(createElement(ConsoleScreenForm, formProps({ item }))), 'data-console-screen-form="banner"', "form");
+  const grupo = block(formulario, 'data-console-screen-link-target=""', "div");
+  assert.match(textOf(grupo), new RegExp(`^${formCopy.oQueAbreOLink} Imagem e botão Só o botão Só a imagem ${formCopy.alvoDoLinkDica.button.replace(/[.]/g, "\\.")}$`));
+  assert.equal(count(grupo, /type="radio"/g), 3);
+  assert.match(grupo, /<input[^>]*checked=""[^>]*value="button"|<input[^>]*value="button"[^>]*checked=""/, "Só o botão marcado");
+  assert.ok(formulario.indexOf("data-console-screen-link-target") > formulario.indexOf(formCopy.link), "logo depois do Link");
+  // O item de antes da escolha (sem o campo) abre como "Só o botão": e assim que ele ja aparece para a turma.
+  assert.equal(screenFormStart("banner", itemPronto()).linkTarget, "button");
+
+  // A Previa e o que o Salvar manda seguem a escolha.
+  const estado = screenFormStart("banner", itemPronto({ linkTarget: "both" }));
+  assert.deepEqual([screenFormPreview(estado, ORIGEM).linkTarget, screenFormPreview(estado, ORIGEM).buttonLabel], ["both", "Quero"]);
+  const soImagem = { ...estado, linkTarget: "image" };
+  assert.deepEqual([screenFormPreview(soImagem, ORIGEM).linkTarget, screenFormPreview(soImagem, ORIGEM).buttonLabel], ["image", null], "Só a imagem: a Previa sem o botao");
+  assert.equal(screenFormInput(soImagem, WEBINAR).linkTarget, "image");
+  // (O id do item de teste nao e um uuid: os erros sao conferidos como num banner novo.)
+  assert.deepEqual(screenFormErrors({ ...estado, buttonLabel: "", id: null, linkTarget: "button" }, WEBINAR), { buttonLabel: naTela.erros.soBotaoSemTexto });
+  assert.deepEqual(screenFormErrors({ ...soImagem, id: null }, WEBINAR), {});
+});

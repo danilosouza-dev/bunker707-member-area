@@ -62,8 +62,9 @@ test("os limites do SQL sao os do app (simulation-change-rows.ts, model.ts)", ()
   assert.deepEqual(written.filter((column) => !columns.includes(column)), [], "o insert so usa colunas que existem");
 });
 
-test("o aviso de migracao pendente aponta esta (WEBINARS_AUDIENCE_MIGRATION = AUDIENCE_MIGRATION) e WEBINARS_MIGRATION e esta, a mais nova", () => {
+test("o aviso de migracao pendente aponta esta (WEBINARS_AUDIENCE_MIGRATION = AUDIENCE_MIGRATION) e WEBINARS_MIGRATION e esta ou uma mais nova", () => {
   assert.match(dbSource, /export const WEBINARS_AUDIENCE_MIGRATION = "202611140002";/);
   assert.equal(audience.AUDIENCE_MIGRATION, "202611140002");
-  assert.match(dbSource, /export const WEBINARS_MIGRATION = "202611140002";/, "a mais nova dos webinarios: aplicar ate ela inclui todas as de antes");
+  // Desde 12/11/2026 a mais nova e a da rodada v9 (tests/webinarios-v9.guard.test.mjs): aplicar ate ela inclui esta.
+  assert.ok((dbSource.match(/export const WEBINARS_MIGRATION = "(\d+)";/)?.[1] ?? "") >= "202611140002", "o aviso geral aponta esta ou uma mais nova");
 });

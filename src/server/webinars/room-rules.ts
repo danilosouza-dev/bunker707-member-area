@@ -4,6 +4,7 @@
 // consulta de mensagens novas. Sem "server-only", imports relativos: tests/webinarios-sala-*.test.mjs carregam
 // direto pelo Node (nada de enum nem namespace, docs/18 §2.5).
 
+import { studentAnswerAuthor, type StudentAnswerAuthor } from "./answer-author-model";
 import { ROOM_OPENS_MINUTES_BEFORE, sessionOffsetMs, simulatedPhase, type SessionClock } from "./room-model";
 import { QUESTION_REPLY_LIMITS, type ChatMode, type Poll, type PollAnswer, type QuestionReply, type QuestionReplyRole, type Reaction, type WebinarQuestion, type WebinarSession } from "./model";
 
@@ -150,6 +151,12 @@ export function pollAnswerProblem(poll: Pick<Poll, "kind" | "options" | "status"
 export type StudentQuestionReply = {
   /** Legado: linhas de antes de 10/11/2026 (D64). A resposta de quem perguntou numa pergunta Anonima antiga: sem nome e sem foto. */
   anonymous: boolean;
+  /**
+   * Como a resposta da equipe aparece (rodada v9, docs/30 D87): "team" (so o selo Equipe, sem nome e sem foto) ou
+   * "custom" (o nome personalizado em `displayName`, sem foto). Ausente ou nula: o nome e a foto de quem escreveu, como
+   * sempre (a resposta de antes, "Meu nome" e a do aluno).
+   */
+  authorAs?: "custom" | "team" | null;
   avatarUrl: string | null;
   body: string;
   createdAt: string;
@@ -160,14 +167,19 @@ export type StudentQuestionReply = {
 };
 
 export function toStudentReply(reply: QuestionReply, viewerUserId: string | null, avatarUrl: string | null = null): StudentQuestionReply {
+  // "Responder como" (D87) so vale na resposta da equipe: com "Equipe" ou "Outro nome", o nome e a foto de quem
+  // escreveu nunca vao para a turma (em "Outro nome", `displayName` ja e o nome personalizado gravado).
+  const authorAs = reply.role !== "student" && (reply.authorAs === "team" || reply.authorAs === "custom") ? reply.authorAs : null;
   return {
     anonymous: reply.anonymous,
-    avatarUrl: reply.anonymous ? null : avatarUrl,
+    // So quando a equipe escolheu: a resposta de sempre vai sem a chave.
+    ...(authorAs ? { authorAs } : {}),
+    avatarUrl: reply.anonymous || authorAs ? null : avatarUrl,
     body: reply.body,
     createdAt: reply.createdAt,
-    displayName: reply.displayName,
+    displayName: authorAs === "team" ? "" : reply.displayName,
     id: reply.id,
-    mine: Boolean(viewerUserId) && reply.userId === viewerUserId,
+    mine: authorAs ? false : Boolean(viewerUserId) && reply.userId === viewerUserId,
     role: reply.role
   };
 }
@@ -197,6 +209,11 @@ export type StudentQuestion = {
   anonymous: boolean;
   /** A foto do perfil de quem perguntou, quando ela pode aparecer (room-model.authorPhotoUrl); nunca na Anonima. */
   avatarUrl: string | null;
+  /**
+   * Quem assina a resposta escrita (rodada v9, docs/30 D87): com "Meu nome", o nome, o papel e a foto de quem respondeu;
+   * com "Outro nome", so o nome. Nulo: "Equipe" (a escolha Equipe, a resposta de antes) ou o Assistente.
+   */
+  answerAuthor: StudentAnswerAuthor | null;
   answerText: string | null;
   /** Quando a resposta saiu (a hora do fio "1 resposta" na sala, docs/31 V2-A66); null enquanto nao respondida. */
   answeredAt: string | null;
@@ -239,7 +256,9 @@ export function toStudentQuestion(
   viewerUserId: string | null,
   voted: boolean,
   avatarUrl: string | null = null,
-  replies: readonly StudentQuestionReply[] = []
+  replies: readonly StudentQuestionReply[] = [],
+  /** A foto de quem assinou a resposta com "Meu nome" (a da equipe aparece sempre, D62). */
+  answerAuthorAvatarUrl: string | null = null
 ): StudentQuestion | null {
   const mine = Boolean(viewerUserId) && question.userId === viewerUserId;
   if (question.status === "dismissed" && !mine) {
@@ -248,6 +267,7 @@ export function toStudentQuestion(
   return {
     anonymous: question.anonymous,
     avatarUrl: question.anonymous ? null : avatarUrl,
+    answerAuthor: question.answerText ? studentAnswerAuthor(question.answerAuthor, answerAuthorAvatarUrl) : null,
     answerText: question.answerText,
     answeredAt: question.answeredAt,
     answeredLive: question.answeredLive,

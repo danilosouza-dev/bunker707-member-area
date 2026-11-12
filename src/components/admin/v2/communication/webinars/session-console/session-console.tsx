@@ -3,12 +3,13 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePanelMotion } from "@/components/member/webinars/room/use-panel-motion";
-import { useConsolePanelOpen, useConsoleTheme } from "@/components/member/webinars/room/use-room-prefs";
+import { useConsoleAnswerAuthor, useConsolePanelOpen, useConsoleTheme } from "@/components/member/webinars/room/use-room-prefs";
 import { Button } from "@/components/ui/button";
 import type { ActionResult } from "@/lib/action-result";
 import type { LiveEmbedLook } from "@/lib/jitsi-room-config";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
+import type { AnswerAuthorChoice } from "@/server/webinars/answer-author-model";
 import type { ConsolePollLaunch, ModerationAction } from "@/server/webinars/chat-schemas";
 import {
   CONSOLE_POLL_MS,
@@ -196,7 +197,10 @@ type Failure = { message: string; status: number };
 
 type SessionConsoleProps = {
   currentUserId: string;
-  /** O nome de quem esta no console, como o servidor poe na frase dos participantes simulados (getUserDisplayName). */
+  /**
+   * O nome completo de quem esta no console. Nao e mais usado aqui desde a rodada v9 (a frase dos participantes simulados
+   * saiu da tela, docs/30 D85; o nome com que a pessoa escreve vem de `data.viewer`); a pagina ainda o passa.
+   */
   currentUserName?: string | null;
   data: SessionConsoleData;
   /** A leitura do retrato na montagem (o teste de tela; o console sempre comeca respondendo). */
@@ -212,7 +216,7 @@ type SessionConsoleProps = {
 
 type BanTarget = { name: string; participantId: string | null; userId: string };
 
-export function SessionConsole({ currentUserId, currentUserName = null, data, initialPoll = CONSOLE_POLL_START, nonce = null, permissions, serverNow, translationEnabled = false }: SessionConsoleProps) {
+export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL_START, nonce = null, permissions, serverNow, translationEnabled = false }: SessionConsoleProps) {
   const router = useRouter();
   const [snapshot, setSnapshot] = useState<ConsoleSnapshot | null>(data.snapshot);
   const [skew] = useState(() => serverNow - Date.now());
@@ -237,6 +241,7 @@ export function SessionConsole({ currentUserId, currentUserName = null, data, in
   const portalRef = useRef<HTMLDivElement | null>(null);
   const [theme, setTheme] = useConsoleTheme();
   const [panelOpen, setPanelOpen] = useConsolePanelOpen();
+  const [answerAuthor, setAnswerAuthor] = useConsoleAnswerAuthor();
   /** A aba ou a entrada do ⋯ escolhida no painel, so na memoria da pagina (o Chat ao abrir). */
   const [panelView, setPanelView] = useState<ConsolePanelView>({ tab: "chat" });
   // O tema do console vai ao iframe na montagem (no hash, para o CSS da instancia); trocar depois nao remonta a sala.
@@ -1329,12 +1334,17 @@ export function SessionConsole({ currentUserId, currentUserName = null, data, in
                     currentUserAvatarUrl={data.viewer?.avatarUrl ?? null}
                     currentUserName={data.viewer?.name ?? null}
                     marks={attendance && attendance.sessionId === session.id ? attendance.questionMarks : null}
-                    onAnswer={(questionId: string, answerText: string, answeredLive: boolean) => run(`question:${questionId}`, () => answerQuestion({ answerText: answerText || undefined, answeredLive, questionId }))}
+                    // "Responder como" (rodada v9, docs/30 D87): a escolha lembrada no navegador vai com cada resposta.
+                    author={answerAuthor}
+                    onAnswer={(questionId: string, answerText: string, answeredLive: boolean, author?: AnswerAuthorChoice) =>
+                      run(`question:${questionId}`, () => answerQuestion({ answerText: answerText || undefined, answeredLive, author, questionId }))
+                    }
+                    onAuthor={setAnswerAuthor}
                     onDeleteReply={(replyId: string) =>
                       run(`reply:${replyId}`, () => deleteQuestionReply({ replyId }), () => adminToast.success(WEBINAR_ADMIN_COPY.console.questions.replyDeleted))
                     }
-                    onReply={(questionId: string, body: string) =>
-                      run(`question:${questionId}`, () => replyToQuestion({ body, questionId }), () => adminToast.success(WEBINAR_ADMIN_COPY.console.questions.replied))
+                    onReply={(questionId: string, body: string, author?: AnswerAuthorChoice) =>
+                      run(`question:${questionId}`, () => replyToQuestion({ author, body, questionId }), () => adminToast.success(WEBINAR_ADMIN_COPY.console.questions.replied))
                     }
                     onStatus={(questionId: string, status: QuestionStatus) => void run(`question:${questionId}`, () => setQuestionStatus({ questionId, status }))}
                     questions={snapshot.questions}

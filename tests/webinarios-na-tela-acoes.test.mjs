@@ -831,6 +831,8 @@ test("Mostrar: o banner entra com a copia congelada e o minuto, o carimbo por ul
     buttonLabel: "Quero",
     closable: true,
     image: null,
+    // O item do banco de antes da 202611150001 (sem link_target) vale "so o botao", e a copia guarda isso (docs/30 D86).
+    linkTarget: "button",
     linkUrl: "https://exemplo.com/vaga",
     name: "Banner da vaga",
     place: "bottom_right",

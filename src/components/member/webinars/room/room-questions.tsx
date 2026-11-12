@@ -129,13 +129,17 @@ type RoomQuestionItemProps = {
 function RoomQuestionReplyComment({ reply, serverNowMs }: { reply: StudentQuestionReply; serverNowMs?: number }) {
   const sala = WEBINAR_COPY.sala;
   const novas = WEBINAR_COPY.salaV2;
-  const role = reply.role === "student" ? null : chatRoleLabel(reply.role);
-  const name = reply.anonymous ? sala.anonima : reply.mine ? novas.chat.voce : reply.displayName;
+  // "Responder como" (rodada v9, docs/30 D87): com "Equipe", so o selo Equipe e o icone da equipe (como a primeira
+  // resposta); com "Outro nome", o nome personalizado com o icone da equipe e sem o selo do papel.
+  const asTeam = reply.authorAs === "team";
+  const custom = reply.authorAs === "custom";
+  const role = reply.role === "student" || custom ? null : asTeam ? sala.selos.equipe : chatRoleLabel(reply.role);
+  const name = asTeam ? sala.selos.equipe : reply.anonymous ? sala.anonima : reply.mine ? novas.chat.voce : reply.displayName;
   const time = questionTime(reply.createdAt, serverNowMs);
   return (
     <RoomComment
       as="div"
-      avatar={<RoomCommentAvatar imageSrc={reply.avatarUrl} kind={reply.anonymous ? "anonymous" : "person"} name={reply.displayName} />}
+      avatar={asTeam || custom ? <RoomCommentAvatar kind="team" /> : <RoomCommentAvatar imageSrc={reply.avatarUrl} kind={reply.anonymous ? "anonymous" : "person"} name={reply.displayName} />}
       body={reply.body}
       id={reply.id}
       marker="reply"
@@ -156,6 +160,11 @@ function RoomQuestionComment({ footer, onToggleThread, onVote, question, reply =
   const status = questionStatusOf(question);
   const ai = question.answerSource === "ai";
   const badge = ai ? sala.selos.assistente : sala.selos.equipe;
+  // Quem assina a resposta escrita (rodada v9, docs/30 D87): com "Meu nome", o nome, o selo do papel e a foto de quem
+  // respondeu; com "Outro nome", o nome personalizado; sem assinatura (Equipe, a resposta de antes, o Assistente), o selo.
+  const author = ai ? null : (question.answerAuthor ?? null);
+  const answerName = author ? author.name : badge;
+  const answerRole = author ? (author.role ? chatRoleLabel(author.role) : null) : badge;
   const answerTime = questionTime(question.answeredAt, serverNowMs);
   const autor = (parts: Array<string | undefined>) => novas.chat.autor(parts.filter((part): part is string => Boolean(part)));
   const canReply = Boolean(reply?.canWrite) && question.canReply;
@@ -170,13 +179,13 @@ function RoomQuestionComment({ footer, onToggleThread, onVote, question, reply =
       <RoomComment
         actions={footer}
         as="div"
-        avatar={<RoomCommentAvatar kind={ai ? "assistant" : "team"} />}
+        avatar={author?.as === "self" ? <RoomCommentAvatar imageSrc={author.avatarUrl} kind="person" name={author.name} /> : <RoomCommentAvatar kind={ai ? "assistant" : "team"} />}
         body={question.answerText}
         id={question.id}
         key="answer"
         marker="answer"
-        meta={{ name: badge, role: badge, time: answerTime }}
-        srAuthor={autor([badge, answerTime?.label])}
+        meta={{ name: answerName, role: answerRole, time: answerTime }}
+        srAuthor={autor([answerName, answerRole && answerRole !== answerName ? answerRole : undefined, answerTime?.label])}
       />
     );
   }
@@ -307,6 +316,12 @@ export function RoomQuestionItem({ footer = null, look = "classic", onToggleThre
           {question.answerText ? (
             <p className="mt-1.5 whitespace-pre-line text-sm leading-5 text-room-fg">
               {question.answerSource === "ai" ? <span className="sr-only">{`${copy.selos.assistente}: `}</span> : null}
+              {/* Quem assina (rodada v9, docs/30 D87), tambem no cartao da gaveta do vertical. */}
+              {question.answerSource !== "ai" && question.answerAuthor ? (
+                <span className="font-semibold" data-room-answer-author="">
+                  {`${question.answerAuthor.name}: `}
+                </span>
+              ) : null}
               {question.answerText}
             </p>
           ) : null}

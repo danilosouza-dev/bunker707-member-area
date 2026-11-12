@@ -23,7 +23,8 @@ import { useScreenShownRef, type ScreenWatch } from "./use-room-screen";
 // O cartao: a superficie sobre o video da sala (--room-on-video-*, raio 16), a largura do banner pelo tamanho (clamp em
 // cqw da camada, nunca mais de 40 % do palco nem mais que a celula), a imagem inteira (object-contain, com width e
 // height) e o texto em ate 3 linhas; o botao e uma pilula (roomPillClassName num <a>, com a area de toque de 44 px
-// abaixo de lg); sem texto do botao, o banner inteiro e o link; sem link, e so um aviso. O QR Code tem o lado do tamanho
+// abaixo de lg); sem texto do botao, o banner inteiro e o link; com "Imagem e botão" (docs/30 D86), o banner e o botao
+// abrem o link (dois links irmaos, o botao fora do link do banner); sem link, e so um aviso. O QR Code tem o lado do tamanho
 // (128 / 176 / 232, nunca menos de 3 px por modulo: qrSidePx) e, abaixo, a legenda e sempre o link de texto "Abrir o
 // link" (tambem com a area de 44 px). Altura no maximo a area livre: o resto rola por dentro. Entrada com
 // fade de 200 ms (sem animacao com prefers-reduced-motion); nada pisca nem conta tempo. Uma <section> nao modal com nome
@@ -105,17 +106,19 @@ export function RoomScreenImage({ className, image }: { className?: string; imag
   return <img alt={image.alt} className={cn("block h-auto w-full object-contain", className)} data-room-screen-image="" decoding="async" height={image.height} src={src} width={image.width} />;
 }
 
-/** O conteudo do banner no cartao: a imagem, o titulo, o texto em ate 3 linhas e o botao (ou o banner inteiro como link). */
+/** O conteudo do banner no cartao: a imagem, o titulo, o texto em ate 3 linhas e o botao; o link no botao, no banner ou nos dois (screenBannerAction). */
 function BannerContent({ form, handlers, item }: { form: ScreenEventForm; handlers?: ScreenItemHandlers; item: StudentScreenItem }) {
   const href = screenLinkOf(item);
   const action = screenBannerAction(item);
   const text = item.title || item.body;
+  const cardLink = action === "card" || action === "both";
+  const buttonLink = action === "button" || action === "both";
   const content = (
     <>
       {item.image ? <RoomScreenImage image={item.image} /> : null}
       {text ? (
         // Sem imagem, o X fica no canto do texto: o titulo deixa o lugar dele.
-        <span className={cn("flex flex-col gap-1 px-3 pt-3", action === "button" ? null : "pb-3", item.closable && !item.image ? "pr-10" : null)}>
+        <span className={cn("flex flex-col gap-1 px-3 pt-3", buttonLink ? null : "pb-3", item.closable && !item.image ? "pr-10" : null)}>
           {item.title ? <span className="line-clamp-3 text-sm font-semibold leading-5">{item.title}</span> : null}
           {item.body ? <span className="line-clamp-3 text-[13px] leading-[18px]">{item.body}</span> : null}
         </span>
@@ -125,14 +128,14 @@ function BannerContent({ form, handlers, item }: { form: ScreenEventForm; handle
 
   return (
     <>
-      {action === "card" && href ? (
+      {cardLink && href ? (
         <RoomScreenLink className={cn("block min-w-0 rounded-[16px] text-room-on-video-fg hover:opacity-90 focus-visible:-outline-offset-2", ROOM_FOCUS)} href={href} onClick={() => handlers?.onClick?.(item.displayId, form, "card")}>
           {content}
         </RoomScreenLink>
       ) : (
         <div className="min-w-0">{content}</div>
       )}
-      {action === "button" && href && item.buttonLabel ? (
+      {buttonLink && href && item.buttonLabel ? (
         <div className={cn("px-3 pb-3", text ? "pt-2" : "pt-3")}>
           <RoomScreenLink className={roomPillClassName({ className: cn(ROOM_TOUCH_44, "min-w-24 max-w-full"), size: "s", tone: "white" })} href={href} onClick={() => handlers?.onClick?.(item.displayId, form, "button")}>
             <span className="truncate">{item.buttonLabel}</span>

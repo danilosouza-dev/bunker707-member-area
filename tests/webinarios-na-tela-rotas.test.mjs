@@ -189,6 +189,7 @@ test("chat com outro carimbo: o estado inteiro em 3 leituras pequenas; o segundo
     displayId: BANNER,
     image: { alt: "Foguete subindo", height: 360, url: `${ORIGEM}/storage/v1/object/public/content-assets/${IMAGEM}`, width: 640 },
     kind: "banner",
+    linkTarget: "button",
     linkUrl: "https://bunker707.com.br/turma",
     place: "bottom_left",
     shownAt: db.tables.webinar_screen_displays[0].shown_at,

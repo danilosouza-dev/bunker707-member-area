@@ -9,6 +9,7 @@
 import { saoPauloDayKey } from "../../lib/webinar-time";
 import { slugifyTitle } from "../catalog/model";
 import type { AudienceDefinition } from "../communications/audience-model";
+import type { AnswerAuthor, AnswerAuthorMode } from "./answer-author-model";
 import type { RecorderStatus } from "./recorder-model";
 
 export const WEBINAR_KINDS = ["live", "simulated"] as const;
@@ -825,6 +826,12 @@ export type QuestionReply = {
   anonymous: boolean;
   /** A foto do perfil de quem escreveu, so nas leituras do console (author-photos.ts); nunca na Anonima. */
   avatarUrl?: string | null;
+  /**
+   * Como a resposta da equipe aparece (rodada v9, docs/30 D87; webinar_question_replies.author_as): "self" (o nome e a
+   * foto de quem escreveu), "team" (so "Equipe") ou "custom" (o nome personalizado, em `displayName`). Nula na resposta
+   * de antes e na do aluno: vale o nome gravado.
+   */
+  authorAs?: AnswerAuthorMode | null;
   body: string;
   createdAt: string;
   displayName: string;
@@ -842,6 +849,13 @@ export type WebinarQuestion = {
   avatarUrl?: string | null;
   /** O fio da pergunta (as respostas depois da primeira), em ordem; so nas leituras do console. */
   replies?: QuestionReply[];
+  /**
+   * Quem assina a resposta escrita (rodada v9, docs/30 D87; webinar_questions.answer_author). Nula na resposta de antes,
+   * na do Assistente e no banco sem a 202611150001: a sala mostra "Equipe".
+   */
+  answerAuthor?: AnswerAuthor | null;
+  /** A foto de quem assinou com "Meu nome", so nas leituras do console e da sala (a da equipe aparece sempre, D62). */
+  answerAuthorAvatarUrl?: string | null;
   answerText: string | null;
   answeredAt: string | null;
   answeredBy: string | null;

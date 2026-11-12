@@ -654,11 +654,13 @@ test("o Co-apresentador no chat (docs/31 V2-A12): quem e co-apresentador do webi
   assert.equal((await como(CO_DE_OUTRO, "De outro")).role, "team", "co-apresentador de outro webinario");
   assert.equal(ok(await roomActions.sendTeamMessage({ body: "Do Apresentador", sessionId: SESSAO_NO_AR })).message.role, "host");
 
-  // A resposta escrita a uma pergunta tambem vai com o papel de quem responde.
+  // A resposta escrita a uma pergunta tambem leva o papel de quem responde, agora em quem assina (rodada v9: a
+  // resposta nao entra mais no chat, docs/30 D84; o papel fica em answer_author, D87).
   actionStubs.role = { ...original, user: { ...original.user, id: CO, user_metadata: { full_name: "Rui Pereira" } } };
   try {
-    const resposta = ok(await roomActions.answerQuestion({ answerText: "Vai, fica 7 dias.", questionId: pergunta.id }));
-    assert.equal(resposta.message.role, "co_host");
+    const resposta = ok(await roomActions.answerQuestion({ answerText: "Vai, fica 7 dias.", author: { as: "self" }, questionId: pergunta.id }));
+    assert.equal(resposta.message, null, "nenhuma linha no chat");
+    assert.deepEqual(resposta.question.answerAuthor, { as: "self", name: "Rui P.", role: "co_host" });
   } finally {
     actionStubs.role = original;
   }
@@ -1089,7 +1091,7 @@ test("Na tela: fixar numa sessao encerrada e recusado (409) e desafixar continua
   assert.deepEqual(escritas(), ["update webinar_sessions"], "encerrar de novo nao muda a enquete, mas o carimbo sim");
 });
 
-test("perguntas: responder por escrito vira linha da equipe no chat e marca respondida; ao vivo so marca; sem nada, erro no campo; dispensar e reabrir", async () => {
+test("perguntas (rodada v9, P1 e P8): responder por escrito marca respondida e fica so na pergunta, nunca no chat; quem assina vai junto (Equipe sem a escolha, Meu nome, Outro nome); ao vivo so marca; sem nada, erro no campo; dispensar e reabrir", async () => {
   const pergunta = { ...DEFAULTS.webinar_questions, body: "Vai ter replay?", created_at: agora(), display_name: "Ana M.", id: randomUUID(), offset_ms: 2_000, session_id: SESSAO_NO_AR, updated_at: agora(), upvotes: 3, user_id: ALUNA };
   const outra = { ...pergunta, body: "E certificado?", id: randomUUID() };
   const db = usar(bancoEmMemoria(cenario({ webinar_questions: [pergunta, outra] })));
@@ -1099,10 +1101,33 @@ test("perguntas: responder por escrito vira linha da equipe no chat e marca resp
 
   const escrita = ok(await roomActions.answerQuestion({ answerText: "Vai, fica 7 dias.", questionId: pergunta.id }));
   assert.deepEqual([escrita.question.status, escrita.question.answerText, escrita.question.answeredBy, escrita.question.answeredLive], ["answered", "Vai, fica 7 dias.", HOST, false]);
-  assert.equal(escrita.message.kind, "answer");
-  assert.equal(escrita.message.source, "team");
-  assert.equal(escrita.message.role, "host");
-  assert.equal(db.tables.webinar_chat_messages.length, 1);
+  // P1 (decisao do produtor em 12/11/2026: "Chat e chat, pergunta e pergunta"): antes a resposta era gravada tambem
+  // como linha da equipe no chat (kind 'answer') e aparecia como comentario do Apresentador.
+  assert.equal(escrita.message, null, "a resposta nao volta mais como mensagem do chat");
+  assert.equal(db.tables.webinar_chat_messages.length, 0, "nada gravado no chat");
+  // P8: sem a escolha (a pagina aberta antes da troca), a resposta e assinada como Equipe, o que a sala sempre mostrou.
+  const gravada = db.tables.webinar_questions.find((row) => row.id === pergunta.id);
+  assert.deepEqual(gravada.answer_author, { as: "team", name: null, role: "host", v: 1 });
+  assert.deepEqual(escrita.question.answerAuthor, { as: "team", name: null, role: "host" });
+  const auditoria = db.tables.admin_audit_log.find((row) => row.action === "webinar.question_answered");
+  assert.deepEqual([auditoria.metadata.answered_as, "message_id" in auditoria.metadata, auditoria.metadata.written], ["team", false, true]);
+
+  // "Meu nome": o nome com que a pessoa escreve para a turma e o papel; "Outro nome": o nome escrito, limpo.
+  ok(await roomActions.setQuestionStatus({ questionId: pergunta.id, status: "open" }));
+  const comNome = ok(await roomActions.answerQuestion({ answerText: "Fica 7 dias.", author: { as: "self" }, questionId: pergunta.id }));
+  assert.deepEqual([comNome.question.answerAuthor.as, comNome.question.answerAuthor.role, typeof comNome.question.answerAuthor.name], ["self", "host", "string"]);
+  assert.ok(comNome.question.answerAuthor.name.length > 0);
+  ok(await roomActions.setQuestionStatus({ questionId: pergunta.id, status: "open" }));
+  const outroNome = ok(await roomActions.answerQuestion({ answerText: "Fica 7 dias.", author: { as: "custom", name: "  Equipe   Bunker 707 " }, questionId: pergunta.id }));
+  assert.deepEqual(outroNome.question.answerAuthor, { as: "custom", name: "Equipe Bunker 707", role: "host" });
+  assert.deepEqual(db.tables.webinar_questions.find((row) => row.id === pergunta.id).answer_author, { as: "custom", name: "Equipe Bunker 707", role: "host", v: 1 });
+  // "Outro nome" sem um nome valido (vazio, 1 letra, mais de 40): erro no campo, nada muda.
+  for (const name of ["", "A", "x".repeat(41)]) {
+    const recusada = await roomActions.answerQuestion({ answerText: "Outra", author: { as: "custom", name }, questionId: pergunta.id });
+    assert.equal(recusada.status, 400, JSON.stringify(name));
+  }
+  assert.equal(db.tables.webinar_questions.find((row) => row.id === pergunta.id).answer_text, "Fica 7 dias.");
+  assert.equal(db.tables.webinar_chat_messages.length, 0, "nenhuma das respostas foi para o chat");
 
   const aoVivo = ok(await roomActions.answerQuestion({ answeredLive: true, questionId: outra.id }));
   assert.deepEqual([aoVivo.question.status, aoVivo.question.answeredLive, aoVivo.message], ["answered", true, null]);
@@ -1145,26 +1170,27 @@ test("banco sem a 202611100001: responder e apagar no fio pela equipe voltam 409
 
   const resposta = await roomActions.replyToQuestion({ body: "E fica no Replay tambem.", questionId: pergunta.id });
   assert.deepEqual([resposta.ok, resposta.status], [false, 409]);
-  // A frase aponta a mais nova dos webinarios (WEBINARS_MIGRATION, hoje a 202611140002 dos participantes simulados): aplicar ate ela
+  // A frase aponta a mais nova dos webinarios (WEBINARS_MIGRATION, hoje a 202611150001 da rodada v9): aplicar ate ela
   // inclui a do fio.
-  assert.equal(resposta.error, "Esta parte precisa da atualização do banco (migração 202611140002).");
+  assert.equal(resposta.error, "Esta parte precisa da atualização do banco (migração 202611150001).");
   const apagar = await roomActions.deleteQuestionReply({ replyId: randomUUID() });
-  assert.deepEqual([apagar.ok, apagar.status, apagar.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611140002)."]);
+  assert.deepEqual([apagar.ok, apagar.status, apagar.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611150001)."]);
   assert.equal(db.tables.admin_audit_log.length, 0);
   assert.equal(db.tables.notifications.length, 0);
 });
 
-test("D31 na Live ao vivo: a mensagem da equipe e a resposta escrita nascem na linha mestre (o replay toca o chat da live); na Live gravada nao", async () => {
+test("D31 na Live ao vivo: a mensagem da equipe nasce na linha mestre (o replay toca o chat da live); a resposta escrita nao e mais mensagem do chat (rodada v9, D84); na Live gravada nao", async () => {
   const SESSAO_LIVE = "bbbbbbbb-2222-4222-8222-444444444444";
   const noAr = new Date(Date.now() - 5 * MIN).toISOString();
   const live = { ...DEFAULTS.webinar_sessions, id: SESSAO_LIVE, kind: "live", recording_id: null, scheduled_at: noAr, started_at: noAr, status: "live", webinar_id: WEBINAR };
   const pergunta = { ...DEFAULTS.webinar_questions, body: "Vai ter replay?", created_at: agora(), display_name: "Ana M.", id: randomUUID(), offset_ms: 2_000, session_id: SESSAO_LIVE, updated_at: agora(), upvotes: 0, user_id: ALUNA };
-  usar(bancoEmMemoria(cenario({ webinar_questions: [pergunta], webinar_sessions: [...cenario().webinar_sessions, live] })));
+  const db = usar(bancoEmMemoria(cenario({ webinar_questions: [pergunta], webinar_sessions: [...cenario().webinar_sessions, live] })));
 
   const daEquipe = ok(await roomActions.sendTeamMessage({ body: "Bem-vindos!", sessionId: SESSAO_LIVE }));
   assert.equal(daEquipe.message.master, true, "a mensagem da equipe na live e da linha mestre");
   const resposta = ok(await roomActions.answerQuestion({ answerText: "Vai sim.", questionId: pergunta.id }));
-  assert.equal(resposta.message.master, true, "a resposta escrita na live tambem");
+  assert.equal(resposta.message, null, "a resposta escrita fica so na pergunta");
+  assert.equal(db.tables.webinar_chat_messages.filter((row) => row.kind === "answer").length, 0, "nenhuma linha de resposta no chat nem na linha mestre");
   const naGravada = ok(await roomActions.sendTeamMessage({ body: "Oi", sessionId: SESSAO_NO_AR }));
   assert.equal(naGravada.message.master, false, "na Live gravada so a equipe promove");
 });

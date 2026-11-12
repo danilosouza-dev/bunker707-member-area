@@ -17,17 +17,22 @@ import { webinarHref } from "@/server/webinars/model";
 import type { SavedScreenItem, UploadedScreenImage, saveScreenItem } from "@/server/webinars/screen-actions";
 import {
   QR_MARGIN_MODULES,
+  SCREEN_DEFAULT_LINK_TARGET,
   SCREEN_DEFAULT_PLACE,
   SCREEN_DEFAULT_SIZE,
+  SCREEN_LEGACY_LINK_TARGET,
   SCREEN_LIMITS,
+  SCREEN_LINK_TARGETS,
   SCREEN_PLACES,
   SCREEN_SIZES,
   qrIsDense,
   qrModules,
   screenImageUrl,
+  screenLinkTargetOf,
   screenSizesFor,
   type ScreenItem,
   type ScreenKind,
+  type ScreenLinkTarget,
   type ScreenPlace,
   type ScreenSize,
   type StudentScreenItem
@@ -86,6 +91,8 @@ export type ScreenFormState = {
   image: { height: number; path: string; width: number } | null;
   imageAlt: string;
   kind: ScreenKind;
+  /** O que abre o link do banner (docs/30 D86). */
+  linkTarget: ScreenLinkTarget;
   linkUrl: string;
   name: string;
   place: ScreenPlace;
@@ -104,6 +111,8 @@ export function screenFormStart(kind: ScreenKind, item: ScreenItem | null = null
       image: item.image ? { height: item.image.height, path: item.image.path, width: item.image.width } : null,
       imageAlt: item.image?.alt ?? "",
       kind: item.kind,
+      // O item de antes da escolha (sem `linkTarget`): so o botao, como ele ja aparece.
+      linkTarget: item.linkTarget ?? SCREEN_LEGACY_LINK_TARGET,
       linkUrl: item.linkUrl ?? "",
       name: item.name,
       place: item.place,
@@ -112,7 +121,7 @@ export function screenFormStart(kind: ScreenKind, item: ScreenItem | null = null
     };
   }
 
-  return { body: "", buttonLabel: "", closable: true, id: null, image: null, imageAlt: "", kind, linkUrl: "", name: "", place: SCREEN_DEFAULT_PLACE[kind], size: SCREEN_DEFAULT_SIZE, title: "" };
+  return { body: "", buttonLabel: "", closable: true, id: null, image: null, imageAlt: "", kind, linkTarget: SCREEN_DEFAULT_LINK_TARGET, linkUrl: "", name: "", place: SCREEN_DEFAULT_PLACE[kind], size: SCREEN_DEFAULT_SIZE, title: "" };
 }
 
 /** Uma mudanca no formulario: com a posicao e o "pode fechar" novos, o tamanho que deixou de valer (Grande no meio sem fechar) vira Medio. */
@@ -134,6 +143,7 @@ export function screenFormInput(state: ScreenFormState, webinarId: string): Scre
     imageAlt: qr || !state.image ? null : text(state.imageAlt),
     imagePath: qr ? null : (state.image?.path ?? null),
     kind: state.kind,
+    linkTarget: qr ? null : state.linkTarget,
     linkUrl: text(state.linkUrl),
     name: text(state.name),
     place: state.place,
@@ -200,12 +210,16 @@ export function screenFormPreview(state: ScreenFormState, origin: string | null 
   const url = !qr && state.image ? screenImageUrl(state.image.path, origin) : null;
   const title = state.title.trim() || null;
 
+  // A mesma conta do salvar: "Só a imagem" sem o botao; fora do banner com link, o padrao.
+  const link = screenLinkTargetOf({ buttonLabel: qr || !linkUrl ? null : state.buttonLabel.trim() || null, kind: state.kind, linkTarget: state.linkTarget, linkUrl });
+
   return {
     body: qr ? null : state.body.trim() || null,
-    buttonLabel: qr || !linkUrl ? null : state.buttonLabel.trim() || null,
+    buttonLabel: link.buttonLabel,
     closable: state.closable,
     image: url && state.image ? { alt: state.imageAlt.trim() || title || "", height: state.image.height, url, width: state.image.width } : null,
     kind: state.kind,
+    linkTarget: link.linkTarget,
     linkUrl,
     place: state.place,
     size: state.size,
@@ -553,6 +567,22 @@ export function ConsoleScreenForm({ busy, canShow, initialDevice = "desktop", it
             {text("body", form.texto, SCREEN_LIMITS.body, undefined, true)}
             {text("buttonLabel", form.textoDoBotao, SCREEN_LIMITS.buttonLabel, form.textoDoBotaoDica)}
             {text("linkUrl", form.link, SCREEN_LIMITS.link)}
+            {/* O que abre o link (docs/30 D86): so faz diferenca com o link e o texto do botao escritos. */}
+            {state.linkUrl.trim() && state.buttonLabel.trim() ? (
+              <div className="flex min-w-0 flex-col gap-1.5" data-console-screen-link-target="">
+                <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]" id={`${prefix}-alvo-do-link`}>
+                  {form.oQueAbreOLink}
+                </span>
+                <PillGroup
+                  ariaLabel={form.oQueAbreOLink}
+                  name={`${prefix}-link-target`}
+                  onChange={(linkTarget: ScreenLinkTarget) => change({ linkTarget })}
+                  options={SCREEN_LINK_TARGETS.map((target) => ({ label: form.alvosDoLink[target], value: target }))}
+                  value={state.linkTarget}
+                />
+                <p className="text-xs leading-5 text-[var(--text-secondary)]">{form.alvoDoLinkDica[state.linkTarget]}</p>
+              </div>
+            ) : null}
           </>
         )}
 

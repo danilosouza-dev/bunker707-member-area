@@ -8,11 +8,14 @@
 // padrao.
 
 import {
+  SCREEN_DEFAULT_LINK_TARGET,
   SCREEN_DEFAULT_PLACE,
   SCREEN_DEFAULT_SIZE,
   SCREEN_DISPLAY_KINDS,
   SCREEN_HIDDEN_REASONS,
   SCREEN_KINDS,
+  SCREEN_LEGACY_LINK_TARGET,
+  SCREEN_LINK_TARGETS,
   SCREEN_PLACES,
   SCREEN_SIZES,
   type ScreenDisplay,
@@ -20,6 +23,7 @@ import {
   type ScreenHiddenReason,
   type ScreenItem,
   type ScreenKind,
+  type ScreenLinkTarget,
   type ScreenPlace,
   type ScreenSize
 } from "./screen-model";
@@ -36,6 +40,12 @@ function oneOf<T extends string>(values: readonly T[], value: unknown): T | null
 export const SCREEN_ITEM_COLUMNS =
   "id, webinar_id, kind, name, title, body, button_label, link_url, image_path, image_width, image_height, image_alt, place, size, closable, created_by, created_at, updated_at, archived_at";
 
+/**
+ * As colunas da 202611150001 (rodada v9), lidas a parte: a lista de sempre nao muda, e no banco sem a migracao o app
+ * le de novo so com ela (screen-store.withItemColumns).
+ */
+export const SCREEN_ITEM_COLUMNS_V9 = `${SCREEN_ITEM_COLUMNS}, link_target`;
+
 export type ScreenItemRow = {
   archived_at: string | null;
   body: string | null;
@@ -49,6 +59,8 @@ export type ScreenItemRow = {
   image_path: string | null;
   image_width: number | null;
   kind: string;
+  /** So com a 202611150001 (SCREEN_ITEM_COLUMNS_V9); sem a coluna, ausente. */
+  link_target?: string | null;
   link_url: string | null;
   name: string;
   place: string;
@@ -78,6 +90,8 @@ export function screenItemFromRow(row: ScreenItemRow): ScreenItem | null {
     id: row.id,
     image,
     kind,
+    // Sem a coluna (o banco de antes da 202611150001): so o botao, como era.
+    linkTarget: kind === "qr" ? SCREEN_DEFAULT_LINK_TARGET : (oneOf<ScreenLinkTarget>(SCREEN_LINK_TARGETS, row.link_target ?? "") ?? SCREEN_LEGACY_LINK_TARGET),
     linkUrl: row.link_url,
     name: row.name,
     place: oneOf<ScreenPlace>(SCREEN_PLACES, row.place) ?? SCREEN_DEFAULT_PLACE[kind],
@@ -98,6 +112,7 @@ export type ScreenItemWrite = {
   image_path: string | null;
   image_width: number | null;
   kind: ScreenKind;
+  link_target: ScreenLinkTarget;
   link_url: string | null;
   name: string;
   place: ScreenPlace;
@@ -112,6 +127,7 @@ export function screenItemWriteOf(input: {
   closable: boolean;
   image: { alt: string | null; height: number; path: string; width: number } | null;
   kind: ScreenKind;
+  linkTarget: ScreenLinkTarget;
   linkUrl: string | null;
   name: string;
   place: ScreenPlace;
@@ -127,6 +143,7 @@ export function screenItemWriteOf(input: {
     image_path: input.image ? input.image.path : null,
     image_width: input.image ? input.image.width : null,
     kind: input.kind,
+    link_target: input.kind === "qr" ? SCREEN_DEFAULT_LINK_TARGET : input.linkTarget,
     link_url: input.linkUrl,
     name: input.name,
     place: input.place,

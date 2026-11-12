@@ -355,12 +355,20 @@ export function screenImageSrc(url: string | null | undefined): string | null {
   return typeof url === "string" && SCREEN_IMAGE_SRC.test(url) ? url : null;
 }
 
-/** O que o banner faz com o link: o botao (com o texto do botao), o banner inteiro (sem ele) ou nada (sem link). */
-export function screenBannerAction(item: Pick<StudentScreenItem, "buttonLabel" | "kind" | "linkUrl">): "button" | "card" | "none" {
+/**
+ * O que o banner faz com o link (rodada v9, P3; docs/30 D86): "both" (o banner e o botao abrem o link), "button" (so o
+ * botao), "card" (o banner inteiro: sem texto do botao, ou com "Só a imagem") ou "none" (sem link). Sem `linkTarget` (o
+ * servidor de antes), so o botao, como era.
+ */
+export function screenBannerAction(item: Pick<StudentScreenItem, "buttonLabel" | "kind" | "linkTarget" | "linkUrl">): "both" | "button" | "card" | "none" {
   if (!screenLinkOf(item)) {
     return "none";
   }
-  return item.buttonLabel ? "button" : "card";
+  const target = item.linkTarget ?? "button";
+  if (!item.buttonLabel || target === "image") {
+    return "card";
+  }
+  return target === "both" ? "both" : "button";
 }
 
 /** As exibicoes que chegaram agora (as que a sala nao tinha); a primeira leitura nao anuncia nada. */

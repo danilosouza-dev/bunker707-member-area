@@ -18,9 +18,11 @@ import {
   SCREEN_IMAGE_PATH_PATTERN,
   SCREEN_KINDS,
   SCREEN_LIMITS,
+  SCREEN_LINK_TARGETS,
   SCREEN_PLACES,
   SCREEN_SIZES,
   screenItemProblems,
+  screenLinkTargetOf,
   type PollPinSnapshot,
   type ScreenDisplayKind,
   type ScreenItemFields,
@@ -60,6 +62,8 @@ export const screenItemInputSchema = z
     imageAlt: optionalText(SCREEN_LIMITS.imageAlt),
     imagePath: optionalText(160, ERROS.imagemSumiu),
     kind: z.enum(SCREEN_KINDS, { error: ERROS.invalido }),
+    /** O que abre o link do banner (D86): ausente (a pagina de antes), o padrao. */
+    linkTarget: z.enum(SCREEN_LINK_TARGETS, { error: ERROS.invalido }).nullish(),
     linkUrl: optionalText(SCREEN_LIMITS.link, ERROS.link),
     name: optionalText(SCREEN_LIMITS.name),
     place: z.enum(SCREEN_PLACES, { error: ERROS.invalido }).nullish(),
@@ -70,11 +74,19 @@ export const screenItemInputSchema = z
   .transform((value) => ({
     ...value,
     imageAlt: value.imagePath ? value.imageAlt : null,
-    place: value.place ?? SCREEN_DEFAULT_PLACE[value.kind]
+    place: value.place ?? SCREEN_DEFAULT_PLACE[value.kind],
+    // "Só a imagem" grava sem o texto do botao; fora do banner com link vale o padrao (screenLinkTargetOf).
+    ...screenLinkTargetOf(value),
+    /** O texto do botao como veio (antes de "Só a imagem" tirar): a regra de "Só o botão" olha este. */
+    typedButtonLabel: value.buttonLabel
   }))
   .superRefine((value, context) => {
     for (const problem of screenItemProblems(value)) {
       context.addIssue({ code: "custom", message: problem.message, path: [problem.field] });
+    }
+    // "Só o botão" sem o texto do botao nao teria o que clicar.
+    if (value.kind === "banner" && value.linkUrl && value.linkTarget === "button" && !value.typedButtonLabel) {
+      context.addIssue({ code: "custom", message: ERROS.soBotaoSemTexto, path: ["buttonLabel"] });
     }
   });
 
@@ -100,6 +112,8 @@ export const screenSnapshotSchema = z.object({
   buttonLabel: snapshotText(SCREEN_LIMITS.buttonLabel),
   closable: z.boolean(),
   image: snapshotImageSchema.nullable(),
+  // Ausente na copia gravada antes da 202611150001 (a turma viu so o botao clicavel).
+  linkTarget: z.enum(SCREEN_LINK_TARGETS).optional(),
   linkUrl: z
     .string()
     .max(SCREEN_LIMITS.link)

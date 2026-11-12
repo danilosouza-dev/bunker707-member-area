@@ -47,8 +47,11 @@ export type WebinarsDb = SupabaseClient;
  * participantes simulados mudados a qualquer momento (docs/30 D79, 11/11/2026) vem por ultimo: a 202611140002 cria
  * webinar_simulation_changes e e a mais nova, entao o aviso a aponta (aplicar ate ela inclui todas as de antes; docs/21
  * §9.14 e §9.15). Nada que o app sempre le vem dela: sem ela, so mudar o numero volta 409 com o aviso.
+ * Rodada v9 (docs/30 D86 a D88, 12/11/2026): a 202611150001 (o que abre o link do banner, quem assina a resposta e o
+ * comentario na tela) passa a ser a mais nova, entao o aviso a aponta. Nenhuma coluna dela entra nas listas que o app
+ * sempre le: sem ela a sala e o console seguem como antes, e so as escritas novas voltam 409 com o aviso (docs/21 §9.16).
  */
-export const WEBINARS_MIGRATION = "202611140002";
+export const WEBINARS_MIGRATION = "202611150001";
 
 /** 4a: webinar_panel (os paineis Lives ao vivo e Lives gravadas e os numeros da lista). */
 export const WEBINARS_PANELS_MIGRATION = "202610300002";
@@ -129,3 +132,12 @@ export const WEBINAR_MISSING_MESSAGE = "Esse webinário não existe mais.";
 /** O arquivado fica so de leitura (docs/30 §2.3): toda escrita do webinario pede o Desarquivar antes. */
 export const WEBINAR_ARCHIVED_MESSAGE = "Esse webinário está arquivado. Desarquive para mexer nele.";
 export const WEBINAR_CHANGED_MESSAGE = "Esse webinário mudou em outra tela. Recarregue a página e tente de novo.";
+
+/**
+ * Rodada v9 (docs/30 D86 a D88; 12/11/2026): webinar_screen_items.link_target (o que abre o link do banner),
+ * webinar_questions.answer_author e webinar_question_replies.author_as (quem assina a resposta) e
+ * webinar_screen_comments (o comentario ou a pergunta na tela). Nenhuma leitura de sempre depende dela: sem as colunas,
+ * o banner vale "so o botao", a resposta aparece como "Equipe" e nada fica na tela; mostrar um comentario e escolher
+ * quem assina voltam 409 com o aviso desta. E tambem a mais nova dos webinarios (WEBINARS_MIGRATION).
+ */
+export const WEBINARS_V9_MIGRATION = "202611150001";

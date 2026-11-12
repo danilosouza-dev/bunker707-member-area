@@ -556,6 +556,14 @@ export function replyPhotoUrl(reply: Pick<QuestionReply, "anonymous" | "displayN
   });
 }
 
+/** A foto de quem assinou a resposta com "Meu nome" (docs/30 D87): a da equipe aparece sempre; nas outras escolhas, nenhuma. */
+export function answerAuthorPhotoUrl(question: Pick<WebinarQuestion, "answerAuthor" | "answeredBy">, webinarId: string, photos: ReadonlyMap<string, AuthorPhoto>): string | null {
+  if (question.answerAuthor?.as !== "self" || !question.answeredBy) {
+    return null;
+  }
+  return authorPhotoUrl({ authorUserId: question.answeredBy, displayName: question.answerAuthor.name ?? "", photo: photos.get(question.answeredBy), source: "team", viewer: "team", webinarId });
+}
+
 /** O fio de cada pergunta da sessao (id da pergunta -> as respostas em ordem), como o aluno recebe. */
 export function studentRepliesByQuestion(replies: readonly QuestionReply[], userId: string, webinarId: string, photos: ReadonlyMap<string, AuthorPhoto>): Map<string, StudentQuestionReply[]> {
   const byQuestion = new Map<string, StudentQuestionReply[]>();
@@ -578,12 +586,30 @@ export async function listStudentQuestions(db: WebinarsDb, session: Pick<Webinar
   const replies = replyRows.map(questionReplyFromRow);
   const [voted, photos, personas] = await Promise.all([
     listStudentVotedQuestionIds(db, { questionIds: questions.map((question) => question.id), userId }),
-    loadAuthorPhotos(db, [...questions.filter((question) => !question.anonymous).map((question) => question.userId), ...replies.filter((reply) => !reply.anonymous).map((reply) => reply.userId)], now),
+    loadAuthorPhotos(
+      db,
+      [
+        ...questions.filter((question) => !question.anonymous).map((question) => question.userId),
+        ...replies.filter((reply) => !reply.anonymous).map((reply) => reply.userId),
+        // Quem assinou a resposta com "Meu nome" (D87): a foto da equipe.
+        ...questions.filter((question) => question.answerAuthor?.as === "self").map((question) => question.answeredBy)
+      ],
+      now
+    ),
     scriptedQuestionAvatarUrls(db, questions, now)
   ]);
   const thread = studentRepliesByQuestion(replies, userId, session.webinarId, photos);
   return questions
-    .map((question) => toStudentQuestion(question, userId, voted.has(question.id), questionPhotoUrl(question, session.webinarId, photos, "student", personas), thread.get(question.id) ?? []))
+    .map((question) =>
+      toStudentQuestion(
+        question,
+        userId,
+        voted.has(question.id),
+        questionPhotoUrl(question, session.webinarId, photos, "student", personas),
+        thread.get(question.id) ?? [],
+        answerAuthorPhotoUrl(question, session.webinarId, photos)
+      )
+    )
     .filter((question): question is StudentQuestion => question !== null);
 }
 

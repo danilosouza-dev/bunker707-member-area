@@ -217,6 +217,8 @@ test("o item do aluno: o id da exibicao, a imagem com o endereco da nossa origem
     displayId: EXIBICAO,
     image: { alt: "Foguete subindo", height: 360, url: `${ORIGEM}/storage/v1/object/public/content-assets/${IMAGEM}`, width: 640 },
     kind: "banner",
+    // A copia gravada antes da 202611150001 nao diz o que abre o link: so o botao, como a turma viu (docs/30 D86).
+    linkTarget: "button",
     linkUrl: "https://bunker707.com.br/turma",
     place: "bottom_left",
     shownAt: "2026-11-10T20:05:00.000Z",
