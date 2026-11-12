@@ -4,6 +4,7 @@ import { AUDIO_LIMITS } from "@/server/communications/campaign-model";
 import { CommunicationError } from "@/server/communications/db";
 import { NOTICE_AUDIO_SIZE_MESSAGE, persistNoticeAudio } from "@/server/communications/media";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // Audio do aviso (Comunicacao > Avisos e pop-ups, docs/22 §4.5): arquivo enviado ou gravado no navegador,
 // em multipart (campo "file"). Rota, e nao Server Action, porque o audio passa do 1 MB das acoes. O
@@ -24,6 +25,9 @@ function noStore(response: NextResponse) {
 }
 
 export async function POST(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "conteudo" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiRole("messaging.write");
 
   if (auth.response) {

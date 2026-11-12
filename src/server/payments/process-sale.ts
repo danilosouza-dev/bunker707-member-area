@@ -31,7 +31,22 @@ import "server-only";
 //   na compra, aluno sem conta, assinatura sem cobranca registrada) e IGNORADO com o motivo escrito;
 // - erro de verdade (payload sem e-mail, falha do banco, banco sem a tabela de vinculos) sobe para quem
 //   chamou marcar `failed`.
+//
+// Venda guardada (produto licenciado, docs/32 §2.2 e §11.3; so no modo "enforce"): quando a situacao da licenca nao
+// permite acesso novo (a classe matricula barrada: Escola congelada, copia nunca ativada, Aviso de endereco diferente ou
+// de licenca ilegivel, ou a licenca que nao pode ser lida), a compra de um produto que a pessoa ainda nao tinha fica
+// GUARDADA (held_sales), tenha ela conta ou nao: nenhuma conta nasce, nenhum acesso abre e nenhum e-mail sai para quem
+// comprou. O que a pessoa ja tinha (qualquer acesso, aberto ou fechado) renova, retoma e estende na hora, como sempre;
+// na compra com os dois, so os produtos novos ficam guardados. A tarefa do tick `vendas-guardadas`
+// (held-sales-release.ts) libera as guardadas pela mesma regra quando a licenca volta a permitir (`release`). O
+// reembolso, o chargeback e a assinatura cancelada passam sempre e descartam a venda guardada da mesma compra antes de
+// decidir o resto: ela nunca e liberada. No modo "off" nada disso le ou grava nada: o comportamento de sempre.
 
+import { getConfiguredSiteOrigin } from "@/server/auth/site-origin";
+import { licensingMode } from "@/server/licensing/build-config";
+import { requestLicensesAfterSale } from "@/server/licensing/interno/sale-requests";
+import { readCurrentLicenseState } from "@/server/licensing/current-state";
+import type { LicenseState } from "@/server/licensing/state";
 import { findAccountByEmail, normalizeEmail } from "@/server/students/accounts";
 import { applyAccessAction, provisionStudentAccess, restoreEntitlements } from "@/server/students/access";
 import { accessStateOf, isAccessOpen, targetTypeForContentKind } from "@/server/students/model";
@@ -44,6 +59,24 @@ import {
   type EntitlementRow,
   type StudentsDb
 } from "@/server/students/store";
+import {
+  heldSaleDetail,
+  heldSaleDiscardNote,
+  heldSaleDiscardedDetail,
+  newAccessDecisionOf,
+  splitHeldProducts,
+  type HeldSaleReason,
+  type HeldSaleUndoKind
+} from "./held-sales-model";
+import { notifyHeldSalesEpisodeSafely } from "./held-sales-notice";
+import {
+  HELD_SALES_MIGRATION,
+  discardHeldSalesOf,
+  findPendingHeldSaleOfTransaction,
+  isHeldSalesSchemaMissing,
+  recordHeldSale,
+  resolveHeldSaleOfEvent
+} from "./held-sales-store";
 import { SALES_PROVIDER_LABELS, decideEntitlementAfterSale, type EntitlementAfterSaleDecision, type SaleGrantLike, type SaleOutcome } from "./model";
 import {
   assertSaleGrantsAvailable,
@@ -55,6 +88,7 @@ import {
   hasClosingEventForTransaction,
   insertSaleGrants,
   reopenSubscriptionCanceledGrants,
+  updateWebhookEventsOutcome,
   type SaleGrantInsert,
   type SaleGrantRow,
   type SalesDb
@@ -79,6 +113,10 @@ export type SaleProcessingResult = {
   productId: string | null;
   productIds: string[];
   userId: string | null;
+  /** A parte da compra que ficou guardada (venda guardada inteira, outcome "held", ou em parte, junto do acesso liberado). */
+  held?: { id: string; productIds: string[]; reason: HeldSaleReason };
+  /** O reembolso, chargeback ou cancelamento nao achou nada registrado desta compra (nem vinculo, nem acesso). */
+  nothingToUndo?: boolean;
 };
 
 type ResolvedTarget =
@@ -154,28 +192,172 @@ export type ProcessSaleInput = {
   event: NormalizedSaleEvent;
   /** Origem publica do site (`https://host`) para os links dos e-mails. */
   siteOrigin: string | null;
-  /** Linha de webhook_events que esta sendo processada (vai para o vinculo da venda). */
+  /** Linha de webhook_events que esta sendo processada (vai para o vinculo da venda e para a venda guardada). */
   webhookEventId?: string | null;
+  /**
+   * A situacao da licenca que decide se a compra pode dar acesso novo (venda guardada). Sem o campo, a deste pedido
+   * (readCurrentLicenseState), lida so quando a compra traz produto que a pessoa ainda nao tinha.
+   */
+  license?: LicenseState | null;
+  /**
+   * A liberacao de uma venda guardada pela tarefa do tick (held-sales-release.ts): so estes produtos, sem perguntar de
+   * novo a licenca (a tarefa ja perguntou), cada acesso com o sufixo do produto e o e-mail de compra com chave propria.
+   */
+  release?: { productIds: readonly string[] };
 };
 
+/**
+ * A venda inteira: a regra de acesso de sempre (processSaleAccess, que nao muda) e, depois dela, o passo da venda que vira
+ * Licenca do Bunker Members (docs/32 §11.10; src/server/licensing/interno/sale-requests.ts). O passo so existe com a API
+ * interna do Emissor configurada (a nossa escola): sem ela, nao le nem grava nada, e o resultado e exatamente o de antes.
+ * Com ela, so enfileira pedidos ao Emissor (license_requests) e acrescenta uma frase ao detalhe; o erro do banco nesse
+ * passo marca a venda com erro, com o acesso ja liberado, e o Reprocessar refaz os dois.
+ */
 export async function processSaleEvent(db: SalesDb, input: ProcessSaleInput): Promise<SaleProcessingResult> {
+  const result = await processSaleAccess(db, input);
+  let license: Awaited<ReturnType<typeof requestLicensesAfterSale>>;
+
+  try {
+    license = await requestLicensesAfterSale(db, {
+      access: { heldProductIds: result.held?.productIds ?? [], userId: result.userId },
+      event: input.event,
+      webhookEventId: input.webhookEventId ?? null
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+
+    throw new SaleProcessingError(
+      `${result.outcome === "access_granted" ? "O acesso foi liberado, mas o" : "O"} pedido da Licença do Bunker Members não entrou na fila (${reason}). Use Reprocessar.`,
+      { comboId: result.comboId, productId: result.productId }
+    );
+  }
+
+  return license.note ? { ...result, detail: `${result.detail} ${license.note}` } : result;
+}
+
+/** A regra de acesso de uma venda (a de sempre). */
+async function processSaleAccess(db: SalesDb, input: ProcessSaleInput): Promise<SaleProcessingResult> {
   const { event } = input;
 
   if (event.type === "other") {
     return ignored(`Evento ${event.rawType} não muda o acesso de ninguém.`);
   }
 
+  if (event.type !== "purchase_approved") {
+    // Reembolso, chargeback e cancelamento passam sempre. A venda guardada da mesma compra (ou da mesma assinatura) sai
+    // da lista antes, descartada: ela nunca deu acesso e nunca vai dar.
+    const discarded = await discardHeldSalesUndoneBy(db, event);
+    const result = await undoSale(db, input);
+
+    return discarded > 0 ? withHeldSalesDiscarded(result, discarded) : result;
+  }
+
   if (!event.externalProductId) {
     return ignored("O evento não informa qual produto foi vendido.");
   }
 
-  if (event.type === "purchase_approved") {
-    return grantPurchase(db, { ...input, lines: saleLines(event) });
+  return grantPurchase(db, { ...input, lines: saleLines(event) });
+}
+
+async function undoSale(db: SalesDb, input: ProcessSaleInput): Promise<SaleProcessingResult> {
+  const { event } = input;
+
+  if (!event.externalProductId) {
+    return ignored("O evento não informa qual produto foi vendido.");
   }
 
   // Reembolso, chargeback e cancelamento decidem pelos vinculos da venda (sale_grants): os produtos
   // vendidos junto na mesma compra tem vinculo da mesma transacao e entram sozinhos.
   return removeAccess(db, { ...input, target: await resolveTarget(db, event.provider, event.externalProductId) });
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Venda guardada (docs/32 §2.2 e §11.3; so no modo "enforce")
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * O reembolso, o chargeback ou o cancelamento descartam as vendas guardadas da mesma compra (ou da mesma assinatura, no
+ * cancelamento e no aviso sem a compra) e marcam o evento de compra delas como ignorado, com o motivo; o evento de
+ * compra nao volta a ser reprocessavel (processed), para um clique nao liberar o que foi desfeito. Devolve quantas
+ * foram descartadas. No modo "off" nao le nada.
+ */
+async function discardHeldSalesUndoneBy(db: SalesDb, event: NormalizedSaleEvent): Promise<number> {
+  if (licensingMode() !== "enforce" || event.type === "purchase_approved" || event.type === "other") {
+    return 0;
+  }
+
+  const kind: HeldSaleUndoKind = event.type;
+  const bySubscription = event.subscriptionCode && (event.type === "subscription_canceled" || !event.transactionId) ? event.subscriptionCode : null;
+  const resolution = heldSaleDiscardedDetail(kind);
+  const discarded = await discardHeldSalesOf(db, {
+    provider: event.provider,
+    resolution,
+    subscriptionCode: bySubscription,
+    transactionId: event.transactionId
+  });
+
+  if (discarded.length > 0) {
+    await updateWebhookEventsOutcome(db, {
+      ids: discarded.map((row) => row.webhook_event_id),
+      onlyOutcome: "held",
+      outcome: "ignored",
+      outcomeDetail: resolution
+    });
+  }
+
+  return discarded.length;
+}
+
+/** O resultado do reembolso que tambem descartou vendas guardadas: a frase do descarte vem antes do resto. */
+function withHeldSalesDiscarded(result: SaleProcessingResult, count: number): SaleProcessingResult {
+  const note = heldSaleDiscardNote(count);
+
+  return { ...result, detail: result.nothingToUndo ? note : `${note} ${result.detail}` };
+}
+
+/**
+ * Guarda a parte nova da compra. A mesma compra ja guardada por outro aviso (a confirmacao do fim da garantia, um reenvio
+ * com outro id), com os mesmos produtos, nao guarda de novo: `sameSale`. Banco sem a migracao 202611110002: a venda nao
+ * pode ficar guardada nem liberar acesso novo; falha com a frase para o dono (a plataforma reenvia, e o Reprocessar
+ * depois da migracao guarda).
+ */
+async function holdSale(
+  db: SalesDb,
+  input: { base: TargetRef; event: NormalizedSaleEvent; productIds: string[]; reason: HeldSaleReason; subscriptionCode: string | null; webhookEventId: string | null }
+): Promise<{ created: boolean; id: string; sameSale: boolean }> {
+  if (!input.webhookEventId) {
+    throw new SaleProcessingError("A compra precisa ficar guardada (a Licença não permite acesso novo agora), mas chegou sem o evento gravado.", input.base);
+  }
+
+  const transactionId = saleSourceEventId(input.event);
+
+  try {
+    const sameSale = await findPendingHeldSaleOfTransaction(db, { provider: input.event.provider, transactionId, webhookEventId: input.webhookEventId });
+
+    if (sameSale && input.productIds.every((productId) => sameSale.product_ids.includes(productId))) {
+      return { created: false, id: sameSale.id, sameSale: true };
+    }
+
+    const recorded = await recordHeldSale(db, {
+      productIds: input.productIds,
+      provider: input.event.provider,
+      reason: input.reason,
+      subscriptionCode: input.subscriptionCode,
+      transactionId,
+      webhookEventId: input.webhookEventId
+    });
+
+    return { ...recorded, sameSale: false };
+  } catch (error) {
+    if (isHeldSalesSchemaMissing(error)) {
+      throw new SaleProcessingError(
+        `A compra precisa ficar guardada (a Licença não permite acesso novo agora), mas o banco ainda não tem a migração ${HELD_SALES_MIGRATION}. Nada foi liberado: rode a migração e use Reprocessar.`,
+        input.base
+      );
+    }
+
+    throw error;
+  }
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -425,6 +607,73 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
   }
 
   const webhookEventId = input.webhookEventId ?? null;
+  let heldPart: SaleProcessingResult["held"] | undefined;
+
+  if (input.release) {
+    // Liberacao de uma venda guardada: so os produtos que ficaram guardados (os que a pessoa ja tinha renovaram na hora
+    // da venda). A licenca ja foi perguntada pela tarefa do tick.
+    const held = new Set(input.release.productIds);
+    const releasing = productIds.filter((productId) => held.has(productId));
+
+    if (releasing.length === 0) {
+      return ignored("Os produtos guardados desta venda não fazem mais parte dela (o código ou o pacote mudou); nada foi liberado. Revise em Alunos se for o caso.", {
+        ...base,
+        userId: account?.id ?? null
+      });
+    }
+
+    productIds = releasing;
+  } else {
+    // Venda guardada: acesso novo so com a matricula liberada pela licenca. O que a pessoa ja tinha passa na hora.
+    const split = splitHeldProducts(productIds, (productId) => beforeByTarget.has(productId));
+
+    if (split.held.length > 0) {
+      const license = input.license !== undefined ? input.license : await readCurrentLicenseState();
+      const decision = newAccessDecisionOf(license);
+
+      if (!decision.allowed) {
+        const heldSubscription = event.subscriptionCode && split.held.some((productId) => subscriptionProductIds.has(productId)) ? event.subscriptionCode : null;
+        const recorded = await holdSale(db, { base, event, productIds: split.held, reason: decision.reason, subscriptionCode: heldSubscription, webhookEventId });
+
+        if (recorded.created) {
+          await notifyHeldSalesEpisodeSafely(db, { configuredHost: getConfiguredSiteOrigin(), now: new Date(), reason: decision.reason, state: license });
+        }
+
+        heldPart = { id: recorded.id, productIds: split.held, reason: decision.reason };
+
+        if (split.now.length === 0 && recorded.sameSale) {
+          return withSaleNotes(
+            ignored("Esta compra já está guardada por outro aviso da mesma venda: ela é liberada uma vez só, quando a Licença permitir acesso novo.", {
+              ...base,
+              // A parte guardada vai junto: o passo da Licenca do Bunker Members (processSaleEvent) nunca pede o que espera.
+              held: heldPart,
+              userId: account?.id ?? null
+            }),
+            saleNotes
+          );
+        }
+
+        if (split.now.length === 0) {
+          const what = target.kind === "combo" ? `pacote ${target.name} (${plural(split.held.length, "produto", "produtos")})` : plural(split.held.length, "produto", "produtos");
+
+          return withSaleNotes(
+            {
+              comboId: target.comboId,
+              detail: heldSaleDetail({ heldCount: split.held.length, reason: decision.reason, what }),
+              held: heldPart,
+              outcome: "held",
+              productId: target.productId,
+              productIds: [],
+              userId: account?.id ?? null
+            },
+            saleNotes
+          );
+        }
+
+        productIds = split.now;
+      }
+    }
+  }
 
   // Acesso que ja existe (aberto ou fechado) ganha o vinculo ANTES da liberacao: se a liberacao falhar no
   // meio, o reprocesso encontra o vinculo com o prazo que havia (a mesma venda nao duplica o vinculo).
@@ -461,7 +710,11 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
       siteOrigin,
       source: "webhook",
       sourceEventId: saleSourceEventId(event),
-      sourceProvider: event.provider
+      sourceProvider: event.provider,
+      // A liberacao de uma venda guardada: o acesso leva sempre o sufixo do produto (a parte renovada na hora da venda
+      // pode ter ficado com a compra sem sufixo, e o par aluno + origem e unico) e o e-mail de compra tem chave propria
+      // (o da parte renovada ja saiu com a chave da compra).
+      ...(input.release ? { purchaseEmailKeyTag: "venda-guardada", sourceEventPerProduct: true } : {})
     },
     studentsDb
   );
@@ -477,14 +730,22 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
   });
   await insertSaleGrants(db, newGrants);
 
+  // O mesmo evento ja tinha ficado guardado e agora passou pela regra de sempre (o reenvio ou o Reprocessar com a
+  // licenca em dia): a venda guardada dele sai da lista como liberada. A liberacao pela tarefa do tick grava a dela.
+  if (!input.release && !heldPart && webhookEventId && licensingMode() === "enforce") {
+    await resolveHeldSaleOfEvent(db, { resolution: "Liberada pela regra de acesso de sempre, com a Licença já permitindo acesso novo.", webhookEventId });
+  }
+
   const granted = result.grantedProductIds.length;
   const what = target.kind === "combo" ? `pacote ${target.name} (${plural(granted, "produto", "produtos")})` : plural(granted, "produto liberado", "produtos liberados");
   const accountNote = result.existingAccount ? "conta que já existia" : "conta nova";
+  const grantedDetail = `${what}; ${accountNote}.`;
 
   return withSaleNotes(
     {
       comboId: target.comboId,
-      detail: `${what}; ${accountNote}.`,
+      detail: heldPart ? heldSaleDetail({ grantedDetail, heldCount: heldPart.productIds.length, reason: heldPart.reason }) : grantedDetail,
+      ...(heldPart ? { held: heldPart } : {}),
       outcome: "access_granted",
       productId: target.productId,
       productIds: result.grantedProductIds,
@@ -564,11 +825,18 @@ async function removeAccess(db: SalesDb, input: ProcessSaleInput & { target: Res
   // adivinha pelo produto (poderia suspender um acesso pago a parte); quem sabe de qual venda se trata e a
   // plataforma. Com a transacao (Ticto), o acesso que nasceu dela ainda e achado (legacyRows).
   if (saleGrants.length === 0 && event.type === "subscription_canceled" && event.subscriptionCode && !event.transactionId) {
-    return ignored(`Nenhuma cobrança da assinatura ${event.subscriptionCode} está registrada aqui; nada a suspender. Revise em Alunos se for o caso.`, { ...base, userId: account?.id ?? null });
+    return ignored(`Nenhuma cobrança da assinatura ${event.subscriptionCode} está registrada aqui; nada a suspender. Revise em Alunos se for o caso.`, {
+      ...base,
+      nothingToUndo: true,
+      userId: account?.id ?? null
+    });
   }
 
   if (saleGrants.length === 0 && !account) {
-    return ignored(event.transactionId ? "Nenhuma venda registrada com essa compra e nenhum aluno com o e-mail dela; nada a revogar." : unlinkedMessage(event), base);
+    return ignored(event.transactionId ? "Nenhuma venda registrada com essa compra e nenhum aluno com o e-mail dela; nada a revogar." : unlinkedMessage(event), {
+      ...base,
+      nothingToUndo: true
+    });
   }
 
   const userId = saleGrants[0]?.user_id ?? account?.id ?? null;
@@ -664,7 +932,7 @@ async function removeAccess(db: SalesDb, input: ProcessSaleInput & { target: Res
         : rows.length > 0
           ? "O acesso desta compra já estava fechado; nada mudou."
           : "O aluno não tinha acesso desta compra; nada mudou.",
-      { ...base, userId }
+      { ...base, nothingToUndo: !otherOriginOpen && rows.length === 0, userId }
     );
   }
 

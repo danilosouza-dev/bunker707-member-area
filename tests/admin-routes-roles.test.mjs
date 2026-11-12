@@ -137,12 +137,13 @@ test("rotas de uma aula ou de um comentario dizem o curso tocado (Professor so n
 test("alunos: toda Server Action passa por runAdminAction com uma acao students.*", () => {
   const actions = readFileSync(join(apiRoot, "../../../server/students/actions.ts"), "utf8");
   const exported = actions.match(/export async function \w+/g) ?? [];
-  const guarded = actions.match(/runAdminAction\("students\.(access|delete|export|read_basic)"/g) ?? [];
+  // Cada acao diz tambem a classe da licenca (docs/32 §11.3): uma das cinco, ou um resolvedor pela entrada.
+  const guarded = actions.match(/runAdminAction\("students\.(access|delete|export|read_basic)", (?:"(?:leitura|atendimento|dever_legal|matricula|conteudo)"|actionClassOf\w+), /g) ?? [];
 
   assert.ok(exported.length >= 14, `acoes exportadas: ${exported.length}`);
-  assert.match(actions, /runAdminAction\("students\.export", exportQuerySchema/, "exportar CSV exige students.export");
+  assert.match(actions, /runAdminAction\("students\.export", "dever_legal", exportQuerySchema/, "exportar CSV exige students.export");
   assert.equal(guarded.length, exported.length, "cada acao exportada usa runAdminAction com acao students.*");
-  assert.match(actions, /runAdminAction\("students\.delete", deleteStudentSchema/);
+  assert.match(actions, /runAdminAction\("students\.delete", "dever_legal", deleteStudentSchema/);
   assert.doesNotMatch(actions, /requireApiAdmin|getSupabaseAdminClient\(/);
 });
 

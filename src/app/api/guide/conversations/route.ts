@@ -6,6 +6,7 @@ import {
 } from "@/server/ai/platform-guide";
 import { requireApiUser } from "@/server/auth/guards";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -30,6 +31,9 @@ export async function GET() {
 }
 
 export async function POST() {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiUser();
 
   if (auth.response || !auth.user) return noStore(auth.response!);

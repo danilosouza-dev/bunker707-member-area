@@ -1,7 +1,7 @@
 "use server";
 
 // Server Actions do Assistente e do Atendimento (docs/30 §1.6, §2.2, §2.4, §2.6, §6.6 e D24; fase 4c), todas com
-// messaging.write por runAdminAction: o card Assistente do editor (loadAssistantEditor e saveAssistant: ligado no
+// messaging.write por runWebinarAction: o card Assistente do editor (loadAssistantEditor e saveAssistant: ligado no
 // webinario, "Responder tudo" padrao das sessoes que ainda nao comecaram, as perguntas e respostas cadastradas), o
 // painel Atendimento do console (loadAttendanceSnapshot a cada 5 s, que tambem distribui as perguntas novas entre quem
 // esta atendendo; pingAttendant a cada 30 s com "Atender" / "Pausar"; assign para Assumir, Devolver e Passar para;
@@ -13,7 +13,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { ActionResult } from "@/lib/action-result";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
-import { runAdminAction } from "@/server/actions/run-action";
+import { runWebinarAction } from "./run-webinar-action";
 import { recordAudit } from "@/server/audit/log";
 import { isPendingMigrationError } from "@/server/db/pending-migration";
 import { applyReplyAllDefault, fetchAiRequestByReply, loadAttendanceSnapshot as readAttendanceSnapshot, type AttendanceSnapshotResult } from "./assistant-queries";
@@ -90,7 +90,7 @@ async function requireSession(db: WebinarsDb, sessionId: string) {
 
 /** [messaging.write] O Assistente do webinario, as perguntas e respostas cadastradas e se o ambiente e a IA deixam. */
 export async function loadAssistantEditor(input: { webinarId: string }): Promise<ActionResult<AssistantEditorData>> {
-  return runAdminAction("messaging.write", webinarIdSchema, input, async ({ input: data }) => {
+  return runWebinarAction("messaging.write", "leitura", webinarIdSchema, input, async ({ input: data }) => {
     const db = webinarsDb();
     const webinar = await requireWebinarRow(db, data.webinarId);
     const envEnabled = webinarAssistantEnabled();
@@ -117,7 +117,7 @@ export async function loadAssistantEditor(input: { webinarId: string }): Promise
  * ainda nao comecaram quando muda) e as perguntas e respostas, na ordem (as que sairam sao apagadas).
  */
 export async function saveAssistant(input: { items: { answer: string; id?: string | null; question: string }[]; settings: AssistantSettings; webinarId: string }): Promise<ActionResult<SavedAssistant>> {
-  return runAdminAction("messaging.write", saveAssistantSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", saveAssistantSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const webinar = await requireWebinarRow(db, data.webinarId);
     assertWebinarNotArchived(webinar);
@@ -153,7 +153,7 @@ export async function saveAssistant(input: { items: { answer: string; id?: strin
  * perguntas; distribui as perguntas novas sem dono entre os atendentes online (nunca tira de quem assumiu).
  */
 export async function loadAttendanceSnapshot(input: { sessionId: string }): Promise<ActionResult<AttendanceSnapshotResult>> {
-  return runAdminAction("messaging.write", sessionIdSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "leitura", sessionIdSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const snapshot = await readAttendanceSnapshot(db, { currentUserId: user.id, distribute: true, sessionId: data.sessionId });
 
@@ -174,7 +174,7 @@ export async function loadAttendanceSnapshot(input: { sessionId: string }): Prom
 
 /** [messaging.write] "Responder tudo" da sessao: o Assistente responde as perguntas novas que ninguem assumiu. */
 export async function setReplyAll(input: { on: boolean; sessionId: string }): Promise<ActionResult<{ on: boolean; sessionId: string }>> {
-  return runAdminAction("messaging.write", replyAllSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", replyAllSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const session = await requireSession(db, data.sessionId);
     const on = await withAssistantTables(() => setSessionReplyAll(db, { on: data.on, sessionId: session.id }));
@@ -196,7 +196,7 @@ export async function setReplyAll(input: { on: boolean; sessionId: string }): Pr
  * A auditoria guarda so a troca de situacao (nao cada batida).
  */
 export async function pingAttendant(input: { sessionId: string; status: AttendantStatus }): Promise<ActionResult<Attendant>> {
-  return runAdminAction("messaging.write", attendantPingSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", attendantPingSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const session = await requireSession(db, data.sessionId);
     const result = await withAssistantTables(async () => {
@@ -239,7 +239,7 @@ async function requireAttendanceTarget(db: WebinarsDb, input: { id: string; sess
  * fila (userId nulo) uma pergunta ou pergunta do chat. O Assistente cala na pergunta que tem dono.
  */
 export async function assign(input: { id: string; sessionId: string; target: AssistantTarget; userId: string | null }): Promise<ActionResult<{ assignedTo: string | null; changed: boolean }>> {
-  return runAdminAction("messaging.write", assignAttendanceSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", assignAttendanceSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const session = await requireSession(db, data.sessionId);
     await requireAttendanceTarget(db, { id: data.id, sessionId: session.id, target: data.target });
@@ -274,7 +274,7 @@ export async function assign(input: { id: string; sessionId: string; target: Ass
  * corrigiu (o relatorio conta as corrigidas); a pergunta da aba que ela respondeu ganha o mesmo texto.
  */
 export async function editAssistantAnswer(input: { body: string; messageId: string }): Promise<ActionResult<{ message: ChatMessage }>> {
-  return runAdminAction("messaging.write", editAssistantMessageSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", editAssistantMessageSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const message = await fetchChatMessageRow(db, data.messageId);
     if (!message || message.deleted_at) {

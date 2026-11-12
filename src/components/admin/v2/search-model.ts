@@ -7,6 +7,7 @@
 // lista de Alunos ja filtrada.
 
 import { canAny, type AdminAccess, type AdminAction } from "../../../server/auth/roles";
+import { NO_DISABLED_FEATURES, WEBINARS_FEATURE, featureVisible, type FeatureKey } from "../../../server/licensing/features";
 import { STUDENT_AREA_HREF, adminNavItems, canSeeAdminArea, visibleAdminNav, type AdminNavItem } from "./nav";
 import { newStudentHref, studentSearchHref } from "./students/hrefs";
 
@@ -92,6 +93,8 @@ export function formatAdminLessonMeta(productTitle: string | null | undefined, m
 }
 
 type StaticEntry = AdminSearchItem & {
+  /** Modulo da licenca de que o destino faz parte (docs/32 §11.8): sem ele ligado, a entrada some. */
+  feature?: FeatureKey;
   /** Aparece com o campo vazio. */
   featured?: boolean;
   keywords?: string;
@@ -169,6 +172,7 @@ const ACTIONS: readonly StaticEntry[] = [
   },
   {
     // Webinarios (docs/30 §2.2): a tela de criar uma Live ao vivo ou uma Live gravada.
+    feature: WEBINARS_FEATURE,
     group: "actions",
     href: "/admin/comunicacao/webinarios/novo",
     id: "acao:novo-webinario",
@@ -192,21 +196,32 @@ const SCREENS = buildScreens(adminNavItems);
 
 /**
  * Telas e acoes que a pessoa pode abrir. Sem `access` (testes de montagem), todas. O servidor confere
- * cada tela de novo (requirePageArea); aqui so nao oferecemos o que ia dar em recusa.
+ * cada tela de novo (requirePageArea); aqui so nao oferecemos o que ia dar em recusa. As de um modulo
+ * desligado na licenca (`disabledFeatures`) nunca aparecem.
  */
-function staticEntriesFor(access: AdminAccess | null | undefined) {
+function staticEntriesFor(access: AdminAccess | null | undefined, disabledFeatures: readonly FeatureKey[]) {
+  const licensed = (entry: StaticEntry) => featureVisible(entry.feature, disabledFeatures);
+
   if (access === undefined) {
-    return { actions: ACTIONS, screens: SCREENS };
+    if (disabledFeatures.length === 0) {
+      return { actions: ACTIONS, screens: SCREENS };
+    }
+
+    const licensedNav = adminNavItems.map((item) =>
+      item.children ? { ...item, children: item.children.filter((child) => featureVisible(child.feature, disabledFeatures)) } : item
+    );
+
+    return { actions: ACTIONS.filter(licensed), screens: buildScreens(licensedNav) };
   }
 
   return {
-    actions: ACTIONS.filter((entry) => !entry.requires || canAny(access, entry.requires)),
-    screens: buildScreens(visibleAdminNav(access))
+    actions: ACTIONS.filter((entry) => (!entry.requires || canAny(access, entry.requires)) && licensed(entry)),
+    screens: buildScreens(visibleAdminNav(access, disabledFeatures))
   };
 }
 
-export function listAdminStaticSearchItems(access?: AdminAccess | null): AdminSearchItem[] {
-  const entries = staticEntriesFor(access);
+export function listAdminStaticSearchItems(access?: AdminAccess | null, disabledFeatures: readonly FeatureKey[] = NO_DISABLED_FEATURES): AdminSearchItem[] {
+  const entries = staticEntriesFor(access, disabledFeatures);
 
   return [...entries.screens, ...entries.actions].map(stripStatic);
 }
@@ -224,9 +239,13 @@ function matches(entry: StaticEntry, query: string) {
 }
 
 /** Telas e acoes que combinam com o texto (vazio = as principais), na ordem do menu. */
-export function filterAdminStaticItems(query: string | null | undefined, access?: AdminAccess | null) {
+export function filterAdminStaticItems(
+  query: string | null | undefined,
+  access?: AdminAccess | null,
+  disabledFeatures: readonly FeatureKey[] = NO_DISABLED_FEATURES
+) {
   const normalized = normalizeAdminSearchText(query);
-  const entries = staticEntriesFor(access);
+  const entries = staticEntriesFor(access, disabledFeatures);
   const pick = (list: readonly StaticEntry[]) => list.filter((entry) => (normalized ? matches(entry, normalized) : entry.featured)).map(stripStatic);
 
   return { actions: pick(entries.actions), screens: pick(entries.screens) };
@@ -243,11 +262,12 @@ function toItems(group: "products" | "modules" | "lessons", hits: readonly Admin
 export function buildAdminSearchGroups(
   query: string | null | undefined,
   results: AdminSearchResults = EMPTY_ADMIN_SEARCH_RESULTS,
-  access?: AdminAccess | null
+  access?: AdminAccess | null,
+  disabledFeatures: readonly FeatureKey[] = NO_DISABLED_FEATURES
 ): AdminSearchGroup[] {
   const cleaned = cleanAdminSearchQuery(query);
   const searching = cleaned.length >= ADMIN_SEARCH_MIN_LENGTH;
-  const staticItems = filterAdminStaticItems(cleaned, access);
+  const staticItems = filterAdminStaticItems(cleaned, access, disabledFeatures);
   const canSearchStudents = access === undefined || canSeeAdminArea(access, "alunos");
   const actions = searching && canSearchStudents
     ? [

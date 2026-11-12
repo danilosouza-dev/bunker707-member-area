@@ -1,5 +1,10 @@
 # 21. Retomada: migracao para a Hetzner (estado em 19/10/2026)
 
+> **Atualizacao de 10/11/2026 (servidor do Emissor de licencas):** o workflow ganhou as etapas `*-licencas` do servidor
+> proprio do Emissor e do Painel de licencas, `bunker707-licencas` (`docs/32` D39): plano pelo preco do dia, criacao com
+> `CONFIRMADO=sim`, DNS, segredos, deploy da imagem do `bunker-licensing`, backup de hora em hora, restauracao e ensaio.
+> **Nada foi criado nem cobrado**: o custo e a ordem esperam o ok do produtor (secao 11; operacao em `docs/20` §8C).
+>
 > **Atualizacao de 03/11/2026 (producao guardada):** a pedido do produtor, a producao inteira (A `bunker707-membros`,
 > B `bunker707-marketing` e C `bunker707-meet`) passa a ficar **guardada em snapshot** e so e ligada para os testes da
 > equipe: ninguem de fora usa a producao ate o lancamento. Ligada, custava cerca de EUR 25 por mes; guardada, cerca de
@@ -52,6 +57,7 @@ Contexto completo: docs/19 (secao 0, decisao) e docs/20 (secoes 4A e 8A, operaca
 | E-mail | Resend (dominio `mail.bunker707.com.br`, verificado) ate a conta do Amazon SES existir. Mautic ja instalado e enviando pelo Resend; a troca para o SES e so `MAUTIC_MAILER_DSN`. |
 | Custo | Ate US$ 10 por mes no servidor da area de membros. Em 19/10/2026: CX23 (2 vCPU, 4 GB, EUR 6,49) nos dois servidores, porque o CX33 estava sem estoque e subiu para EUR 9,99 (acima de US$ 10). Ver secao 8. Mautic tem custo fixo (servidor) e nao cobra por contato (docs/19 §0.8). Desde 03/11/2026, com a producao guardada: cerca de EUR 4,50 por mes (Storage Box e snapshots) e cerca de EUR 0,01 por hora por servidor ligado (secao 10). |
 | Execucao | 100% pela IA, sem nada na maquina do produtor (ele so tem creditos na nuvem). |
+| Emissor de licencas (10/11/2026) | Servidor proprio, `bunker707-licencas`, desde o lote fundador, no tipo e no local mais baratos da Hetzner na hora de criar, mesmo que mais lento: so a equipe abre o Painel e as Instalacoes conferem uma vez por dia (`docs/32` D39). Fica ligado o tempo todo (nunca entra no snapshot da producao). Etapas e custo na secao 11; a criacao espera o ok do produtor. A unica coisa feita na maquina do produtor e a cerimonia das chaves (a raiz nunca vai para servidor). |
 
 ## 2. Por que a execucao e pelo GitHub Actions
 
@@ -1114,3 +1120,202 @@ Pendente:
 2. (Corrigido em 04/11/2026.) O gravador que falha no meio do `jibri-up` e ficava ligado: a causa (SSH reaproveitado sem o grupo `docker`), a limpeza na falha e a devolucao do preparo abandonado pelo job (`docs/30` §6.7, `docs/20` §8B.5).
 3. Decidir, depois de algumas voltas, se a Storage Box continua (EUR 4,00 por mes) ou vai (os snapshots ficam).
 
+
+## 11. Servidor do Emissor de licencas: `bunker707-licencas` (10/11/2026)
+
+**Decisao do produtor (10/11/2026, `docs/32` D39):** o Emissor e o Painel de licencas rodam num servidor so deles desde
+o comeco, no tipo e no local mais baratos da Hetzner, mesmo que mais lento. O que foi construido aqui sao as etapas do
+workflow que criam e operam esse servidor, testadas so com a Hetzner, a Cloudflare e o servidor de mentira
+(`tests/infra-licencas.test.mjs` e `tests/infra-licencas-servidor.test.mjs`). **Nenhuma rodou de verdade e nada foi
+criado.** A operacao, a ordem e os incidentes estao no `docs/20` §8C. Em 11/11/2026 o `deploy-licencas` passou a
+configurar o Painel de licencas e a conta de envio do Emissor, que chegaram ao `bunker-licensing` depois das etapas
+(§11.5).
+
+### 11.1 As etapas
+
+| Etapa | O que faz | Branch | Trava |
+|---|---|---|---|
+| `plan-licencas` | lista os tipos que servem (2 GB, 20 GB, 1 vCPU; x86 ou ARM) com o preco por mes em cada local que a API informa (fsn1, nbg1, hel1 e os de fora da Europa) e escolhe o mais barato com estoque; empate fica com fsn1, nbg1, hel1. Nao cria nada | qualquer | |
+| `provision-licencas` | servidor com labels `app=bunker707` e `papel=licencas`, firewall proprio (80 e 443 de qualquer lugar, 22 so durante as etapas), bootstrap (Docker, restic, ufw, fail2ban, swap; sem a CLI do Supabase) e a chave do Storage Box. Sem estoque, so tenta os outros locais do mesmo tipo e preco | `main` | `CONFIRMADO=sim`; `LICENCAS_PRECO_MAX` para se o preco do dia passou do aprovado |
+| `dns-licencas` | `licencas` (Painel) A com proxy; `licencas-api` (API) e `licencas-interno` (API interna da escola) A sem proxy; apaga AAAA dos tres | `main` | |
+| `cerimonia-licencas` | as duas raizes e a chave de emissao com o codigo de chaves do proprio Emissor, na imagem do GHCR e sem rede: as raizes so cifradas (senha derivada do `HCLOUD_TOKEN`) direto no Storage Box, a emissao em `segredos/`; o registro mostra so as raizes publicas, que vao para `infra/licencas/raizes.json` num commit (`docs/20` §8C.8) | `main` | `CONFIRMAR=cerimonia`; recusa se as chaves ja existem; `ROTACIONAR=emissao` troca so a de emissao |
+| `secrets-licencas` | a chave do Resend do envelope no `payload` (so o servidor abre; vai direto para `segredos/`), ou do segredo `LICENCAS_RESEND_CHAVE`, e a senha do banco; a chave de emissao e a da cerimonia (os segredos `LICENCAS_EMISSAO_*` de antes ainda valem, os tres juntos, conferidos no runner) | `main` | |
+| `deploy-licencas` | confere a configuracao do Painel e o DNS; puxa do GHCR a imagem e o compose do mesmo commit; `.env` com as raizes, o Painel, a conta de envio e os proxies das duas portas; migracoes; `/health`; Caddy; backup de hora em hora; na primeira vez, a conta do produtor no Painel | `main` (tambem pela trava dos `deploy-*`) | `LICENCAS_TAG` escolhe a versao; `LICENCAS_SEM_PAINEL=sim` sobe sem o Painel |
+| `conectar-licencas` | a nossa escola ligada a API interna do Emissor: a credencial nova sorteada no runner, so o resumo no Emissor (a nova e as anteriores, ate 4), a credencial so no `.env` do app da escola, o Caddy de `licencas-interno` so para o IPv4 da escola e a conferencia de dentro do app (`docs/20` §8C.9); rodar de novo troca a credencial | `main` | `CONFIRMAR=conectar`; `REVOGAR_ANTERIORES=sim` deixa so a nova |
+| `backup-licencas` | um backup agora, com `restic check` | `main` | |
+| `restaurar-licencas` | troca o banco pelo de um backup (o mais novo com dados, ou `SNAPSHOT`), com um backup antes | `main` | `CONFIRMAR=restaurar` |
+| `ensaio-licencas` | restaura num Postgres descartavel e sem rede, confere e apaga; o banco em uso nao e tocado | `main` | |
+| `status-licencas` | servidor, preco, DNS (avisa AAAA), respostas publicas; com `SSH=1`, por dentro | qualquer | |
+| `exec-licencas` | um comando no servidor, como `deploy` (por exemplo, as contas do Painel: `docs/20` §8C.3, passo 11) | `main` | |
+
+A trava da `main` esta no workflow (passo "Licencas so da main") e de novo nos scripts (`licencas_so_da_main`).
+
+O ensaio de comprador real (`docs/32` item 13) tem as etapas dele, todas so da `main`: `teste-plano`, `teste-criar`,
+`teste-dns`, `teste-instalar` e `teste-apagar` (`docs/20` §9E), com o pacote da escola gerado pelo workflow
+`pacote-escola.yml` (`docs/20` §9D.6). O passo a passo do primeiro ensaio, com o Emissor junto, o que o produtor clica e
+o custo de cada passo, esta no `docs/20` §9F.
+
+### 11.2 Custo (precisa do ok do produtor antes do `provision-licencas`)
+
+O preco do dia sai do `plan-licencas`, sem IVA, mais o IPv4 (cerca de EUR 0,50 por mes). Referencia conhecida: CX23 a EUR
+6,49 por mes pela API em 19/10/2026 (secao 8); um ARM (CAX) ou outro local pode sair mais barato, e o plano o escolhe. O
+Storage Box nao muda (repositorio novo no box que ja existe). Sem snapshot: fica ligado o tempo todo. Estimativa: perto
+de EUR 7 por mes ou menos, a confirmar no `plan-licencas`.
+
+### 11.3 O job de publicacao no `bunker-licensing`
+
+Escrito la em 10/11/2026 (o job `publicar` do `.github/workflows/ci.yml`, commit `505e012`, com o YAML abaixo): publica
+a imagem (amd64 e arm64) e os arquivos de implantacao no GHCR a cada push na `main` de la, depois dos testes e do compose
+de ponta a ponta. A primeira imagem sai quando aquele trabalho chegar a `main` do `bunker-licensing`:
+
+```yaml
+  publicar:
+    name: Publicar no GHCR
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [verify, imagem]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tags e labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=main
+      - name: Imagem do Emissor (amd64 e arm64)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+      # O compose.yaml e o .env.example do mesmo commit, numa imagem sem programa (o .dockerignore os tira da imagem do
+      # Emissor). O deploy-licencas do bunker707-member-area copia os dois para o servidor.
+      - name: Arquivos de implantacao
+        run: |
+          set -euo pipefail
+          d=$(mktemp -d)
+          cp compose.yaml .env.example "$d/"
+          printf 'FROM scratch\nCOPY compose.yaml .env.example /implantacao/\n' > "$d/Dockerfile"
+          img="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker buildx build --platform linux/amd64,linux/arm64 --push \
+            -t "$img:sha-${GITHUB_SHA::7}-implantacao" -t "$img:main-implantacao" "$d"
+```
+
+E uma vez, pelo produtor: pacote `bunker-licensing` > Package settings > Manage Actions access > Add repository >
+`bunker707-member-area`, papel Read (`docs/20` §8C.2).
+
+### 11.4 Decisoes e perguntas abertas
+
+1. **O nome da API**: `licencas-api.bunker707.com.br`, o mesmo do `docs/protocolo.md` do `bunker-licensing`
+   (`LICENCAS_API_DOMAIN` muda; `ativacao.bunker707.com.br` foi a outra opcao). Ele vai gravado no produto vendido:
+   decidir antes do primeiro fundador.
+2. **A API fica fora do proxy da Cloudflare.** O `docs/32` §10 diz que o Emissor fica "atras da protecao da Cloudflare" e
+   o §11.2 pede o endereco sem o desafio de robos e so IPv4. No plano gratis as duas coisas sao da zona inteira: o Bot
+   Fight Mode nao tem excecao por regra, e o AAAA que a Cloudflare responde para nome com proxy so sai desligando o IPv6
+   da zona toda (a escola junto). Por isso a API ficou com registro A sem proxy: sem desafio, so IPv4, o IP real da
+   conexao; o custo e o IP do servidor publico e nenhum WAF na API (fica o limite de pedidos do Emissor). Caminhos para
+   colocar a API atras da Cloudflare, se o produtor quiser: desligar o IPv6 da zona e criar uma Configuration Rule (o token
+   precisa da permissao "Config Rules: Edit"), ou um dominio proprio para a API, com a zona dele. O `docs/32` §10 ja diz
+   que so o Painel fica atras da Cloudflare e que a API responde direto.
+3. **O compose do `bunker-licensing`**, conferido de novo em 11/11/2026, com o Painel: servicos `postgres`, `migrar` e
+   `emissor`, projeto `bunker-licensing` (volume `bunker-licensing_banco`), imagem local nos servicos com build; o Painel
+   e o mesmo processo do `emissor`, na porta `PAINEL_PORTA_NO_HOST` (8081); a chave do Resend em `segredos/resend-chave`
+   (`ARQUIVO_CHAVE_RESEND`), montada sempre. Se um dia os nomes mudarem, mudar `infra/licencas` e as variaveis
+   `LICENCAS_*_SERVICE`.
+4. ~~**O Cloudflare Access** do Painel e criado pelo produtor no Zero Trust.~~ Desde 11/11/2026 o Painel entra com
+   e-mail e senha, sem o Access e sem lista de IPs (`docs/32` D40): o produtor nao configura nada na Cloudflare.
+5. **Storage Box**: os tres servidores usam a mesma chave SFTP; um servidor comprometido apaga os backups dos outros (os
+   snapshots diarios do box seguram). Uma subconta do box para o Emissor isola melhor e fica como opcao.
+6. **Achado na producao, fora deste trabalho**: `infra/scripts/backup.sh` e `infra/mautic/scripts/backup.sh` chamam
+   `restic forget --keep-daily 30` sem `--group-by`, e cada backup tem a hora no caminho da pasta: o restic agrupa por
+   host e caminhos, cada snapshot fica sozinho no grupo e nenhum sai (a retencao de 30 dias nao vale; o box so cresce
+   devagar, pela deduplicacao). O backup do Emissor ja agrupa pelo host. Corrigir os dois e uma PR propria, com o ok do
+   produtor: o primeiro backup depois dela apaga os snapshots com mais de 30 dias.
+
+### 11.5 O Painel e a conta de envio no deploy (11/11/2026)
+
+O `deploy-licencas` foi escrito antes do Painel de licencas e da fila de e-mail do Emissor e nao os configurava: o
+Emissor subiria sem o Painel. Agora, a cada rodada:
+
+- **A configuracao do Painel vem das variaveis do repositorio** (nao sao segredo), que o workflow entrega so ao
+  `deploy-licencas`, todas com padrao: `LICENCAS_EMISSOR_EMAIL_REMETENTE` (quem envia; `Bunker Members
+  <licencas@mail.bunker707.com.br>`), `LICENCAS_EMISSOR_EMAIL_PRODUTOR` (o `PRODUCER_EMAIL`),
+  `LICENCAS_PAINEL_TETO_DIARIO` (10), `LICENCAS_EMISSOR_KIDS_ANTERIORES` e os links do Renovar e da loja (vazios). O
+  endereco do Painel sai de `LICENCAS_PAINEL_DOMAIN`. A tabela esta no `docs/20` §8C.5. Desde 11/11/2026 (D40) nao ha
+  Cloudflare Access nem lista de IPs: o Painel entra com e-mail e senha.
+- **O deploy confere tudo no runner, como o Emissor confere ao subir, e para antes de qualquer chamada** se um valor
+  estiver fora do formato. Subir sem o Painel so com `LICENCAS_SEM_PAINEL=sim` (o Painel e o e-mail ficam vazios; a
+  API das Instalacoes funciona igual).
+- **No servidor, o `implantar.sh` escreve no `.env` do compose do Emissor** o Painel, a conta de envio, as chaves
+  anteriores e os links, e os proxies das duas portas iguais ao caminho do Caddy: `EMISSOR_PROXIES_CONFIAVEIS` e
+  `PAINEL_PROXIES_CONFIAVEIS` so com o gateway da rede borda, e o `x-forwarded-for` nas duas. Antes de mexer no que esta
+  no ar, confere os segredos: com o Painel, `segredos/resend-chave` precisa ter a chave. A variavel nova do
+  `.env.example` do Emissor que so traz um exemplo entre `<` e `>` entra vazia, nunca com o exemplo.
+- **O `secrets-licencas`** confere a chave do Resend no formato do Emissor (`re_...`) e, sem o segredo, mantem a chave
+  do servidor ou cria o arquivo vazio que o compose monta.
+- **A conta do produtor no Painel** e criada pelo proprio `deploy-licencas`, na primeira vez (`docs/20` §8C.3, passo
+  11): o Emissor manda o link de uso unico para definir a senha ao e-mail dele.
+
+O que o produtor precisa criar: nada no Cloudflare e nenhuma variavel (D40). A chave do Resend do Emissor e a do
+`docs/20` §8C.5. Testado so com os dubles de `tests/infra-licencas*.test.mjs`; nada rodou de verdade.
+
+### 11.6 Pronto para o primeiro ensaio de comprador (11/11/2026)
+
+Construido e testado so com os dubles (`tests/infra-licencas*.test.mjs`, `tests/infra-teste.test.mjs`,
+`tests/kit-pacote-escola.test.mjs`, `tests/kit-instalar.test.mjs`); nada rodou de verdade:
+
+- **O Painel com e-mail e senha** (`docs/32` D40): o Caddy do `licencas.bunker707.com.br` continua atras do proxy da
+  Cloudflare, com o IP real so das faixas dela, e sem a lista de IPs e sem o Access (os cabecalhos `Cf-Access-*` saem do
+  pedido). O `deploy-licencas` nao pede mais variavel nenhuma (o remetente tem padrao no dominio de envio ja verificado) e
+  cria, na primeira vez, a conta do produtor: o link de senha vai por e-mail, conferido na fila do Emissor; so com
+  `LICENCAS_MOSTRAR_LINK=sim` e o e-mail falhando ele aparece no registro.
+- **A chave do Resend:** nao ha segredo do Resend da producao no repositorio (a da producao viaja em envelope). O
+  `secrets-licencas` passa a aceitar o mesmo envelope: a IA cria a chave so de envio pelo conector e a cifra para a
+  `transfer.pub` do Emissor, que o `provision-licencas` agora imprime. O produtor nao cadastra segredo.
+- **A cerimonia das chaves** (`docs/32` D41): `cerimonia-licencas` (acima e `docs/20` §8C.8).
+- **O pacote da escola de um fundador:** `pacote-escola.yml` (`docs/20` §9D.6), num passo so: a chave publicavel e
+  escolhida no CI (publica), e os segredos da escola nascem so no servidor dela.
+- **O ensaio:** as etapas `teste-*` (`docs/20` §9E) e o passo a passo (`docs/20` §9F).
+- **Os nomes:** o kit nasce com `KIT_NOME=membros`; a nossa producao continua `bunker707` ate a migracao planejada.
+
+Depende do `bunker-licensing`: o Emissor com a entrada de e-mail e senha publicado no GHCR (a PR de la na `main`). Com a
+imagem de antes, o `deploy-licencas` de agora deixa o Emissor sem o Access, e ele nao sobe com o Painel.
+
+### 11.7 A nossa escola ligada ao Emissor, sem colar segredo (11/11/2026)
+
+**Decisao do produtor (11/11/2026):** o teste de cliente novo roda inteiro nos nossos servidores, sem a Vercel: a nossa
+escola de producao e ligada para o teste (`restaurar`), o Emissor e o Painel rodam no `bunker707-licencas` e a escola do
+comprador no `bunker707-teste`. O que faltava era ligar a escola a API interna do Emissor sem ninguem colar a credencial.
+Construido (testado so com os dubles; nada rodou de verdade):
+
+- **O endereco da API interna**, `licencas-interno.bunker707.com.br` (`LICENCAS_INTERNO_DOMAIN`): registro A sem proxy
+  pelo `dns-licencas`; no Caddy do Emissor, so `/interno/v1/*`, so do IPv4 do servidor da escola (lido da API da Hetzner;
+  sem a escola no ar, ninguem) e o resto 403 sem chegar ao Emissor. O `deploy-licencas` escreve os `INTERNO_*` do `.env`
+  do Emissor iguais ao caminho do Caddy e nunca mexe no resumo da credencial (`docs/20` §8C.4).
+- **A etapa `conectar-licencas`** (`docs/20` §8C.9), so da `main`, com `CONFIRMAR=conectar`: a credencial nasce no runner,
+  so o resumo vai ao Emissor, so a credencial vai ao `.env` do app da escola (como o `secrets-membros` grava), e a
+  conferencia de dentro do app pede `GET /interno/v1/planos`. Rodar de novo troca a credencial; depois de cada
+  `restaurar` da escola, rodar de novo (o IP muda; o `restaurar` lembra).
+- **As migracoes na producao:** o `deploy-membros` ja aplica as pendentes (o `deploy.sh` do servidor roda o `migrate.sh`,
+  `supabase db push`, antes de recriar o app); as desta leva (de `202611100001` a `202611130001`: seis no branch da #168 em 8c4b886, sete
+  depois que a dev #169 entrou nele, com a `202611100002_webinars_v7_na_tela` e a `license_state` em `202611100003`) vem
+  depois da ultima que a producao aplicou (`202611010001`) e nenhuma roda fora de transacao. `tests/infra-deploy-migracoes.test.mjs` prende isso.
+- **O passo a passo do teste**, com quem faz o que e o custo de cada passo: `docs/20` §9F.
+
+Em aberto: a virada das vendas para a producao (o webhook da Hotmart e da Ticto apontando para
+`https://membros.bunker707.com.br/api/webhooks/...`, secao 8, item 4) nunca foi feita; para o teste, o produtor cadastra o
+webhook so do produto do Bunker Members (`docs/20` §9F, passo 18) e o desliga se a escola voltar ao snapshot.

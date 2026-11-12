@@ -17,6 +17,7 @@ import { readTodayAttention, readTodayByProduct, readTodayNewAccesses } from "@/
 import { requirePageArea } from "@/server/auth/permissions";
 import { can } from "@/server/auth/roles";
 import { getUserDisplayName } from "@/server/auth/session";
+import { getDisabledFeatures } from "@/server/licensing/guards";
 
 export const metadata: Metadata = {
   title: "Visão geral"
@@ -38,10 +39,12 @@ export default async function AdminTodayPage({ searchParams }: AdminTodayPagePro
   const now = readNow();
   const resolved = readAdminPeriod(params, now);
   const productId = parseAdminProduct(params.produto);
-  const [attention, newAccesses, byProduct] = await Promise.all([
+  const [attention, newAccesses, byProduct, disabledFeatures] = await Promise.all([
     readTodayAttention(productId, now),
     readTodayNewAccesses(resolved, productId),
-    readTodayByProduct(resolved, productId)
+    readTodayByProduct(resolved, productId),
+    // Os modulos desligados na licenca (docs/32 §11.8): o Criar esconde o destino deles. No modo "off", nenhum.
+    getDisabledFeatures()
   ]);
 
   const demo = isAdminDemoEnabled()
@@ -54,7 +57,7 @@ export default async function AdminTodayPage({ searchParams }: AdminTodayPagePro
     byProduct,
     byProductMeta: getByProductMeta(resolved),
     comparisonLabel: resolved.comparisonLabel,
-    createItems: getTodayCreateItems((action) => can(access, action)),
+    createItems: getTodayCreateItems((action) => can(access, action), disabledFeatures),
     dateLabel: formatTodayDate(now),
     demo,
     greeting: `${getGreeting(now)}, ${getUserDisplayName(user).name}`,

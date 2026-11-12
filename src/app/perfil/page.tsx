@@ -10,6 +10,7 @@ import { getAppShellData } from "@/server/db/platform-store";
 import { getProfilePageData } from "@/server/member-area/student-pages";
 import { normalizeProfileTab } from "@/server/member-area/student-pages-model";
 import { getStudentProfileRecord } from "@/server/member-area/student-profile";
+import { WEBINARS_FEATURE, featureVisible } from "@/server/licensing/features";
 
 export const dynamic = "force-dynamic";
 
@@ -40,9 +41,16 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
       accessPreviewMode={accessPreviewMode}
       branding={shellData.branding}
       canUseAccessPreview={shellData.canUseAccessPreview}
+      disabledFeatures={shellData.disabledFeatures}
       student={shellData.student}
     >
-      <ProfileView accessPreviewMode={accessPreviewMode} accesses={accesses} details={details} tab={tab} />
+      <ProfileView
+        accessPreviewMode={accessPreviewMode}
+        accesses={accesses}
+        details={details}
+        tab={tab}
+        webinars={featureVisible(WEBINARS_FEATURE, shellData.disabledFeatures)}
+      />
       <MemberFooter branding={shellData.branding} />
     </AppShell>
   );

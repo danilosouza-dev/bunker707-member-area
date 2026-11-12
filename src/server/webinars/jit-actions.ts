@@ -21,7 +21,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { ActionResult } from "@/lib/action-result";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
-import { runAdminAction } from "@/server/actions/run-action";
+import { runWebinarAction } from "./run-webinar-action";
 import { recordAudit } from "@/server/audit/log";
 import { requireRole } from "@/server/auth/permissions";
 import { getUserDisplayName } from "@/server/auth/session";
@@ -70,7 +70,7 @@ function rulesOf(template: Pick<JitSimulationTemplate, "countRule" | "joins" | "
 
 /** [messaging.write] As regras do "Comeca quando voce entra" e as sessoes que nasceram hoje (dia de Sao Paulo). */
 export async function loadJitSettings(input: { webinarId: string }): Promise<ActionResult<JitSettingsData>> {
-  return runAdminAction("messaging.write", webinarIdSchema, input, async ({ input: data }) =>
+  return runWebinarAction("messaging.write", "leitura", webinarIdSchema, input, async ({ input: data }) =>
     withJitSchema(async () => {
       const db = webinarsDb();
       const row = await requireWebinarRow(db, data.webinarId);
@@ -85,7 +85,7 @@ export async function loadJitSettings(input: { webinarId: string }): Promise<Act
  * sessoes que nascerem depois copiam). Ver o comeco do arquivo.
  */
 export async function saveJitSettings(input: SaveJitSettingsInput): Promise<ActionResult<JitSettingsData>> {
-  return runAdminAction("messaging.write", saveJitSettingsSchema, input, async ({ input: data, user }) => withJitSchema(async () => {
+  return runWebinarAction("messaging.write", "conteudo", saveJitSettingsSchema, input, async ({ input: data, user }) => withJitSchema(async () => {
     const db = webinarsDb();
     const now = new Date();
     const nowMs = now.getTime();

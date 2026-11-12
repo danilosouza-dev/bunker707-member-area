@@ -5,6 +5,7 @@ import { isUuid, noStore, recordCommunicationEvents } from "@/server/communicati
 import { STUDENT_WRITE_LIMIT_MESSAGE, STUDENT_WRITE_RETRY_AFTER_SECONDS, takeStudentWrite } from "@/server/communications/student-write-limit";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // "Aceitar" ou "Recusar" num aviso que pede resposta, tambem para mudar a resposta enquanto a notificacao
 // estiver no sino (v3a, docs/24 §1.5): { response }. Devolve { changed, response }; a mesma resposta nao
@@ -18,6 +19,9 @@ type RouteContext = { params: Promise<{ id: string }> };
 const INVALID_RESPONSE = "Resposta invalida.";
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiSessionUser();
 
   if (auth.response || !auth.user) {

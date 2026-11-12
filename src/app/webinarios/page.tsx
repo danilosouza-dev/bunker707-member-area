@@ -6,6 +6,8 @@ import { normalizeAccessPreviewMode } from "@/lib/access-preview";
 import { requireStudentPageUser } from "@/server/auth/guards";
 import { getAppShellData } from "@/server/db/platform-store";
 import { getWebinarsPageData } from "@/server/webinars/student-queries";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { requireFeaturePage } from "@/server/licensing/guards";
 
 // /webinarios (docs/30 §1.1): Proxima live, Em andamento e Replays, so com o que o aluno pode ver.
 // Sem chave de visita de pagina nesta fase (pageKeyOfRoute nao conhece a rota: nada e gravado).
@@ -23,6 +25,9 @@ type WebinarsPageProps = {
 };
 
 export default async function WebinarsPage({ searchParams }: WebinarsPageProps) {
+  // Sem o modulo dos Webinarios na licenca: 404 antes da sessao e do banco (docs/32 §11.8).
+  await requireFeaturePage(WEBINARS_FEATURE);
+
   const resolvedSearchParams = await searchParams;
   const requestedAccessPreviewMode = normalizeAccessPreviewMode(resolvedSearchParams?.accessPreview);
   const user = await requireStudentPageUser("/webinarios");
@@ -35,6 +40,7 @@ export default async function WebinarsPage({ searchParams }: WebinarsPageProps) 
       accessPreviewMode={accessPreviewMode}
       branding={shellData.branding}
       canUseAccessPreview={shellData.canUseAccessPreview}
+      disabledFeatures={shellData.disabledFeatures}
       student={shellData.student}
     >
       <WebinarsPageView accessPreviewMode={accessPreviewMode} data={data} />

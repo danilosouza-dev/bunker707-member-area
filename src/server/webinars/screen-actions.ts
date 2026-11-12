@@ -1,7 +1,8 @@
 "use server";
 
 // Server Actions da "Na tela" (docs/30 §2.4 e §5.1; especificacao de 10/11/2026, R3, R4, §5.3 e §8): o banner e o QR
-// Code que a equipe poe na frente da turma, pelo console da sessao. Todas por runAdminAction("messaging.write"), com a
+// Code que a equipe poe na frente da turma, pelo console da sessao. Todas por runWebinarAction("messaging.write"), com a
+// classe de acao da licenca e a guarda do modulo (docs/32 §11.3 e §11.8), com a
 // auditoria (quem e quando; nunca o texto nem o link) e a pagina do console revalidada. A mensagem e a enquete fixadas
 // ficam em room-actions.ts (pinMessage, pinPoll, unpinPoll).
 //
@@ -30,7 +31,7 @@
 import { revalidatePath } from "next/cache";
 import { GENERIC_ACTION_ERROR, type ActionResult } from "@/lib/action-result";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
-import { runAdminAction } from "@/server/actions/run-action";
+import { runWebinarAction } from "./run-webinar-action";
 import { recordAudit } from "@/server/audit/log";
 import { decodeWebpDataUrl, readWebpDimensions, webpIsAnimated } from "@/server/catalog/webp";
 import { CommunicationError } from "@/server/communications/db";
@@ -251,7 +252,7 @@ export async function saveScreenItem(input: {
   title?: string | null;
   webinarId: string;
 }): Promise<ActionResult<SavedScreenItem>> {
-  return runAdminAction("messaging.write", screenItemInputSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", screenItemInputSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const webinar = await requireWebinarRow(db, data.webinarId);
 
@@ -316,7 +317,7 @@ export async function saveScreenItem(input: {
  * sessao que ainda mostra; o ja arquivado nao muda nada. Auditoria `webinar.screen_item_archived`.
  */
 export async function archiveScreenItem(input: { id: string }): Promise<ActionResult<ArchivedScreenItem>> {
-  return runAdminAction("messaging.write", screenItemIdSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", screenItemIdSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const row = await fetchScreenItemRow(db, data.id);
 
@@ -365,7 +366,7 @@ export async function archiveScreenItem(input: { id: string }): Promise<ActionRe
  * mais de 200.000 bytes, lado fora de 16 a 1.280 px e WebP animado. Auditoria `webinar.screen_image_uploaded`.
  */
 export async function uploadScreenImage(input: { image: string }): Promise<ActionResult<UploadedScreenImage>> {
-  return runAdminAction("messaging.write", uploadScreenImageSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", uploadScreenImageSchema, input, async ({ input: data, user }) => {
     const bytes = decodeWebpDataUrl(data.image);
 
     if (!bytes || bytes.length === 0) {
@@ -408,7 +409,7 @@ export async function uploadScreenImage(input: { image: string }): Promise<Actio
  * ou de outro webinario: 404. O carimbo da sessao muda por ultimo; auditoria `webinar.screen_shown`.
  */
 export async function showScreenItem(input: { itemId: string; sessionId: string }): Promise<ActionResult<ShownScreenItem>> {
-  return runAdminAction("messaging.write", showScreenItemSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", showScreenItemSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const { session, webinar } = await loadSession(db, data.sessionId);
@@ -479,7 +480,7 @@ export async function showScreenItem(input: { itemId: string; sessionId: string 
  * ultimo; auditoria `webinar.screen_hidden`.
  */
 export async function hideScreenItem(input: { displayId: string }): Promise<ActionResult<HiddenScreenItem>> {
-  return runAdminAction("messaging.write", hideScreenItemSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", hideScreenItemSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const display = await fetchScreenDisplayRow(db, data.displayId);

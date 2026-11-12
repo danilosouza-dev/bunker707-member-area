@@ -5,6 +5,8 @@ import { webinarsDb } from "@/server/webinars/db";
 import { OfferHiddenError, clickStudentOffer } from "@/server/webinars/offer-queries";
 import { offerClickBodySchema } from "@/server/webinars/offer-schemas";
 import { guardRoomRequest, loadRoomContextFor, ok, parseRoomBody, recordAfterReply, roomErrorResponse, type RouteContext } from "@/server/webinars/room-route";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // "Quero participar" (docs/30 §5.1 e M7): POST { sessionId, offerId, offsetMs? } devolve { url } = o checkout da
 // variante do aluno com ?b7=<click_token>; o navegador abre em outra aba (noopener). Na sessao gravada o offset e o do
@@ -26,6 +28,9 @@ function clickErrorResponse(error: unknown) {
 }
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context, { write: true });
   if ("response" in guarded) {
     return guarded.response;

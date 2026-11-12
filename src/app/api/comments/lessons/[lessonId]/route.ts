@@ -6,6 +6,7 @@ import {
 } from "@/server/comments/comment-store";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 type LessonCommentsRouteContext = {
   params: Promise<{ lessonId: string }>;
@@ -43,6 +44,9 @@ export async function GET(request: Request, context: LessonCommentsRouteContext)
 }
 
 export async function POST(request: Request, context: LessonCommentsRouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiUser();
 
   if (auth.response || !auth.user) {

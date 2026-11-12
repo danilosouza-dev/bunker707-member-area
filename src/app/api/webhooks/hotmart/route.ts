@@ -1,4 +1,5 @@
 import { receiveSaleWebhook } from "@/server/payments/webhook-handler";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // Webhook 2.0 da Hotmart (compra aprovada, reembolso, chargeback, assinatura cancelada). O token
 // (hottok) vem no cabecalho X-HOTMART-HOTTOK e e conferido em tempo constante contra o segredo salvo em
@@ -8,5 +9,8 @@ export const runtime = "nodejs";
 export const maxDuration = 30;
 
 export async function POST(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "dever_legal" });
+  if (licenseRefusal) return licenseRefusal;
+
   return receiveSaleWebhook("hotmart", request);
 }

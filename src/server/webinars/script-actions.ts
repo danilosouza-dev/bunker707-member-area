@@ -2,7 +2,7 @@
 
 // Server Actions do Roteiro de chat (docs/30 §2.2 "Roteiro de chat", §5.2, §6.6 D6-b e D6-c; fase 2b): salvar os
 // itens, importar e exportar o CSV de quatro colunas, a transcricao do video (normalizeManualTranscript, a mesma das
-// aulas) e a resolucao das frases ao salvar, e "Soltar agora" no console. Todas passam por runAdminAction
+// aulas) e a resolucao das frases ao salvar, e "Soltar agora" no console. Todas passam por runWebinarAction
 // (messaging.write), gravam recordAudit so com ids e contagens (nunca o texto das mensagens) e revalidam a pagina
 // do webinario e o console. Toda leitura e escrita vai pela service role (webinarsDb) com assertNoDbError no store.
 //
@@ -36,7 +36,7 @@ import { revalidatePath } from "next/cache";
 import type { ActionResult } from "@/lib/action-result";
 import { csvFileName } from "@/lib/csv";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
-import { runAdminAction } from "@/server/actions/run-action";
+import { runWebinarAction } from "./run-webinar-action";
 import { TranscriptError, normalizeManualTranscript } from "@/server/ai/transcripts";
 import { recordAudit } from "@/server/audit/log";
 import { decodeWebpDataUrl, readWebpDimensions, webpIsAnimated } from "@/server/catalog/webp";
@@ -357,7 +357,7 @@ async function withPersonaColumn<T>(work: () => Promise<T>): Promise<T> {
  * resolvidos agora, com a transcricao da gravacao (D6-b).
  */
 export async function saveScriptItems(input: SaveScriptItemsInput): Promise<ActionResult<SavedScript>> {
-  return runAdminAction("messaging.write", saveScriptItemsSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", saveScriptItemsSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const row = await requireScriptWebinar(db, data.webinarId);
     const live = row.kind === "live";
@@ -406,7 +406,7 @@ export async function saveScriptItems(input: SaveScriptItemsInput): Promise<Acti
  * da linha e nao entram.
  */
 export async function importScriptCsv(input: { csv: string; replace?: boolean; webinarId: string }): Promise<ActionResult<ImportedScript>> {
-  return runAdminAction("messaging.write", importScriptCsvSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", importScriptCsvSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     // R8: a Live ao vivo tambem importa (as linhas entram "Num minuto da live", com o Tempo em minutos; a foto dos itens
     // que ficam nao muda). Sem a 202611100002, a live nao grava roteiro (scriptAvatarsFor).
@@ -464,7 +464,7 @@ export async function importScriptCsv(input: { csv: string; replace?: boolean; w
  * Live ao vivo, o Tempo em minuto:segundo da live).
  */
 export async function exportScriptCsv(input: { webinarId: string }): Promise<ActionResult<ExportedCsv>> {
-  return runAdminAction("messaging.write", resolveScriptPhrasesSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "leitura", resolveScriptPhrasesSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const row = await requireWebinarRow(db, data.webinarId);
     const items = (await listScriptItemRows(db, row.id)).map(scriptItemFromRow);
@@ -483,7 +483,7 @@ export async function exportScriptCsv(input: { webinarId: string }): Promise<Act
  * viram a persona `team`; o resto, `student`.
  */
 export async function exportSessionChatCsv(input: { sessionId: string }): Promise<ActionResult<ExportedCsv>> {
-  return runAdminAction("messaging.write", sessionIdInputSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "leitura", sessionIdInputSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const session = await fetchSessionRow(db, data.sessionId);
 
@@ -518,7 +518,7 @@ export async function exportSessionChatCsv(input: { sessionId: string }): Promis
  * lesson_transcripts) e confere de novo as frases do roteiro.
  */
 export async function saveTranscript(input: { format?: WebinarTranscriptFormat; language?: string; recordingId?: string; text: string; webinarId: string }): Promise<ActionResult<SavedTranscript>> {
-  return runAdminAction("messaging.write", saveTranscriptSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", saveTranscriptSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const row = await requireSimulatedWebinar(db, data.webinarId);
     const recordings = await listRecordingRows(db, [row.id]);
@@ -583,7 +583,7 @@ export async function saveTranscript(input: { format?: WebinarTranscriptFormat; 
 
 /** [messaging.write] Confere de novo as frases "Quando o apresentador diz" com a transcricao que existe hoje. */
 export async function resolveScriptPhrases(input: { webinarId: string }): Promise<ActionResult<ResolvedScript>> {
-  return runAdminAction("messaging.write", resolveScriptPhrasesSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", resolveScriptPhrasesSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const row = await requireSimulatedWebinar(db, data.webinarId);
     const { transcript } = await loadTranscriptFor(db, row.id);
@@ -611,7 +611,7 @@ export async function resolveScriptPhrases(input: { webinarId: string }): Promis
  * como mensagem `scripted` da persona. O mesmo item na mesma sessao entra uma vez so (chave unica): repetir da 409.
  */
 export async function fireScriptItem(input: { itemId: string; sessionId: string }): Promise<ActionResult<{ message: ChatMessage }>> {
-  return runAdminAction("messaging.write", fireScriptItemSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", fireScriptItemSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const row = await fetchSessionRow(db, data.sessionId);
@@ -714,7 +714,7 @@ function checkPersonaPhotoBytes(bytes: Uint8Array): { height: number; width: num
  * a pasta propria) e devolve so o caminho e as medidas, nunca um endereco. Auditoria `webinar.persona_photo_uploaded`.
  */
 export async function uploadPersonaPhoto(input: { image: string }): Promise<ActionResult<UploadedPersonaPhoto>> {
-  return runAdminAction("messaging.write", uploadPersonaPhotoSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", uploadPersonaPhotoSchema, input, async ({ input: data, user }) => {
     const bytes = decodeWebpDataUrl(data.image);
 
     if (!bytes || bytes.length === 0) {
@@ -757,7 +757,7 @@ export async function uploadPersonaPhoto(input: { image: string }): Promise<Acti
  * Auditoria `webinar.script_comment_sent` (sem o texto).
  */
 export async function sendScriptedComment(input: ScriptCommentInput): Promise<ActionResult<SentScriptedComment>> {
-  return runAdminAction("messaging.write", scriptCommentSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", scriptCommentSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const row = await fetchSessionRow(db, data.sessionId);
@@ -864,7 +864,7 @@ export async function sendScriptedComment(input: ScriptCommentInput): Promise<Ac
  * fica so de leitura. Auditoria `webinar.script_item_added` (sem o texto).
  */
 export async function saveScriptComment(input: ScriptCommentInput): Promise<ActionResult<SavedScriptComment>> {
-  return runAdminAction("messaging.write", scriptCommentSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", scriptCommentSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const session = await fetchSessionRow(db, data.sessionId);
 

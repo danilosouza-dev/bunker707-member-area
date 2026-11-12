@@ -41,7 +41,9 @@ const TAB_NOTES: Record<CommunicationTab, string> = {
   webinarios: " Os webinários chegam com esta tela."
 };
 
+// A aba de um modulo leva o modulo: SectionTabs a esconde quando a licenca nao o liga (docs/32 §11.8).
 const TAB_ITEMS = COMMUNICATION_TABS.map((tab) => ({
+  feature: COMMUNICATION_TAB_META[tab].feature,
   href: COMMUNICATION_TAB_META[tab].href,
   label: COMMUNICATION_TAB_META[tab].label
 }));

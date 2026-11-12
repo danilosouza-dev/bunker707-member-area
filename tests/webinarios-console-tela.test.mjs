@@ -705,12 +705,13 @@ test("paginas e rota: a pagina do console com as guardas e a migracao pendente; 
 
   const room = stripComments(read("src/server/webinars/room-actions.ts"));
   assert.match(room, /^"use server";/);
-  assert.match(room, /runAdminAction\("messaging\.publish", sessionIdInputSchema, input, async[\s\S]*?openSession\(db, row\.id, now\)/, "abrir pede messaging.publish");
-  assert.match(room, /runAdminAction\("messaging\.publish", sessionIdInputSchema, input, async[\s\S]*?finishSession\(db, row\.id, now\)/, "encerrar pede messaging.publish");
-  assert.match(room, /runAdminAction\("messaging\.publish", saveSimulationSchema/);
-  assert.match(room, /runAdminAction\("messaging\.publish", removeStudentMessagesSchema/);
-  assert.match(room, /runAdminAction\("messaging\.write", moderateMessageSchema/);
-  assert.match(room, /runAdminAction\("messaging\.write", createReplaySessionSchema/);
+  // Pelo esqueleto dos Webinarios (runWebinarAction), com a classe de cada acao (docs/32 §11.3).
+  assert.match(room, /runWebinarAction\("messaging\.publish", "atendimento", sessionIdInputSchema, input, async[\s\S]*?openSession\(db, row\.id, now\)/, "abrir pede messaging.publish");
+  assert.match(room, /runWebinarAction\("messaging\.publish", "atendimento", sessionIdInputSchema, input, async[\s\S]*?finishSession\(db, row\.id, now\)/, "encerrar pede messaging.publish");
+  assert.match(room, /runWebinarAction\("messaging\.publish", "conteudo", saveSimulationSchema/);
+  assert.match(room, /runWebinarAction\("messaging\.publish", "dever_legal", removeStudentMessagesSchema/);
+  assert.match(room, /runWebinarAction\("messaging\.write", "atendimento", moderateMessageSchema/);
+  assert.match(room, /runWebinarAction\("messaging\.write", "conteudo", createReplaySessionSchema/);
   for (const action of ["webinar.session_opened", "webinar.session_ended", "webinar.team_message", "webinar.moderated", "webinar.chat_mode", "webinar.polls_saved", "webinar.poll_launched", "webinar.poll_closed", "webinar.question_answered", "webinar.question_status", "webinar.simulation_saved", "webinar.replay_created", "webinar.replay_cancelled", "webinar.student_messages_removed"]) {
     assert.match(room, new RegExp(`action: "${action.replace(".", "\\.")}"`), action);
   }
@@ -719,8 +720,8 @@ test("paginas e rota: a pagina do console com as guardas e a migracao pendente; 
   assert.match(script, /^"use server";/);
   // Adendo de 10/11/2026 (R8 e R9): o "Novo comentário" (Enviar agora, Guardar na lista) e a foto de quem comenta pedem o
   // mesmo messaging.write do Soltar agora (o apresentador, o co-apresentador e a equipe).
-  assert.equal(count(script, /runAdminAction\("messaging\.write"/g), 10, "as dez acoes do roteiro pedem messaging.write");
-  assert.doesNotMatch(script, /runAdminAction\("messaging\.publish"/);
+  assert.equal(count(script, /runWebinarAction\("messaging\.write"/g), 10, "as dez acoes do roteiro pedem messaging.write");
+  assert.doesNotMatch(script, /run(?:Admin|Webinar)Action\("messaging\.publish"/);
   for (const action of [
     "webinar.script_saved",
     "webinar.script_imported",

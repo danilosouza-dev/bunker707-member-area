@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { generateAITextWithFallback, getAIProviderRuntimeCandidateForConnection } from "@/server/ai/provider-pool";
 import { requireApiRole } from "@/server/auth/permissions";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 type RouteContext = { params: Promise<{ connectionId: string }> };
 
@@ -11,6 +12,9 @@ export const maxDuration = 60;
 export const revalidate = 0;
 
 export async function POST(_request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "leitura" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiRole("settings.ai");
 
   if (auth.response || !auth.user) return auth.response;

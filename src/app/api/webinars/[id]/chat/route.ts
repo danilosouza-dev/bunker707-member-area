@@ -5,6 +5,8 @@ import { readChatWindow, readRecentChat, webinarsDb } from "@/server/webinars/ro
 import { badRequest, guardRoomRequest, loadRoomContextFor, offsetMsFieldSchema, ok, parseRoomBody, recordAfterReply, roomErrorResponse, type RouteContext } from "@/server/webinars/room-route";
 import { postStudentChat, removeStudentChat } from "@/server/webinars/room-writes";
 import { webinarAssistantEnabled } from "@/server/webinars/v4-env";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // O chat da Sala (docs/30 §5.1, §6.6 e §8.5). GET ?sessao=&from=&to= devolve a janela por offset (a linha mestre ja
 // deslocada pela ancora + as linhas da sessao, as pendentes so do proprio aluno); GET ?sessao=&since=&after= devolve as
@@ -30,6 +32,9 @@ export const revalidate = 0;
 const postSchema = chatPostBodySchema.extend({ offsetMs: offsetMsFieldSchema });
 
 export async function GET(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context);
   if ("response" in guarded) {
     return guarded.response;
@@ -58,6 +63,9 @@ export async function GET(request: Request, context: RouteContext) {
 }
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context, { write: true });
   if ("response" in guarded) {
     return guarded.response;
@@ -94,6 +102,9 @@ export async function POST(request: Request, context: RouteContext) {
 }
 
 export async function DELETE(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "dever_legal", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context, { write: true });
   if ("response" in guarded) {
     return guarded.response;

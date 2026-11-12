@@ -217,6 +217,7 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
       bannerCorners={pageHero.corners}
       branding={shellData.branding}
       canUseAccessPreview={shellData.canUseAccessPreview}
+      disabledFeatures={shellData.disabledFeatures}
       student={shellData.student}
     >
       {/* data-member-banner: a escolha do produto (Detalhes > Cantos do banner) vence a da area so neste banner;

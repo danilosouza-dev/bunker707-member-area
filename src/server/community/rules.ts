@@ -19,7 +19,7 @@ const BLOCKED_WORD_COLUMNS = "id,word,message,active,created_at,updated_at";
 
 /** [community.moderate] Acrescenta uma palavra ou termo (ativo). Duplicado -> 409. */
 export async function createBlockedWord(input: BlockedWordInput): Promise<ActionResult<AdminBlockedWordRule>> {
-  return runAdminAction("community.moderate", blockedWordSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("community.moderate", "atendimento", blockedWordSchema, input, async ({ input: data, user }) => {
     const word = data.word.trim();
     const normalizedWord = normalizeCommentForModeration(word);
 
@@ -53,7 +53,7 @@ export async function createBlockedWord(input: BlockedWordInput): Promise<Action
 
 /** [community.moderate] Liga ou desliga uma palavra sem apagar. */
 export async function toggleBlockedWord(input: ToggleBlockedWordInput): Promise<ActionResult<AdminBlockedWordRule>> {
-  return runAdminAction("community.moderate", toggleBlockedWordSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("community.moderate", "atendimento", toggleBlockedWordSchema, input, async ({ input: data, user }) => {
     const result = await communityDb()
       .from("lesson_comment_blocked_words")
       .update({ active: data.active, updated_by: user.id })
@@ -74,7 +74,7 @@ export async function toggleBlockedWord(input: ToggleBlockedWordInput): Promise<
 
 /** [community.moderate] Exclui; a tela oferece "Desfazer" recriando a mesma palavra. */
 export async function deleteBlockedWord(input: DeleteBlockedWordInput): Promise<ActionResult<{ id: string }>> {
-  return runAdminAction("community.moderate", deleteBlockedWordSchema, input, async ({ input: data }) => {
+  return runAdminAction("community.moderate", "atendimento", deleteBlockedWordSchema, input, async ({ input: data }) => {
     const result = await communityDb()
       .from("lesson_comment_blocked_words")
       .delete()

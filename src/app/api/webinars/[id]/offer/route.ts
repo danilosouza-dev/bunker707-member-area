@@ -2,6 +2,8 @@ import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { webinarsDb } from "@/server/webinars/db";
 import { loadStudentOffer } from "@/server/webinars/offer-queries";
 import { guardRoomRequest, loadRoomContextFor, ok, roomErrorResponse, sessionIdOf, type RouteContext } from "@/server/webinars/room-route";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // O card da Oferta na sala (docs/30 §1.6, §5.1, §8.6 e M7): GET ?sessao= devolve { offer, serverTime, pollMs } com a
 // variante do aluno e a janela no relogio do video, nunca o link do checkout (sai so no POST .../offer-click). So na
@@ -14,6 +16,9 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context);
   if ("response" in guarded) {
     return guarded.response;

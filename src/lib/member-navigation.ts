@@ -3,7 +3,12 @@
 // icone Lucide pela chave `key`.
 //
 // Toda pagina listada aqui exige sessao (requireStudentPageUser ou requirePageUser na pagina e o prefixo
-// em proxy.ts).
+// em proxy.ts). O item de um modulo vendido a parte diz o modulo (`feature`): sem ele na licenca, o item some do
+// menu (docs/32 §11.8; quem esconde e member-shell-model.ts, com a lista que o servidor manda ao AppShell). O item de
+// vendedor (`seller`, Minhas licencas do Bunker Members, docs/32 §2.4) so aparece quando o servidor diz que a pessoa e
+// compradora, com as paginas de vendedor ligadas (a nossa escola); na copia do comprador, nunca.
+
+import { WEBINARS_FEATURE, type FeatureKey } from "../server/licensing/features";
 
 export const MEMBER_ROUTES = {
   changePassword: "/alterar-senha",
@@ -11,6 +16,7 @@ export const MEMBER_ROUTES = {
   favorites: "/favoritos",
   home: "/",
   journey: "/minha-jornada",
+  licenses: "/minhas-licencas",
   materials: "/materiais",
   profile: "/perfil",
   purchases: "/minhas-compras",
@@ -26,6 +32,7 @@ export type MemberNavigationKey =
   | "journey"
   | "continueWatching"
   | "purchases"
+  | "licenses"
   | "favorites"
   | "materials"
   | "webinars"
@@ -35,9 +42,13 @@ export type MemberNavigationKey =
 export type MemberNavigationItem = {
   /** Texto curto para leitores de tela e tooltip quando o menu estiver recolhido. */
   description: string;
+  /** Modulo da licenca de que o destino faz parte; sem ele ligado, o item some. Sem o campo, o item e do nucleo. */
+  feature?: FeatureKey;
   href: MemberRouteHref;
   key: MemberNavigationKey;
   label: string;
+  /** Item de vendedor: so para quem comprou o Bunker Members, na nossa escola (o servidor manda o sinal ao AppShell). */
+  seller?: true;
 };
 
 export type MemberNavigationGroup = {
@@ -54,9 +65,10 @@ export const MEMBER_NAVIGATION_GROUPS: readonly MemberNavigationGroup[] = [
       { description: "Seu progresso em cada curso", key: "journey", label: "Minha jornada", href: "/minha-jornada" },
       { description: "Aulas que você começou", key: "continueWatching", label: "Continue assistindo", href: "/continue-assistindo" },
       { description: "Tudo que você comprou ou recebeu", key: "purchases", label: "Minhas compras", href: "/minhas-compras" },
+      { description: "Suas licenças do Bunker Members", key: "licenses", label: "Minhas licenças", href: "/minhas-licencas", seller: true },
       { description: "Cursos, módulos e aulas salvos", key: "favorites", label: "Favoritos", href: "/favoritos" },
       { description: "Arquivos de apoio das suas aulas", key: "materials", label: "Materiais", href: "/materiais" },
-      { description: "Lives ao vivo e gravadas da escola", key: "webinars", label: "Webinários", href: "/webinarios" }
+      { description: "Lives ao vivo e gravadas da escola", feature: WEBINARS_FEATURE, key: "webinars", label: "Webinários", href: "/webinarios" }
     ],
     label: "Estudar"
   },

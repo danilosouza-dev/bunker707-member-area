@@ -2,7 +2,7 @@
 
 // Server Actions da Oferta (docs/30 §2.2, §2.4, §8.6 e M7; fase 4b): o card Oferta do editor (loadOfferEditor,
 // saveOffer, archiveOffer) e o painel Oferta do console (loadOfferConsole a cada 5 s, showOfferNow, hideOffer). Todas
-// com messaging.write por runAdminAction; as escritas gravam recordAudit so com ids e contagens (nunca o texto das
+// com messaging.write por runWebinarAction; as escritas gravam recordAudit so com ids e contagens (nunca o texto das
 // variantes nem o link) e derrubam o cache do relatorio (invalidateWebinars). O relogio e sempre o do servidor: o
 // "Mostrar agora" aparece no segundo do video de agora (hora marcada da sessao gravada) e so na sessao gravada que
 // ainda nao terminou. Banco sem a 202610300003: a leitura devolve { pendingMigration } e a tela mostra o aviso.
@@ -11,7 +11,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { ActionResult } from "@/lib/action-result";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
-import { runAdminAction } from "@/server/actions/run-action";
+import { runWebinarAction } from "./run-webinar-action";
 import { recordAudit } from "@/server/audit/log";
 import { listProductOptions } from "@/server/catalog/queries";
 import type { ProductOption } from "@/server/catalog/types";
@@ -61,7 +61,7 @@ async function withOfferTables<T>(write: () => Promise<T>): Promise<T> {
 
 /** [messaging.write] A Oferta do webinario (nula quando ainda nao existe) e os produtos do seletor. */
 export async function loadOfferEditor(input: { webinarId: string }): Promise<ActionResult<OfferEditorData>> {
-  return runAdminAction("messaging.write", webinarIdSchema, input, async ({ input: data }) => {
+  return runWebinarAction("messaging.write", "leitura", webinarIdSchema, input, async ({ input: data }) => {
     const db = webinarsDb();
     const webinar = await requireWebinarRow(db, data.webinarId);
     let offer: WebinarOffer | null;
@@ -88,7 +88,7 @@ export async function loadOfferEditor(input: { webinarId: string }): Promise<Act
  * offer-schemas.ts confere letras unicas, link https e, ligada, pelo menos uma variante ligada.
  */
 export async function saveOffer(input: { draft: OfferDraftInput; webinarId: string }): Promise<ActionResult<WebinarOffer>> {
-  return runAdminAction("messaging.write", saveOfferSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", saveOfferSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const webinar = await requireWebinarRow(db, data.webinarId);
     assertWebinarNotArchived(webinar);
@@ -120,7 +120,7 @@ export async function saveOffer(input: { draft: OfferDraftInput; webinarId: stri
 
 /** [messaging.write] Arquiva a Oferta: o card some da sala; cliques, janelas e compras ficam no relatorio. */
 export async function archiveOffer(input: { offerId: string; webinarId: string }): Promise<ActionResult<{ archived: true; offerId: string }>> {
-  return runAdminAction("messaging.write", archiveOfferSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "dever_legal", archiveOfferSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const offer = await withOfferTables(() => fetchOfferById(db, data.offerId));
     if (!offer || offer.webinarId !== data.webinarId) {
@@ -150,7 +150,7 @@ export async function archiveOffer(input: { offerId: string; webinarId: string }
 
 /** [messaging.write] A janela da oferta nesta sessao e os cliques por variante, relidos a cada 5 s. */
 export async function loadOfferConsole(input: { sessionId: string }): Promise<ActionResult<OfferConsoleData>> {
-  return runAdminAction("messaging.write", sessionIdSchema, input, async ({ input: data }) => {
+  return runWebinarAction("messaging.write", "leitura", sessionIdSchema, input, async ({ input: data }) => {
     try {
       return { pendingMigration: false as const, view: await loadConsoleOffer(webinarsDb(), { sessionId: data.sessionId }) };
     } catch (error) {
@@ -180,7 +180,7 @@ async function requireConsoleOffer(input: { offerId: string; sessionId: string }
  * `visibleMinutes` depois (ou no fim). Mostrar de novo reabre a janela da sessao com o prazo da primeira vez.
  */
 export async function showOfferNow(input: { offerId: string; sessionId: string }): Promise<ActionResult<ConsoleOfferView>> {
-  return runAdminAction("messaging.write", offerDisplayActionSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", offerDisplayActionSchema, input, async ({ input: data, user }) => {
     const { db, offer, session } = await requireConsoleOffer(data);
     const nowMs = Date.now();
     const offsetMs = offerOffsetMs(session, nowMs);
@@ -241,7 +241,7 @@ export async function showOfferNow(input: { offerId: string; sessionId: string }
 
 /** [messaging.write] "Esconder": a janela da sessao fecha no segundo do video de agora. */
 export async function hideOffer(input: { offerId: string; sessionId: string }): Promise<ActionResult<ConsoleOfferView>> {
-  return runAdminAction("messaging.write", offerDisplayActionSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "dever_legal", offerDisplayActionSchema, input, async ({ input: data, user }) => {
     const { db, offer, session } = await requireConsoleOffer(data);
     const nowMs = Date.now();
     const offsetMs = offerOffsetMs(session, nowMs);

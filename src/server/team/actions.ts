@@ -130,7 +130,7 @@ export type TeamMemberAdded = {
 
 /** [settings.team] Adiciona alguem a equipe com uma ou mais funcoes e, se quiser, permissoes extras. */
 export async function addTeamMember(raw: unknown): Promise<ActionResult<TeamMemberAdded>> {
-  return runAdminAction("settings.team", addTeamMemberSchema, raw, async ({ input, user }) => {
+  return runAdminAction("settings.team", "conteudo", addTeamMemberSchema, raw, async ({ input, user }) => {
     const db = teamDb();
     const stored = storedAccessFor(input, await loadReferencedFunctions(db, input.functions));
     const email = normalizeEmail(input.email);
@@ -184,7 +184,7 @@ export async function addTeamMember(raw: unknown): Promise<ActionResult<TeamMemb
 
 /** [settings.team] Muda funcoes, extras ou cursos de alguem. */
 export async function updateTeamMember(raw: unknown): Promise<ActionResult<{ updatedAt: string }>> {
-  return runAdminAction("settings.team", updateTeamMemberSchema, raw, async ({ input, user }) => {
+  return runAdminAction("settings.team", "dever_legal", updateTeamMemberSchema, raw, async ({ input, user }) => {
     const db = teamDb();
     const current = await fetchTeamRoleRow(db, input.userId);
 
@@ -225,7 +225,7 @@ export async function updateTeamMember(raw: unknown): Promise<ActionResult<{ upd
 
 /** [settings.team] Tira a pessoa da equipe. A conta continua (vira uma conta comum, de aluno). */
 export async function removeTeamMember(raw: unknown): Promise<ActionResult<{ userId: string }>> {
-  return runAdminAction("settings.team", teamMemberIdSchema, raw, async ({ input, user }) => {
+  return runAdminAction("settings.team", "dever_legal", teamMemberIdSchema, raw, async ({ input, user }) => {
     const db = teamDb();
     const current = await fetchTeamRoleRow(db, input.userId);
 
@@ -264,7 +264,7 @@ export async function removeTeamMember(raw: unknown): Promise<ActionResult<{ use
  * pede uma senha nova, e quem ja entra usa "Esqueci minha senha" no login se precisar.
  */
 export async function resendTeamInvite(raw: unknown): Promise<ActionResult<{ userId: string }>> {
-  return runAdminAction("settings.team", teamMemberIdSchema, raw, async ({ input, user }) => {
+  return runAdminAction("settings.team", "atendimento", teamMemberIdSchema, raw, async ({ input, user }) => {
     const db = teamDb();
     const current = await fetchTeamRoleRow(db, input.userId);
 
@@ -297,7 +297,7 @@ export async function resendTeamInvite(raw: unknown): Promise<ActionResult<{ use
 
 /** [settings.team] Cria uma funcao com nome (pacote de permissoes, algumas podem valer so nos cursos). */
 export async function createTeamFunction(raw: unknown): Promise<ActionResult<{ id: string; updatedAt: string }>> {
-  return runAdminAction("settings.team", createTeamFunctionSchema, raw, async ({ input, user }) => {
+  return runAdminAction("settings.team", "conteudo", createTeamFunctionSchema, raw, async ({ input, user }) => {
     const db = teamDb();
     const grants = storedFunctionGrants(input.actions, input.scopedActions);
     const row = await insertTeamFunction(db, { ...grants, createdBy: user.id, description: input.description, name: input.name });
@@ -317,7 +317,7 @@ export async function createTeamFunction(raw: unknown): Promise<ActionResult<{ i
 
 /** [settings.team] Muda uma funcao: vale para todo mundo que a tem, na proxima requisicao de cada um. */
 export async function updateTeamFunction(raw: unknown): Promise<ActionResult<{ updatedAt: string }>> {
-  return runAdminAction("settings.team", updateTeamFunctionSchema, raw, async ({ input, user }) => {
+  return runAdminAction("settings.team", "dever_legal", updateTeamFunctionSchema, raw, async ({ input, user }) => {
     const db = teamDb();
     const current = await fetchTeamFunctionRow(db, input.id);
 
@@ -352,7 +352,7 @@ export async function updateTeamFunction(raw: unknown): Promise<ActionResult<{ u
 
 /** [settings.team] Exclui uma funcao que ninguem tem mais. */
 export async function deleteTeamFunction(raw: unknown): Promise<ActionResult<{ id: string }>> {
-  return runAdminAction("settings.team", teamFunctionIdSchema, raw, async ({ input, user }) => {
+  return runAdminAction("settings.team", "dever_legal", teamFunctionIdSchema, raw, async ({ input, user }) => {
     const db = teamDb();
     const current = await fetchTeamFunctionRow(db, input.id);
 

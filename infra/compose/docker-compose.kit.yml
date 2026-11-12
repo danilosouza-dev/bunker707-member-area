@@ -1,0 +1,337 @@
+# Kit do produto licenciado (docs/32 §11.6 e §11.7): o compose que vai no servidor do comprador.
+#
+# O stack da nossa producao (docker-compose.yml, nesta pasta) reduzido ao que o app usa: o Postgres, o Auth, o
+# PostgREST, o Storage com o redimensionador de imagens (imgproxy), o gateway (Envoy), o app e o Caddy. Ficam fora o
+# Realtime, o Supavisor e o Edge Runtime, que o app nao usa (D30 e A29), e o Studio e o postgres-meta (D14).
+# O que muda em relacao a producao:
+#   - as imagens de terceiros vao fixadas pelo resumo (tag@sha256): todo comprador baixa exatamente a mesma coisa. As
+#     tags sao as da producao (a guarda em tests/kit-compose.test.mjs confere); trocar uma versao e trocar a tag na
+#     producao e rodar `node infra/kit/fixar-imagens.mjs`, que resolve os resumos de novo;
+#   - os nomes (o projeto e os containers) vem de KIT_NOME, do infra/kit/kit.conf (A10), que os comandos do kit
+#     exportam (infra/kit/lib-kit.sh). Sem KIT_NOME o compose para, em vez de criar um segundo projeto sobre as mesmas
+#     pastas do banco;
+#   - o app fala com o Supabase pela rede interna (SUPABASE_INTERNAL_URL = api-gw:8000). O endereco publico fica para o
+#     navegador, os links e o nome do cookie da sessao; DNS ou certificado errados nao derrubam mais o banco do app;
+#   - o Auth baixa os modelos de e-mail do Caddy pela rede interna (a porta 8088 nao e publicada);
+#   - o Caddy tira o certificado direto (Let's Encrypt, com o ZeroSSL de reserva pelo mesmo ACME_EMAIL), guarda na
+#     pasta do servidor que sobrevive a uma reinstalacao (KIT_PASTA_CERTIFICADOS) e so confia na Cloudflare com
+#     CADDY_FRENTE=cloudflare (caddy/frente/);
+#   - so o Caddy publica porta (80 e 443). O banco e o gateway ficam so na rede interna: o migrador, o backup e a
+#     restauracao do kit entram no banco por `docker compose exec`.
+# As pastas de dados (./volumes/db/data, ./volumes/storage), os scripts de inicio do banco, a configuracao do Envoy e os
+# modelos de e-mail sao os da producao, nesta mesma pasta: o restore.sh, o backup e o migrador do kit leem daqui.
+#
+# Uso: pelos comandos do kit (infra/kit/membros), que exportam KIT_NOME e KIT_PASTA_CERTIFICADOS. O .env desta pasta e
+# o arquivo de segredos da instalacao (so o administrador le) e nunca vai para o repositorio.
+
+name: ${KIT_NOME:?falta KIT_NOME; rode pelos comandos do kit, que o leem de infra/kit/kit.conf}
+
+services:
+
+  # Gateway da API, com a configuracao da producao (volumes/api/envoy). As rotas do Realtime, das Functions, do Studio e
+  # do meta ficam sem destino (503) e nunca recebem pedido: o Caddy so encaminha o Auth, o PostgREST e o Storage.
+  api-gw:
+    container_name: ${KIT_NOME:?falta KIT_NOME}-envoy
+    image: envoyproxy/envoy:v1.39.1@sha256:57e14a549d7bd43c8d3f6d03e8cfa653e037d4b38e133acd9b54f38c524401b4
+    restart: unless-stopped
+    networks:
+      default:
+        aliases:
+          - envoy
+          - kong
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/127.0.0.1/8000'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - ./volumes/api/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ./volumes/api/envoy/cds.yaml:/etc/envoy/cds.yaml:ro
+      - ./volumes/api/envoy/lds.template.yaml:/etc/envoy/lds.template.yaml:ro
+      - ./volumes/api/envoy/docker-entrypoint.sh:/docker-entrypoint.sh:ro
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
+      ANON_KEY_ASYMMETRIC: ${ANON_KEY_ASYMMETRIC:-}
+      SERVICE_ROLE_KEY_ASYMMETRIC: ${SERVICE_ROLE_KEY_ASYMMETRIC:-}
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+    entrypoint: ["/bin/sh", "/docker-entrypoint.sh"]
+
+  auth:
+    container_name: ${KIT_NOME:?falta KIT_NOME}-auth
+    image: supabase/gotrue:v2.197.0@sha256:1736a63078f5922b198c4cbe50f80ab9a2d3b54fe8b7b6cfb2e9dc5dbbc12c6b
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL}
+
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+
+      GOTRUE_SITE_URL: ${SITE_URL}
+      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS}
+      # Plataforma fechada: sem cadastro publico. Contas entram pelo admin ou por convite.
+      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP}
+
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_KEYS: ${JWT_KEYS:-[]}
+      GOTRUE_JWT_ISSUER: ${API_EXTERNAL_URL}
+
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: ${ENABLE_EMAIL_SIGNUP}
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: ${ENABLE_ANONYMOUS_USERS}
+      GOTRUE_MAILER_AUTOCONFIRM: ${ENABLE_EMAIL_AUTOCONFIRM}
+      GOTRUE_PASSWORD_MIN_LENGTH: ${AUTH_PASSWORD_MIN_LENGTH:-8}
+      GOTRUE_RATE_LIMIT_EMAIL_SENT: ${AUTH_RATE_LIMIT_EMAIL_SENT:-30}
+
+      # E-mail transacional pelo provedor do comprador (o Resend na primeira fase; a porta sai do arquivo de segredos:
+      # 587, ou 2587 e 2465 onde o provedor do servidor bloqueia a 587).
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}
+      GOTRUE_SMTP_HOST: ${SMTP_HOST}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT}
+      GOTRUE_SMTP_USER: ${SMTP_USER}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME}
+      GOTRUE_MAILER_URLPATHS_INVITE: ${MAILER_URLPATHS_INVITE}
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: ${MAILER_URLPATHS_CONFIRMATION}
+      GOTRUE_MAILER_URLPATHS_RECOVERY: ${MAILER_URLPATHS_RECOVERY}
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: ${MAILER_URLPATHS_EMAIL_CHANGE}
+      # Modelos em portugues (volumes/auth-templates), servidos pelo Caddy so na rede interna (caddy/Caddyfile.kit,
+      # porta 8088): nem o DNS nem o certificado do endereco publico entram no envio. Se o download falha, o Auth manda
+      # o texto padrao dele, em ingles, sem erro no registro: a conferencia final (infra/scripts/smoke.sh) baixa um
+      # modelo de dentro deste container.
+      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: http://caddy:8088/auth-templates/confirmation.html
+      GOTRUE_MAILER_TEMPLATES_INVITE: http://caddy:8088/auth-templates/invite.html
+      GOTRUE_MAILER_TEMPLATES_MAGIC_LINK: http://caddy:8088/auth-templates/magic_link.html
+      GOTRUE_MAILER_TEMPLATES_EMAIL_CHANGE: http://caddy:8088/auth-templates/email_change.html
+      GOTRUE_MAILER_TEMPLATES_RECOVERY: http://caddy:8088/auth-templates/recovery.html
+      GOTRUE_MAILER_TEMPLATES_REAUTHENTICATION: http://caddy:8088/auth-templates/reauthentication.html
+      # Assuntos sem marca nossa: a escola troca pelo arquivo de segredos (AUTH_SUBJECT_*).
+      GOTRUE_MAILER_SUBJECTS_CONFIRMATION: ${AUTH_SUBJECT_CONFIRMATION:-Confirme seu e-mail}
+      GOTRUE_MAILER_SUBJECTS_INVITE: ${AUTH_SUBJECT_INVITE:-Crie sua senha de acesso}
+      GOTRUE_MAILER_SUBJECTS_MAGIC_LINK: ${AUTH_SUBJECT_MAGIC_LINK:-Seu link de acesso}
+      GOTRUE_MAILER_SUBJECTS_EMAIL_CHANGE: ${AUTH_SUBJECT_EMAIL_CHANGE:-Confirme a troca de e-mail}
+      GOTRUE_MAILER_SUBJECTS_RECOVERY: ${AUTH_SUBJECT_RECOVERY:-Redefina sua senha}
+      GOTRUE_MAILER_SUBJECTS_REAUTHENTICATION: ${AUTH_SUBJECT_REAUTHENTICATION:-Seu codigo de confirmacao}
+
+      GOTRUE_EXTERNAL_PHONE_ENABLED: ${ENABLE_PHONE_SIGNUP}
+      GOTRUE_SMS_AUTOCONFIRM: ${ENABLE_PHONE_AUTOCONFIRM}
+
+  rest:
+    container_name: ${KIT_NOME:?falta KIT_NOME}-rest
+    image: postgrest/postgrest:v14.18@sha256:c7cd7e265a85b05248abf53f4473fcec7e327c282d0bd0cf60f1551996d09fcf
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "postgrest", "--ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
+      PGRST_DB_MAX_ROWS: ${PGRST_DB_MAX_ROWS:-1000}
+      PGRST_DB_EXTRA_SEARCH_PATH: ${PGRST_DB_EXTRA_SEARCH_PATH:-public}
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_ADMIN_SERVER_PORT: 3001
+      PGRST_ADMIN_SERVER_HOST: localhost
+      PGRST_JWT_SECRET: ${JWT_JWKS:-${JWT_SECRET}}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY}
+    command: ["postgrest"]
+
+  # Arquivos em disco (./volumes/storage), no backup diario do kit (membros backup).
+  storage:
+    container_name: ${KIT_NOME:?falta KIT_NOME}-storage
+    image: supabase/storage-api:v1.81.0@sha256:98ffec5d0678803783c30e404c27f4ec65e97efbe014088f2a86b4b8b54b9f54
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      rest:
+        condition: service_started
+      imgproxy:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://storage:5000/status"]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+      start_period: 10s
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      JWT_JWKS: ${JWT_JWKS:-{"keys":[]}}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      STORAGE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+      FILE_SIZE_LIMIT: 52428800
+      STORAGE_BACKEND: file
+      GLOBAL_S3_BUCKET: ${GLOBAL_S3_BUCKET}
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: ${STORAGE_TENANT_ID}
+      REGION: ${REGION}
+      ENABLE_IMAGE_TRANSFORMATION: "true"
+      IMGPROXY_URL: http://imgproxy:5001
+      S3_PROTOCOL_ACCESS_KEY_ID: ${S3_PROTOCOL_ACCESS_KEY_ID}
+      S3_PROTOCOL_ACCESS_KEY_SECRET: ${S3_PROTOCOL_ACCESS_KEY_SECRET}
+    volumes:
+      - ./volumes/storage:/var/lib/storage:z
+
+  imgproxy:
+    container_name: ${KIT_NOME:?falta KIT_NOME}-imgproxy
+    image: darthsim/imgproxy:v3.31.4@sha256:73c5dda13199745b0d2d00e4149d4a589c5b2e205dbf335ca05eca8276b54712
+    restart: unless-stopped
+    volumes:
+      - ./volumes/storage:/var/lib/storage:z
+    healthcheck:
+      test: ["CMD", "imgproxy", "health"]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    environment:
+      IMGPROXY_BIND: ":5001"
+      IMGPROXY_LOCAL_FILESYSTEM_ROOT: /
+      IMGPROXY_USE_ETAG: "true"
+      IMGPROXY_AUTO_WEBP: ${IMGPROXY_AUTO_WEBP}
+      IMGPROXY_MAX_SRC_RESOLUTION: 16.8
+
+  # Postgres 17 da imagem oficial do Supabase (pg_cron, pg_net, vault, pgsodium...). Sem porta publicada: o migrador
+  # (infra/kit/migrar.sh), o backup e a restauracao entram por `docker compose exec`. Sem os scripts de inicio do
+  # Realtime (_realtime), do Logflare (_analytics) e do Supavisor (o banco _supabase), que so eles usavam.
+  db:
+    container_name: ${KIT_NOME:?falta KIT_NOME}-db
+    image: supabase/postgres:17.6.1.136@sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00
+    restart: unless-stopped
+    volumes:
+      - ./volumes/db/webhooks.sql:/docker-entrypoint-initdb.d/init-scripts/98-webhooks.sql:Z
+      - ./volumes/db/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:Z
+      - ./volumes/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:Z
+      - ./volumes/db/data:/var/lib/postgresql/data:Z
+      # Chave raiz do pgsodium/Vault. Entra no backup; sem ela o Vault restaurado nao abre.
+      - db-config:/etc/postgresql-custom
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      PGPORT: ${POSTGRES_PORT}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      POSTGRES_DB: ${POSTGRES_DB}
+      JWT_EXP: ${JWT_EXPIRY}
+    command:
+      ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf", "-c", "log_min_messages=fatal"]
+
+  # O app Next.js: a imagem do Pacote da versao, carregada com `docker load` (docs/32 §11.6). Nunca e construida aqui.
+  # Sem porta publicada: so o Caddy chega nele (app:3000), e o tick de minuto chega por http://app:3000/api/jobs/tick.
+  app:
+    container_name: ${KIT_NOME:?falta KIT_NOME}-app
+    image: ${APP_IMAGE:?falta APP_IMAGE, a imagem do app carregada do Pacote da versao}
+    restart: unless-stopped
+    depends_on:
+      api-gw:
+        condition: service_healthy
+    # So o otimizador de imagens do next/image ainda busca pelo endereco publico (as capas publicas do Storage, como o
+    # navegador): o nome leva ao proprio servidor (o Caddy), sem passar pelo DNS. O resto vai pela rede interna.
+    extra_hosts:
+      - "${SUPABASE_PUBLIC_HOST:?falta SUPABASE_PUBLIC_HOST, o host do endereco publico do Supabase}:host-gateway"
+    environment:
+      NEXT_PUBLIC_SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY}
+      # O servidor do app fala com o Supabase por aqui (src/server/db/supabase/internal-fetch.ts): o Auth, o PostgREST
+      # e o Storage pelo gateway, sem DNS e sem TLS. O endereco publico continua no cookie, nos links e no navegador.
+      SUPABASE_INTERNAL_URL: http://api-gw:8000
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY}
+      JOBS_TICK_TOKEN: ${JOBS_TICK_TOKEN}
+      AUTH_SESSION_STRATEGY: ${AUTH_SESSION_STRATEGY:-user}
+      YOUTUBE_UNOFFICIAL_STREAMS: ${YOUTUBE_UNOFFICIAL_STREAMS:-}
+      ADMIN_DEMO_DATA: ${ADMIN_DEMO_DATA:-off}
+      BUNKER_AI_GATEWAY_URL: ${BUNKER_AI_GATEWAY_URL:-}
+      BUNKER_AI_GATEWAY_API_KEY: ${BUNKER_AI_GATEWAY_API_KEY:-}
+      BUNKER_AI_GATEWAY_MANAGEMENT_KEY: ${BUNKER_AI_GATEWAY_MANAGEMENT_KEY:-}
+      NEXT_PUBLIC_POSTHOG_KEY: ${NEXT_PUBLIC_POSTHOG_KEY:-}
+      NEXT_PUBLIC_POSTHOG_HOST: ${NEXT_PUBLIC_POSTHOG_HOST:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_WEBHOOK_SECRET: ${RESEND_WEBHOOK_SECRET:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:-}
+      EMAIL_DAILY_LIMIT: ${EMAIL_DAILY_LIMIT:-}
+      NEXT_PUBLIC_SITE_URL: ${APP_PUBLIC_URL}
+      # Webinarios (docs/30, docs/32 §5): vazias = a sala diz "em breve" e o resto segue. WEBINAR_RECORDER_DISPATCH
+      # nunca entra aqui: o duble do gravador so existe fora da producao.
+      WEBINAR_MEET_DOMAIN: ${WEBINAR_MEET_DOMAIN:-}
+      WEBINAR_JWT_APP_ID: ${WEBINAR_JWT_APP_ID:-}
+      WEBINAR_JWT_SECRET: ${WEBINAR_JWT_SECRET:-}
+      WEBINAR_RECORDER_WEBHOOK_SECRET: ${WEBINAR_RECORDER_WEBHOOK_SECRET:-}
+      GITHUB_INFRA_TOKEN: ${GITHUB_INFRA_TOKEN:-}
+      BUNNY_STREAM_API_KEY: ${BUNNY_STREAM_API_KEY:-}
+      BUNNY_STREAM_LIBRARY_ID: ${BUNNY_STREAM_LIBRARY_ID:-}
+      BUNNY_EMBED_TOKEN_KEY: ${BUNNY_EMBED_TOKEN_KEY:-}
+      WEBINAR_ASSISTANT_ENABLED: ${WEBINAR_ASSISTANT_ENABLED:-}
+      WEBINAR_TRANSLATION_ENABLED: ${WEBINAR_TRANSLATION_ENABLED:-}
+      YOUTUBE_DATA_API_KEY: ${YOUTUBE_DATA_API_KEY:-}
+
+  # Borda: HTTPS automatico direto no servidor do comprador (caddy/Caddyfile.kit). E o unico servico que publica porta.
+  # Os certificados e a conta ACME ficam numa pasta do servidor fora do pacote e dos volumes do Docker
+  # (KIT_PASTA_CERTIFICADOS): uma reinstalacao reaproveita o certificado em vez de pedir outro e bater no limite de
+  # emissoes da autoridade.
+  caddy:
+    container_name: ${KIT_NOME:?falta KIT_NOME}-caddy
+    image: caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5
+    restart: unless-stopped
+    ports:
+      - ${CADDY_BIND:-0.0.0.0}:${CADDY_HTTP_PORT:-80}:80
+      - ${CADDY_BIND:-0.0.0.0}:${CADDY_HTTPS_PORT:-443}:443
+      - ${CADDY_BIND:-0.0.0.0}:${CADDY_HTTPS_PORT:-443}:443/udp
+    depends_on:
+      api-gw:
+        condition: service_healthy
+      app:
+        condition: service_started
+    environment:
+      APP_SITE_ADDRESS: ${APP_SITE_ADDRESS}
+      SUPABASE_SITE_ADDRESS: ${SUPABASE_SITE_ADDRESS}
+      # Sem o e-mail nao ha a autoridade de reserva (o ZeroSSL pede o e-mail da conta): o kit sempre informa.
+      ACME_EMAIL: ${ACME_EMAIL:?falta ACME_EMAIL, o e-mail da conta dos certificados}
+      # direta (padrao): sem proxy na frente. cloudflare: o proxy da Cloudflare ligado (opcao avancada, docs/32 §3.1).
+      CADDY_FRENTE: ${CADDY_FRENTE:-direta}
+    volumes:
+      - ./caddy/Caddyfile.kit:/etc/caddy/Caddyfile:ro
+      - ./caddy/frente:/etc/caddy/frente:ro
+      - ./caddy/cloudflare-trusted-proxies.caddyfile:/etc/caddy/cloudflare-trusted-proxies.caddyfile:ro
+      - ./volumes/auth-templates:/srv/auth-templates:ro
+      - ${KIT_PASTA_CERTIFICADOS:?falta KIT_PASTA_CERTIFICADOS; rode pelos comandos do kit}:/data
+      - caddy-config:/config
+
+volumes:
+  db-config:
+  caddy-config:

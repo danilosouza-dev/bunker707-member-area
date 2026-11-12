@@ -2,6 +2,8 @@ import { heartbeatBodySchema } from "@/server/webinars/chat-schemas";
 import { webinarsDb } from "@/server/webinars/room-queries";
 import { guardRoomRequest, loadCachedRoomContext, ok, parseRoomBody, recordAfterReply, resetRoomAccessCache, roomErrorResponse, type RouteContext } from "@/server/webinars/room-route";
 import { recordStudentHeartbeat } from "@/server/webinars/room-writes";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // O sinal de presenca da Sala (docs/30 §5.1, §8.2 e D19): POST { sessionId, offsetSeconds, state, visible, leave? }
 // a cada 15 s (e `leave: true` pelo sendBeacon ao sair, em text/plain). Sessao pelas claims do JWT
@@ -20,6 +22,9 @@ export function resetHeartbeatAccessCache() {
 }
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context, { session: "claims" });
   if ("response" in guarded) {
     return guarded.response;

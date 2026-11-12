@@ -16,6 +16,7 @@ import {
   type AdminSearchItem,
   type AdminSearchResults
 } from "./search-model";
+import { useAdminDisabledFeatures } from "./admin-features";
 import { adminTransition } from "./styles";
 
 // Busca global (prototipo aprovado): campo de 320 px a esquerda da barra superior, "Buscar (Cmd+K)".
@@ -48,12 +49,14 @@ export function GlobalSearch({ access }: { access: AdminAccess }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [remote, setRemote] = useState<RemoteState | null>(null);
   const shortcut = useSyncExternalStore(noopSubscribe, getShortcutLabel, () => "Cmd");
+  // Telas e acoes de um modulo desligado na licenca nao aparecem (docs/32 §11.8).
+  const disabledFeatures = useAdminDisabledFeatures();
 
   const cleaned = cleanAdminSearchQuery(query);
   const searching = shouldSearchAdminCatalog(cleaned);
   const current = remote && remote.query === cleaned ? remote : null;
   const results = current?.status === "done" ? current.results : EMPTY_ADMIN_SEARCH_RESULTS;
-  const groups = buildAdminSearchGroups(cleaned, results, access);
+  const groups = buildAdminSearchGroups(cleaned, results, access, disabledFeatures);
   const items = flattenAdminSearchGroups(groups);
   const active = items.find((item) => item.id === activeId) ?? items[0] ?? null;
   const loading = searching && (!current || current.status === "loading");

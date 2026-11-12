@@ -3,6 +3,8 @@ import { requestStudentHandoff } from "@/server/webinars/assistant";
 import { handoffBodySchema } from "@/server/webinars/assistant-schemas";
 import { webinarsDb } from "@/server/webinars/db";
 import { guardRoomRequest, loadRoomContextFor, ok, parseRoomBody, roomErrorResponse, type RouteContext } from "@/server/webinars/room-route";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // "Falar com a equipe" (docs/30 §1.6, Agente de IA e Atendentes; D24): POST { sessionId, target: "chat" | "question",
 // id } marca o pedido na propria mensagem ou pergunta do aluno nesta sessao (a pergunta aberta por uma mensagem do chat
@@ -15,6 +17,9 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context, { write: true });
   if ("response" in guarded) {
     return guarded.response;

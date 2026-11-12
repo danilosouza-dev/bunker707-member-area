@@ -26,6 +26,9 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context);
   if ("response" in guarded) {
     return guarded.response;

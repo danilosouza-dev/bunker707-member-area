@@ -9,6 +9,7 @@
 // mostra o cabecalho, as abas e os quatro numeros em "—", e um aviso honesto no lugar da lista. Nenhum numero ou
 // promocao de exemplo.
 
+import { WEBINARS_FEATURE, type FeatureKey } from "../../../../server/licensing/features";
 import { WEBINAR_ADMIN_COPY } from "../../../../server/webinars/editor-model";
 import type { KpiValueFormat } from "../format";
 import type { ResolvedAdminPeriod } from "../period";
@@ -24,6 +25,8 @@ export const COMMUNICATION_HOME_HREF = "/admin/comunicacao/avisos";
 type CommunicationTabMeta = {
   /** Frase de apoio do cabecalho, a mesma do prototipo para a aba. */
   description: string;
+  /** Modulo da licenca de que a aba faz parte (docs/32 §11.8): sem ele ligado, a aba some. */
+  feature?: FeatureKey;
   href: string;
   label: string;
   /** Fase do docs/17 em que a aba chega. So vai para data-phase, nunca para o texto. */
@@ -65,6 +68,7 @@ export const COMMUNICATION_TAB_META: Record<CommunicationTab, CommunicationTabMe
   },
   webinarios: {
     description: "Lives com inscrição, lembretes de 24 h e 1 h e o replay que vira aula.",
+    feature: WEBINARS_FEATURE,
     href: "/admin/comunicacao/webinarios",
     label: "Webinários",
     phase: 5,

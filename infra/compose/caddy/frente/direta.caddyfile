@@ -1,0 +1,2 @@
+# CADDY_FRENTE=direta (o padrao do kit): nada na frente do Caddy. O IP do aluno e o da conexao, e nenhum cabecalho de
+# IP vindo de fora e aceito. Este arquivo fica sem diretiva de proposito (infra/compose/caddy/Caddyfile.kit).

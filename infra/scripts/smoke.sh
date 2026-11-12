@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Teste de fumaca do stack (depois de subir, de um deploy ou de uma restauracao):
+# Teste de fumaca do stack (depois de subir, de um deploy ou de uma restauracao) e a conferencia final do kit:
 #   sh infra/scripts/smoke.sh
 # Confere, pelos enderecos publicos do .env: o app (/api/health e redirecionamento para /login), o Auth,
-# o PostgREST, o Storage e o Realtime do Supabase. Sai com erro no primeiro problema.
+# o PostgREST e o Storage do Supabase; o Realtime onde o compose tem o servico (a nossa producao; o kit nao leva,
+# docs/32 §11.6, e la o caminho dele tem de estar fechado); e os modelos de e-mail do Auth, baixados como o Auth
+# baixa. Sai com erro se alguma conferencia falhar.
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
@@ -16,6 +18,10 @@ anon_key=$(env_value SUPABASE_PUBLISHABLE_KEY)
 secret_key=$(env_value SUPABASE_SECRET_KEY)
 [ -n "$secret_key" ] || secret_key=$(require_env_value SERVICE_ROLE_KEY)
 failures=0
+# Os servicos deste compose (o da producao ou o do kit). Sem resposta, nada e pulado por engano: a conferencia do
+# Realtime cai no ramo do kit e exige o caminho fechado, que a producao nao tem.
+services=$(compose config --services 2>/dev/null || true)
+has_service() { printf '%s\n' "$services" | grep -qx "$1"; }
 
 check() {
     # check "nome" codigo-esperado url [curl args...]
@@ -47,23 +53,58 @@ check "rest /rest/v1/ (sem chave)" 401 "$supabase_url/rest/v1/"
 check "rest nega anon em tabela interna" 401 "$supabase_url/rest/v1/job_runs?select=id&limit=1" -H "apikey: $anon_key" -H "Authorization: Bearer $anon_key"
 check "rest le com a chave do servidor" 200 "$supabase_url/rest/v1/job_runs?select=id&limit=1" -H "apikey: $secret_key" -H "Authorization: Bearer $secret_key"
 check "storage /status" 200 "$supabase_url/storage/v1/status"
-# O gateway fecha /realtime/v1/api/tenants para todo mundo (correcao de seguranca do self-hosted 0.6.0):
-# o Realtime e conferido pelo healthcheck do proprio container. O primeiro teste dele so roda 30 s depois
-# da partida: recem-criado, "starting" ganha ate 90 s antes de virar falha.
-realtime_health=$(compose ps --format '{{.Health}}' realtime 2>/dev/null | head -n1)
-for _ in $(seq 30); do
-    [ "$realtime_health" = "starting" ] || break
-    sleep 3; realtime_health=$(compose ps --format '{{.Health}}' realtime 2>/dev/null | head -n1)
-done
-if [ "$realtime_health" = "healthy" ]; then
-    printf '  ok   %-28s %s\n' "realtime (healthcheck)" "$realtime_health"
+if has_service realtime; then
+    # O gateway fecha /realtime/v1/api/tenants para todo mundo (correcao de seguranca do self-hosted 0.6.0):
+    # o Realtime e conferido pelo healthcheck do proprio container. O primeiro teste dele so roda 30 s depois
+    # da partida: recem-criado, "starting" ganha ate 90 s antes de virar falha.
+    realtime_health=$(compose ps --format '{{.Health}}' realtime 2>/dev/null | head -n1)
+    for _ in $(seq 30); do
+        [ "$realtime_health" = "starting" ] || break
+        sleep 3; realtime_health=$(compose ps --format '{{.Health}}' realtime 2>/dev/null | head -n1)
+    done
+    if [ "$realtime_health" = "healthy" ]; then
+        printf '  ok   %-28s %s\n' "realtime (healthcheck)" "$realtime_health"
+    else
+        printf '  FALHA %-28s %s\n' "realtime (healthcheck)" "${realtime_health:-sem container}"
+        failures=$((failures + 1))
+    fi
+    check "realtime fechado em /api/tenants" 403 "$supabase_url/realtime/v1/api/tenants/realtime-dev/health" -H "Authorization: Bearer $secret_key"
 else
-    printf '  FALHA %-28s %s\n' "realtime (healthcheck)" "${realtime_health:-sem container}"
-    failures=$((failures + 1))
+    # O kit nao leva o Realtime: o caminho dele nem chega ao gateway (404 no Caddy).
+    check "realtime fora do compose" 404 "$supabase_url/realtime/v1/api/tenants/realtime-dev/health" -H "Authorization: Bearer $secret_key"
 fi
-check "realtime fechado em /api/tenants" 403 "$supabase_url/realtime/v1/api/tenants/realtime-dev/health" -H "Authorization: Bearer $secret_key"
 # Em producao o Caddy responde 404 fora da API; no ensaio local o Envoy responde 401 (basic auth do Studio).
 check "studio fechado no host da API" "404|401" "$supabase_url/"
+
+# Os modelos de e-mail do Auth, pelo mesmo caminho que o Auth usa ao enviar: sem eles, o convite e o "esqueci a senha"
+# saem no texto padrao do Auth, em ingles, sem erro no registro. No kit o endereco e interno (http://caddy:8088) e o
+# download sai de dentro do container do Auth; na producao e o endereco publico.
+log "Modelos de e-mail do Auth"
+template_urls=$(compose config --format json 2>/dev/null | python3 -I -c '
+import json, sys
+env = json.load(sys.stdin)["services"]["auth"].get("environment") or {}
+for chave in sorted(env):
+    if chave.startswith("GOTRUE_MAILER_TEMPLATES_"):
+        print(env[chave])
+' 2>/dev/null || true)
+if [ -z "$template_urls" ]; then
+    printf '  FALHA %-28s %s\n' "modelos de e-mail" "nenhum GOTRUE_MAILER_TEMPLATES_* no servico auth do compose"
+    failures=$((failures + 1))
+else
+    while IFS= read -r template_url; do
+        case "$template_url" in
+            http://*) body=$(compose exec -T auth wget -q -T 10 -O - "$template_url" 2>/dev/null || true); route="de dentro do Auth" ;;
+            *) body=$(curl -sS --max-time 15 "$template_url" 2>/dev/null || true); route="pelo endereco publico" ;;
+        esac
+        # Todo modelo tem ao menos uma variavel do GoTrue ({{ .SiteURL }}, {{ .Token }}...): uma pagina de erro nao tem.
+        if printf '%s' "$body" | grep -q '{{ *\.'; then
+            printf '  ok   %-28s %s\n' "modelo ${template_url##*/}" "$route"
+        else
+            printf '  FALHA %-28s nao baixou %s (%s)\n' "modelo ${template_url##*/}" "$route" "$template_url"
+            failures=$((failures + 1))
+        fi
+    done <<< "$template_urls"
+fi
 
 if [ "$failures" -gt 0 ]; then
     die "$failures verificacao(oes) falharam."

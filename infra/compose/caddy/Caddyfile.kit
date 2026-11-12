@@ -1,0 +1,64 @@
+# Borda do kit, no servidor do comprador (infra/compose/docker-compose.kit.yml, servico caddy; docs/32 §3.1 e §11.7).
+#   APP_SITE_ADDRESS       o app Next.js (app:3000)
+#   SUPABASE_SITE_ADDRESS  so o Auth, o PostgREST e o Storage, pelo gateway (api-gw:8000); o resto responde 404
+#   http://:8088           os modelos de e-mail do Auth, so na rede interna do compose (a porta nao e publicada)
+#
+# Certificados: dominio puro no endereco = HTTPS automatico, tirado direto pelo Caddy (desafio HTTP-01 na 80 ou
+# TLS-ALPN-01 na 443). Com o e-mail da conta, o Caddy tenta o Let's Encrypt e, se ele falhar, o ZeroSSL (os emissores
+# padrao dele): o kit nao depende de uma autoridade so. Por isso nada aqui fixa `acme_ca`, `cert_issuer` ou
+# `local_certs`. A conta e os certificados ficam em /data, a pasta do servidor que sobrevive a uma reinstalacao.
+# http:// no endereco = sem TLS (ensaio local).
+#
+# O que esta na frente (CADDY_FRENTE): `direta`, o padrao, sem proxy (o IP do aluno e o da conexao); ou `cloudflare`,
+# com o proxy da Cloudflare ligado depois da instalacao (o IP real chega em CF-Connecting-IP, aceito so das faixas
+# dela). Outro valor nao acha o arquivo e o Caddy nao sobe: melhor que confiar num cabecalho que qualquer um forja.
+#
+# A CSP com nonce, o HSTS e os demais cabecalhos de seguranca do app vem do proprio Next: aqui so o Server sai.
+
+{
+	email {$ACME_EMAIL}
+	servers {
+		import /etc/caddy/frente/{$CADDY_FRENTE:direta}.caddyfile
+	}
+}
+
+(sem_server) {
+	header -Server
+}
+
+{$APP_SITE_ADDRESS} {
+	import sem_server
+	encode zstd gzip
+	reverse_proxy app:3000
+}
+
+{$SUPABASE_SITE_ADDRESS} {
+	import sem_server
+	header X-Content-Type-Options nosniff
+	header Referrer-Policy no-referrer
+
+	# So o que o app usa. O Realtime, as Functions e o GraphQL nao estao no kit, e o Studio e o meta tambem nao.
+	@api path /auth/v1/* /rest/v1/* /storage/v1/*
+	handle @api {
+		reverse_proxy api-gw:8000
+	}
+
+	handle {
+		respond 404
+	}
+}
+
+# Os modelos de e-mail do Auth (volumes/auth-templates), so para os containers do compose: o Auth baixa daqui na hora
+# de enviar (GOTRUE_MAILER_TEMPLATES_*). Fora da rede interna, esta porta nao existe.
+http://:8088 {
+	import sem_server
+
+	handle_path /auth-templates/* {
+		root * /srv/auth-templates
+		file_server
+	}
+
+	handle {
+		respond 404
+	}
+}

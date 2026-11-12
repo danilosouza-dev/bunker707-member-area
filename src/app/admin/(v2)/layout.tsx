@@ -4,15 +4,26 @@ import type { ReactNode } from "react";
 import { AdminShellV2 } from "@/components/admin/v2/admin-shell";
 import type { AdminFilterProduct } from "@/components/admin/v2/filters";
 import { formatAdminRole } from "@/components/admin/v2/format";
+import { LicenseBanner } from "@/components/admin/v2/license/license-banner";
 import { ADMIN_SIDEBAR_COOKIE, type AdminNavCounts } from "@/components/admin/v2/nav";
 import { readTodayAlertSummary } from "@/server/admin/today";
 import { requirePageAdmin } from "@/server/auth/guards";
 import { catalogScope, communityScope, toAccessSnapshot, type AdminAccess } from "@/server/auth/roles";
 import { getUserDisplayName } from "@/server/auth/session";
+import { getConfiguredSiteOrigin } from "@/server/auth/site-origin";
 import { PRODUCT_ACCENTS } from "@/server/catalog/model";
 import { listProductOptions } from "@/server/catalog/queries";
 import { countOverdueQuestions } from "@/server/community/counts";
 import { isPendingMigrationError } from "@/server/db/pending-migration";
+import { checkLicenseNow } from "@/server/licensing/actions";
+import { isLicenseManager } from "@/server/licensing/admin-access";
+import { licenseBannerOf, type LicenseBannerModel } from "@/server/licensing/copy";
+import { readCurrentLicenseState } from "@/server/licensing/current-state";
+import { getDisabledFeatures } from "@/server/licensing/guards";
+import { observeAdminRequestHost } from "@/server/licensing/request-host";
+import { isActionClassAllowed } from "@/server/licensing/require-feature";
+import { withHeldSalesBanner } from "@/server/payments/held-sales-model";
+import { countHeldSalesForBanner } from "@/server/payments/held-sales-queries";
 
 export const metadata: Metadata = {
   robots: { follow: false, index: false },
@@ -27,12 +38,27 @@ export const metadata: Metadata = {
 // persiste entre navegacoes, entao e uma leitura por carregamento completo; qualquer falha deixa a
 // moldura sem contador ou sem opcoes, nunca quebrada. O layout nao protege as paginas: layout e pagina
 // renderizam em paralelo, entao cada page.tsx chama requirePageAdmin() de novo. Usuario e papel sao
-// memoizados por requisicao (React.cache em src/server/auth/session.ts).
+// memoizados por requisicao (React.cache em src/server/auth/session.ts). A faixa da Licenca (docs/32 §2.2) vem antes
+// das telas, so no produto vendido (modo "enforce"; no "off" nada aqui le a licenca) e so quando ha o que dizer.
 export default async function AdminV2Layout({ children }: { children: ReactNode }) {
   const { access, role, user } = await requirePageAdmin();
   const { fullName } = getUserDisplayName(user);
+
+  // A Licenca confere o endereco por onde o dono e os administradores abrem o admin (docs/32 §2.2): so no modo
+  // "enforce", sem gravar nada quando nada mudou, e nunca derruba a moldura.
+  if (isLicenseManager(access)) {
+    await observeAdminRequestHost();
+  }
+
   // Contadores valem para a escola toda: a Comunidade de quem responde so nos proprios cursos nao conta.
-  const [allCounts, products, cookieStore] = await Promise.all([readNavCounts(), readProductFilterOptions(access), cookies()]);
+  // Os modulos desligados na licenca (docs/32 §11.8): o menu e a busca escondem as telas deles. No modo "off", nenhum.
+  const [allCounts, products, cookieStore, disabledFeatures, licenseBanner] = await Promise.all([
+    readNavCounts(),
+    readProductFilterOptions(access),
+    cookies(),
+    getDisabledFeatures(),
+    readLicenseBanner()
+  ]);
   const counts = communityScope(access) === null ? allCounts : { ...allCounts, comunidade: undefined };
   const sidebarCollapsed = cookieStore.get(ADMIN_SIDEBAR_COOKIE)?.value === "collapsed";
 
@@ -41,12 +67,37 @@ export default async function AdminV2Layout({ children }: { children: ReactNode 
       access={toAccessSnapshot(access)}
       account={{ email: user.email ?? "", name: fullName, roleLabel: formatAdminRole(role) }}
       counts={counts}
+      disabledFeatures={disabledFeatures}
       initialCollapsed={sidebarCollapsed}
       products={products}
     >
+      {licenseBanner ? <LicenseBanner banner={licenseBanner} canManage={isLicenseManager(access)} checkNowAction={checkLicenseNow} /> : null}
       {children}
     </AdminShellV2>
   );
+}
+
+/**
+ * A faixa da Licenca (src/server/licensing/copy.ts, licenseBannerOf): a mesma situacao do pedido que o menu ja leu
+ * (readCurrentLicenseState, uma leitura por pedido, que nunca lanca). No modo "off", nenhuma, sem ler nada. Sem
+ * leitura, nenhuma faixa (o motivo vai para o log uma vez): a moldura nunca quebra por causa dela. No "enforce", a
+ * contagem das vendas guardadas (docs/32 §2.2) entra na faixa; com a Licenca em dia e venda ainda guardada, uma faixa so
+ * delas ate a tarefa do tick terminar de liberar. A contagem que falha vale 0.
+ */
+async function readLicenseBanner(): Promise<LicenseBannerModel | null> {
+  const state = await readCurrentLicenseState();
+
+  if (!state) {
+    return null;
+  }
+
+  const banner = licenseBannerOf(state, { configuredHost: getConfiguredSiteOrigin() });
+
+  if (state.mode !== "enforce") {
+    return banner;
+  }
+
+  return withHeldSalesBanner(banner, await countHeldSalesForBanner(), isActionClassAllowed(state, "matricula"));
 }
 
 /**

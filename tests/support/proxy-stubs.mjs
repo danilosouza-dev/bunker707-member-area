@@ -17,6 +17,8 @@ export const proxyStubs = {
   claimsResult: { data: null, error: new Error("Auth claims failed") },
   /** Cada createServerClient(): { key, url } recebidos. */
   clients: [],
+  /** As opcoes de cada createServerClient(), na mesma ordem (o `global.fetch` da rede interna do kit, por exemplo). */
+  clientOptions: [],
   /** Cada chamada ao Auth: "getClaims" ou "getUser". */
   authCalls: [],
   /** O que getUser() devolve (usuario ou nulo). */
@@ -24,6 +26,7 @@ export const proxyStubs = {
   reset() {
     this.claimsResult = { data: null, error: new Error("Auth claims failed") };
     this.clients = [];
+    this.clientOptions = [];
     this.authCalls = [];
     this.userResult = { data: { user: null }, error: new Error("Auth session missing") };
   }
@@ -32,9 +35,10 @@ export const proxyStubs = {
 globalThis.__proxyStubs = proxyStubs;
 
 const supabaseSsrStub = `
-export function createServerClient(url, key) {
+export function createServerClient(url, key, options) {
   const stubs = globalThis.__proxyStubs;
   stubs.clients.push({ key, url });
+  stubs.clientOptions.push(options ?? {});
 
   return {
     auth: {

@@ -35,6 +35,7 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
       accessPreviewMode={accessPreviewMode}
       branding={shellData.branding}
       canUseAccessPreview={shellData.canUseAccessPreview}
+      disabledFeatures={shellData.disabledFeatures}
       student={shellData.student}
     >
       <SupportView

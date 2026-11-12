@@ -372,7 +372,7 @@ async function markTeamAnswer(db: WebinarsDb, questionId: string) {
  * publicado.
  */
 export async function openSessionNow(input: { sessionId: string }): Promise<ActionResult<SessionOpened>> {
-  return runAdminAction("messaging.publish", sessionIdInputSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "atendimento", sessionIdInputSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const { row, webinar } = await loadSession(db, data.sessionId);
@@ -406,7 +406,7 @@ export async function openSessionNow(input: { sessionId: string }): Promise<Acti
  * replay nasce quando a gravacao esta pronta (session-lifecycle.finishSession). So na espera ou no ar.
  */
 export async function endSessionNow(input: { sessionId: string }): Promise<ActionResult<SessionEnded>> {
-  return runAdminAction("messaging.publish", sessionIdInputSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "atendimento", sessionIdInputSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const { row, session, webinar } = await loadSession(db, data.sessionId);
@@ -470,7 +470,7 @@ export async function sendTeamMessage(input: {
   replyToId?: string | null;
   sessionId: string;
 }): Promise<ActionResult<{ message: ChatMessage }>> {
-  return runAdminAction("messaging.write", teamChatSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", teamChatSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const { row: sessionRow, session, webinar } = await loadSession(db, data.sessionId);
@@ -613,7 +613,7 @@ async function questionOfMessageByTeam(db: WebinarsDb, message: ChatMessageRow):
  * pendente e liberada no mesmo passo). Recusar a pendente e o apagar.
  */
 export async function moderateMessage(input: { action: ModerationAction; messageId: string; reason?: string }): Promise<ActionResult<ModeratedMessage>> {
-  return runAdminAction("messaging.write", moderateMessageSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", moderateMessageSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const nowIso = new Date().toISOString();
     const message = await fetchChatMessageRow(db, data.messageId);
@@ -735,7 +735,7 @@ export async function moderateMessage(input: { action: ModerationAction; message
 
 /** [messaging.write] Quem pode escrever e o modo lento da sessao (o modo lento nao vale para a equipe, §8.3). */
 export async function setSessionChatMode(input: { chatMode: ChatMode; sessionId: string; slowModeSeconds: SlowModeSeconds | null }): Promise<ActionResult<SessionChatMode>> {
-  return runAdminAction("messaging.write", sessionChatModeSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", sessionChatModeSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const { row, webinar } = await loadSession(db, data.sessionId);
 
@@ -945,7 +945,7 @@ async function openTemplatePoll(
  * equipe e so um modelo do webinario da sessao (nunca uma copia). Com `pin`, o "Abrir e fixar" das prontas (R2).
  */
 export async function launchPoll(input: { pin?: boolean; pollId: string; sessionId: string }): Promise<ActionResult<{ pinned: boolean; poll: Poll }>> {
-  return runAdminAction("messaging.write", launchPollSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", launchPollSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const { session, webinar } = await loadSession(db, data.sessionId);
@@ -1090,7 +1090,7 @@ async function unpinClosedPoll(db: WebinarsDb, input: { now: Date; pollId: strin
  * com as barras. O carimbo da sessao muda por ultimo.
  */
 export async function closePoll(input: { pollId: string; sessionId: string; shareResults?: boolean }): Promise<ActionResult<{ poll: Poll; unpinned: boolean }>> {
-  return runAdminAction("messaging.write", closePollSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", closePollSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const nowIso = now.toISOString();
@@ -1141,7 +1141,7 @@ export async function closePoll(input: { pollId: string; sessionId: string; shar
  * sessao muda por ultimo; auditoria `webinar.poll_pinned`.
  */
 export async function pinPoll(input: { pollId: string; sessionId: string }): Promise<ActionResult<PinnedPoll>> {
-  return runAdminAction("messaging.write", pinPollSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", pinPollSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const { session, webinar } = await loadSession(db, data.sessionId);
@@ -1189,7 +1189,7 @@ export async function pinPoll(input: { pollId: string; sessionId: string }): Pro
  * sessao muda por ultimo; auditoria `webinar.poll_unpinned`.
  */
 export async function unpinPoll(input: { sessionId: string }): Promise<ActionResult<UnpinnedPoll>> {
-  return runAdminAction("messaging.write", unpinPollSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", unpinPollSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const { session, webinar } = await loadSession(db, data.sessionId);
@@ -1226,7 +1226,7 @@ export async function unpinPoll(input: { sessionId: string }): Promise<ActionRes
  * `answer`, respondendo a mensagem de origem quando houver) e/ou "Respondida ao vivo".
  */
 export async function answerQuestion(input: { answerText?: string; answeredLive?: boolean; questionId: string }): Promise<ActionResult<AnsweredQuestion>> {
-  return runAdminAction("messaging.write", answerQuestionSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", answerQuestionSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const question = await fetchQuestionRow(db, data.questionId);
@@ -1307,7 +1307,7 @@ export async function answerQuestion(input: { answerText?: string; answeredLive?
  * aluno saiu), a resposta vai tambem para o sino dele, uma vez por resposta.
  */
 export async function replyToQuestion(input: { body: string; questionId: string }): Promise<ActionResult<RepliedQuestion>> {
-  return runAdminAction("messaging.write", replyQuestionSchema, input, async ({ input: data, user }) => withReplyTable(async () => {
+  return runWebinarAction("messaging.write", "atendimento", replyQuestionSchema, input, async ({ input: data, user }) => withReplyTable(async () => {
     const db = webinarsDb();
     const now = new Date();
     const row = await fetchQuestionRow(db, data.questionId);
@@ -1345,7 +1345,7 @@ export async function replyToQuestion(input: { body: string; questionId: string 
 
 /** [messaging.write] Apaga uma resposta do fio (a do aluno ou a da equipe); o resto do fio fica. */
 export async function deleteQuestionReply(input: { replyId: string }): Promise<ActionResult<{ questionId: string; replyId: string }>> {
-  return runAdminAction("messaging.write", deleteQuestionReplySchema, input, async ({ input: data, user }) => withReplyTable(async () => {
+  return runWebinarAction("messaging.write", "atendimento", deleteQuestionReplySchema, input, async ({ input: data, user }) => withReplyTable(async () => {
     const db = webinarsDb();
     const row = await fetchQuestionReplyRow(db, data.replyId);
 
@@ -1373,7 +1373,7 @@ export async function deleteQuestionReply(input: { replyId: string }): Promise<A
 
 /** [messaging.write] Dispensa, reabre ou marca como respondida uma pergunta. */
 export async function setQuestionStatus(input: { questionId: string; status: WebinarQuestion["status"] }): Promise<ActionResult<{ question: WebinarQuestion }>> {
-  return runAdminAction("messaging.write", questionStatusSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "atendimento", questionStatusSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const nowIso = new Date().toISOString();
     const question = await fetchQuestionRow(db, data.questionId);
@@ -1423,7 +1423,7 @@ export async function setQuestionStatus(input: { questionId: string; status: Web
  * tela aberta antes da meia-noite). Desligar grava a decisao tambem. A auditoria leva os valores (D10).
  */
 export async function saveSimulation(input: { ackText?: string; acknowledged?: boolean; sessionId: string; showLiveBadge: boolean }): Promise<ActionResult<SavedSimulation>> {
-  return runAdminAction("messaging.publish", saveSimulationSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "conteudo", saveSimulationSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const { row, webinar } = await loadSession(db, data.sessionId);
@@ -1497,7 +1497,7 @@ async function hasSimulatedRules(db: WebinarsDb, sessionId: string) {
  * fechada antes reabre.
  */
 export async function createReplaySession(input: { webinarId: string }): Promise<ActionResult<ReplayCreated>> {
-  return runAdminAction("messaging.write", createReplaySessionSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", createReplaySessionSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const webinar = await requireWebinarRow(db, data.webinarId);
@@ -1563,7 +1563,7 @@ export async function createReplaySession(input: { webinarId: string }): Promise
 
 /** [messaging.write] Fecha o Replay livre (a sessao `replay` vira cancelada; "Liberar o replay" reabre a mesma). */
 export async function cancelReplaySession(input: { webinarId: string }): Promise<ActionResult<{ sessionId: string }>> {
-  return runAdminAction("messaging.write", createReplaySessionSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "dever_legal", createReplaySessionSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const nowIso = new Date().toISOString();
     const webinar = await requireWebinarRow(db, data.webinarId);
@@ -1592,7 +1592,7 @@ export async function cancelReplaySession(input: { webinarId: string }): Promise
  * motivo do pedido fica na auditoria (§5.2).
  */
 export async function removeStudentMessages(input: { reason: string; userId: string }): Promise<ActionResult<RemovedStudentContent>> {
-  return runAdminAction("messaging.publish", removeStudentMessagesSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "dever_legal", removeStudentMessagesSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const nowIso = new Date().toISOString();
     const consent = await fetchConsentRow(db, data.userId);

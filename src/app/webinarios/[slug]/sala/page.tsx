@@ -17,6 +17,8 @@ import { webinarHref } from "@/server/webinars/model";
 import { isWebinarSlug } from "@/server/webinars/student-model";
 import { getRoomPageData } from "@/server/webinars/student-queries";
 import { Radio } from "lucide-react";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { requireFeaturePage } from "@/server/licensing/guards";
 
 // /webinarios/[slug]/sala?sessao= (docs/30 §1.3 e §1.6): a Sala da Live gravada, do Replay ou da Live ao vivo (fase 3),
 // um dialogo de tela cheia. Nada fica desenhado por baixo dele: sem Minimizar (docs/31 V2-2), a pagina da live por
@@ -45,6 +47,9 @@ type RoomPageProps = {
 };
 
 export default async function WebinarRoomPage({ params, searchParams }: RoomPageProps) {
+  // Sem o modulo dos Webinarios na licenca: 404 antes da sessao e do banco (docs/32 §11.8).
+  await requireFeaturePage(WEBINARS_FEATURE);
+
   const { slug } = await params;
   const resolvedSearchParams = await searchParams;
   const sessao = Array.isArray(resolvedSearchParams?.sessao) ? resolvedSearchParams?.sessao[0] : resolvedSearchParams?.sessao;
@@ -68,7 +73,7 @@ export default async function WebinarRoomPage({ params, searchParams }: RoomPage
   const nonce = data.state === "ready" && data.payload.session.kind === "live" ? ((await headers()).get("x-nonce") ?? null) : null;
 
   return (
-    <AppShell accessPreviewMode={accessPreviewMode} branding={shellData.branding} canUseAccessPreview={shellData.canUseAccessPreview} student={shellData.student}>
+    <AppShell accessPreviewMode={accessPreviewMode} branding={shellData.branding} canUseAccessPreview={shellData.canUseAccessPreview} disabledFeatures={shellData.disabledFeatures} student={shellData.student}>
       {data.state === "error" ? (
         <MemberPage width="default">
           <MemberEmptyState

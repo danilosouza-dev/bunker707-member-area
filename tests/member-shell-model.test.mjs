@@ -16,8 +16,13 @@ test("barra lateral: grupos Estudar e Conta e ajuda, itens da fonte unica, todos
   const sections = model.getMemberSidebarSections("/");
 
   assert.deepEqual(sections.map((section) => section.label), ["Estudar", "Conta e ajuda"]);
+  // O item de vendedor (Minhas licencas, docs/32 §2.4) so aparece com o sinal do servidor; os outros, sempre.
   assert.deepEqual(
     flatten(sections).map((item) => [item.key, item.label, item.href]),
+    navigation.MEMBER_NAVIGATION_ITEMS.filter((item) => !item.seller).map((item) => [item.key, item.label, item.href])
+  );
+  assert.deepEqual(
+    flatten(model.getMemberSidebarSections("/", undefined, undefined, { licenses: true })).map((item) => [item.key, item.label, item.href]),
     navigation.MEMBER_NAVIGATION_ITEMS.map((item) => [item.key, item.label, item.href])
   );
 

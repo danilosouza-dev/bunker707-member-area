@@ -80,6 +80,8 @@ export async function enqueueWelcomeEmail(db: SupabaseClient, input: EnqueueWelc
 export type EnqueuePurchaseEmailInput = {
   email: string;
   fullName: string | null;
+  /** Segunda parte da mesma venda (a liberacao de uma venda guardada): a chave da fila ganha esta marca. */
+  keyTag?: string | null;
   products: { id: string; title: string }[];
   entitlementIds: string[];
   siteOrigin: string | null | undefined;
@@ -108,6 +110,7 @@ export async function enqueuePurchaseEmail(db: SupabaseClient, input: EnqueuePur
         entitlementIds: input.entitlementIds,
         sourceEventId: input.sourceEventId,
         sourceProvider: input.sourceProvider,
+        tag: input.keyTag,
         userId: input.userId
       }),
       kind: "purchase",

@@ -2,6 +2,8 @@ import { pollAnswerBodySchema, sessionQuerySchema } from "@/server/webinars/chat
 import { listStudentPolls, webinarsDb } from "@/server/webinars/room-queries";
 import { badRequest, guardRoomRequest, loadRoomContextFor, offsetMsFieldSchema, ok, parseRoomBody, recordAfterReply, roomErrorResponse, type RouteContext } from "@/server/webinars/room-route";
 import { answerStudentPoll } from "@/server/webinars/room-writes";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // As enquetes da Sala (docs/30 §1.3 e §5.1): GET ?sessao= devolve as abertas (com a resposta do aluno) e as encerradas
 // com "Compartilhar resultado" (com as contagens); POST { sessionId, pollId, optionIds, offsetMs? } grava a resposta e
@@ -15,6 +17,9 @@ export const revalidate = 0;
 const postSchema = pollAnswerBodySchema.extend({ offsetMs: offsetMsFieldSchema });
 
 export async function GET(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context);
   if ("response" in guarded) {
     return guarded.response;
@@ -34,6 +39,9 @@ export async function GET(request: Request, context: RouteContext) {
 }
 
 export async function POST(request: Request, context: RouteContext) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento", feature: WEBINARS_FEATURE });
+  if (licenseRefusal) return licenseRefusal;
+
   const guarded = await guardRoomRequest(context, { write: true });
   if ("response" in guarded) {
     return guarded.response;

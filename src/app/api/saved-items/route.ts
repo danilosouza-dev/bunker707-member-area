@@ -5,6 +5,7 @@ import { setSavedItem } from "@/server/db/platform-store";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 import type { SavedItemTargetType } from "@/lib/platform-types";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 const savedTargetTypes = new Set<SavedItemTargetType>([
   "formation",
@@ -19,6 +20,9 @@ const savedTargetTypes = new Set<SavedItemTargetType>([
 ]);
 
 export async function PUT(request: Request) {
+  const licenseRefusal = await licenseRouteRefusal({ actionClass: "atendimento" });
+  if (licenseRefusal) return licenseRefusal;
+
   const auth = await requireApiUser();
 
   if (auth.response) {

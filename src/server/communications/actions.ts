@@ -1140,7 +1140,7 @@ async function saveSentNotice(input: {
  * v3b-1: o pop-up grava a configuracao completa (withPopupSettings: o rascunho sem `popup` usa a da linha).
  */
 export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionResult<SavedNotice>> {
-  return runAdminAction("messaging.write", saveNoticeSchema, input, async ({ access, input: data, user }) => {
+  return runAdminAction("messaging.write", "conteudo", saveNoticeSchema, input, async ({ access, input: data, user }) => {
     const db = communicationsDb();
 
     await assertSenderForSave(db, data.draft);
@@ -1308,7 +1308,7 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
  * vem vazia (combinar regras e ler nomes revelaria progresso, estudo e acesso de alunos com nome).
  */
 export async function previewNoticeAudience(input: { audience: AudienceDefinition }): Promise<ActionResult<AudiencePreview>> {
-  return runAdminAction("messaging.write", previewAudienceSchema, input, async ({ access, input: data }) => {
+  return runAdminAction("messaging.write", "leitura", previewAudienceSchema, input, async ({ access, input: data }) => {
     const db = communicationsDb();
     const definition = normalizeAudience(data.audience);
     const [loaded, names] = await Promise.all([loadFactsFor(db, new Date(), definition), loadAudienceNames(db, [definition])]);
@@ -1327,7 +1327,7 @@ export async function previewNoticeAudience(input: { audience: AudienceDefinitio
  * ao foco depois de "Colocar a minha foto em Perfil", para a foto nova aparecer sem recarregar.
  */
 export async function listNoticeSenders(): Promise<ActionResult<NoticeSenderOption[]>> {
-  return runAdminAction("messaging.write", z.undefined().or(z.object({})), undefined, async ({ user }) => loadNoticeSenders(communicationsDb(), user.id));
+  return runAdminAction("messaging.write", "leitura", z.undefined().or(z.object({})), undefined, async ({ user }) => loadNoticeSenders(communicationsDb(), user.id));
 }
 
 /**
@@ -1336,7 +1336,7 @@ export async function listNoticeSenders(): Promise<ActionResult<NoticeSenderOpti
  * messaging.publish_large).
  */
 export async function publishNotice(input: NoticeIdInput): Promise<ActionResult<PublishedNotice>> {
-  return runAdminAction("messaging.write", noticeIdSchema, input, async ({ access, input: data, user }) => {
+  return runAdminAction("messaging.write", "conteudo", noticeIdSchema, input, async ({ access, input: data, user }) => {
     const db = communicationsDb();
     const now = new Date();
     const row = await requireCampaign(db, data.id);
@@ -1435,7 +1435,7 @@ export async function publishNotice(input: NoticeIdInput): Promise<ActionResult<
  * versao que ela revisou (a mesma que e contada e gravada).
  */
 export async function approveNotice(input: NoticeIdInput): Promise<ActionResult<PublishedNotice>> {
-  return runAdminAction("messaging.publish_large", noticeIdSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.publish_large", "conteudo", noticeIdSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
     const now = new Date();
     const row = await requireCampaign(db, data.id);
@@ -1492,7 +1492,7 @@ export async function approveNotice(input: NoticeIdInput): Promise<ActionResult<
 
 /** [messaging.publish_large] Devolve o pedido de aprovacao: o aviso volta a rascunho. */
 export async function rejectNotice(input: NoticeIdInput): Promise<ActionResult<NoticeStateChange>> {
-  return runAdminAction("messaging.publish_large", noticeIdSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.publish_large", "dever_legal", noticeIdSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
     const row = await requireCampaign(db, data.id);
     const updated = await updateCampaign(
@@ -1518,7 +1518,7 @@ export async function rejectNotice(input: NoticeIdInput): Promise<ActionResult<N
 
 /** [messaging.publish] Notificacao agendada volta a rascunho (nada foi enviado). */
 export async function cancelScheduledNotice(input: NoticeIdInput): Promise<ActionResult<NoticeStateChange>> {
-  return runAdminAction("messaging.publish", noticeIdSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.publish", "dever_legal", noticeIdSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
     const row = await requireCampaign(db, data.id);
     const updated = await updateCampaign(
@@ -1603,21 +1603,21 @@ async function changePopupStatus(input: {
 
 /** [messaging.publish] Pausa o pop-up no ar (some da home ate retomar). */
 export async function pauseNotice(input: NoticeIdInput): Promise<ActionResult<NoticeStateChange>> {
-  return runAdminAction("messaging.publish", noticeIdSchema, input, ({ access, input: data, user }) =>
+  return runAdminAction("messaging.publish", "dever_legal", noticeIdSchema, input, ({ access, input: data, user }) =>
     changePopupStatus({ access, actorId: user.id, audit: "communication.paused", expectedUpdatedAt: data.expectedUpdatedAt, from: ["active"], id: data.id, to: "paused" })
   );
 }
 
 /** [messaging.publish] Retoma o pop-up pausado (recalcula quem ve; acima de 500, messaging.publish_large). */
 export async function resumeNotice(input: NoticeIdInput): Promise<ActionResult<NoticeStateChange>> {
-  return runAdminAction("messaging.publish", noticeIdSchema, input, ({ access, input: data, user }) =>
+  return runAdminAction("messaging.publish", "conteudo", noticeIdSchema, input, ({ access, input: data, user }) =>
     changePopupStatus({ access, actorId: user.id, audit: "communication.resumed", expectedUpdatedAt: data.expectedUpdatedAt, from: ["paused"], id: data.id, to: "active" })
   );
 }
 
 /** [messaging.publish] Encerra o pop-up de vez (no ar ou pausado). */
 export async function endNotice(input: NoticeIdInput): Promise<ActionResult<NoticeStateChange>> {
-  return runAdminAction("messaging.publish", noticeIdSchema, input, ({ access, input: data, user }) =>
+  return runAdminAction("messaging.publish", "dever_legal", noticeIdSchema, input, ({ access, input: data, user }) =>
     changePopupStatus({ access, actorId: user.id, audit: "communication.ended", expectedUpdatedAt: data.expectedUpdatedAt, from: ["active", "paused"], id: data.id, to: "ended" })
   );
 }
@@ -1674,7 +1674,7 @@ async function withdrawSentNotice(
  * transicao, useNoticeActions). O updateTag do fluxo encerrado continua (cache das visitas de pagina).
  */
 export async function withdrawNotice(input: WithdrawNoticeInput): Promise<ActionResult<NoticeStateChange & { removed: number }>> {
-  return runAdminAction("messaging.publish", withdrawNoticeSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.publish", "dever_legal", withdrawNoticeSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
     const now = new Date();
     const row = await requireCampaign(db, data.id);
@@ -1718,7 +1718,7 @@ export async function withdrawNotice(input: WithdrawNoticeInput): Promise<Action
  * messaging.publish_large. O aviso nao muda (a versao devolvida e a mesma).
  */
 export async function reshowPopup(input: NoticeIdInput): Promise<ActionResult<{ reshown: number; updatedAt: string }>> {
-  return runAdminAction("messaging.publish", noticeIdSchema, input, async ({ access, input: data, user }) => {
+  return runAdminAction("messaging.publish", "conteudo", noticeIdSchema, input, async ({ access, input: data, user }) => {
     const db = communicationsDb();
     const now = new Date();
     const row = await requireCampaign(db, data.id);
@@ -1756,7 +1756,7 @@ export async function reshowPopup(input: NoticeIdInput): Promise<ActionResult<{ 
  * por requireCampaign (a enquete dele termina quando a notificacao sai do sino).
  */
 export async function closeNoticePoll(input: NoticeIdInput): Promise<ActionResult<NoticeStateChange>> {
-  return runAdminAction("messaging.publish", noticeIdSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.publish", "dever_legal", noticeIdSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
     const now = new Date();
     const row = await requireCampaign(db, data.id);
@@ -1844,7 +1844,7 @@ async function duplicateNoticeFollowUps(db: CommunicationsDb, input: { actorId: 
  * "fica no sino ate uma data" que ja passou, ou a menos de 1 hora, volta para os 90 dias).
  */
 export async function duplicateNotice(input: NoticeIdInput): Promise<ActionResult<{ id: string; updatedAt: string }>> {
-  return runAdminAction("messaging.write", noticeIdSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.write", "conteudo", noticeIdSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
     const now = Date.now();
     const row = await requireCampaign(db, data.id);
@@ -1902,7 +1902,7 @@ export async function duplicateNotice(input: NoticeIdInput): Promise<ActionResul
  * transicao) ou volta para ela (onDeleted). O updateTag do pop-up e do fluxo continua (o cache deles).
  */
 export async function deleteNotice(input: DeleteNoticeInput): Promise<ActionResult<{ id: string; removed: number }>> {
-  return runAdminAction("messaging.write", deleteNoticeSchema, input, async ({ access, input: data, user }) => {
+  return runAdminAction("messaging.write", "dever_legal", deleteNoticeSchema, input, async ({ access, input: data, user }) => {
     const db = communicationsDb();
     const now = new Date();
     const row = await requireCampaign(db, data.id);
@@ -1995,7 +1995,7 @@ export async function deleteNotice(input: DeleteNoticeInput): Promise<ActionResu
  * teste: nao conta nos numeros e nao muda o aviso. Repetir traz o teste de volta como nao lido.
  */
 export async function sendNoticeTestToMe(input: NoticeIdInput): Promise<ActionResult<{ sent: true }>> {
-  return runAdminAction("messaging.write", noticeIdSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.write", "conteudo", noticeIdSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
     const row = await requireCampaign(db, data.id);
 
@@ -2012,7 +2012,7 @@ export async function sendNoticeTestToMe(input: NoticeIdInput): Promise<ActionRe
 
 /** [messaging.write] Imagem 16:9 do aviso (slot "notice"): confere o WebP, envia e devolve a URL. */
 export async function uploadNoticeImage(input: { image: string }): Promise<ActionResult<{ url: string }>> {
-  return runAdminAction("messaging.write", uploadNoticeImageSchema, input, async ({ input: data }) => {
+  return runAdminAction("messaging.write", "conteudo", uploadNoticeImageSchema, input, async ({ input: data }) => {
     const check = checkProductImage("notice", decodeWebpDataUrl(data.image));
 
     if (!check.ok) {
@@ -2128,7 +2128,7 @@ function assertFollowUpTree(input: { drafts: readonly FollowUpDraft[]; entryId: 
  * aviso que ja saiu do sino de todos (409).
  */
 export async function saveNoticeFollowUps(input: SaveNoticeFollowUpsInput): Promise<ActionResult<SavedNoticeFollowUps>> {
-  return runAdminAction("messaging.write", saveNoticeFollowUpsSchema, input, async ({ access, input: data, user }) => {
+  return runAdminAction("messaging.write", "conteudo", saveNoticeFollowUpsSchema, input, async ({ access, input: data, user }) => {
     const db = communicationsDb();
     const now = new Date();
     const notice = await requireCampaign(db, data.noticeId);
@@ -2342,7 +2342,7 @@ const ZERO_COMMENTS = { d7: 0, d30: 0, d90: 0, total: 0 };
  * alguma regra pede. `qualified: null` enquanto a de cima nao saiu.
  */
 export async function previewFollowUpAudience(input: PreviewFollowUpAudienceInput): Promise<ActionResult<FollowUpAudiencePreview>> {
-  return runAdminAction("messaging.write", previewFollowUpAudienceSchema, input, async ({ input: data }) => {
+  return runAdminAction("messaging.write", "leitura", previewFollowUpAudienceSchema, input, async ({ input: data }) => {
     const db = communicationsDb();
     const now = new Date();
     const nowMs = now.getTime();
@@ -2540,7 +2540,7 @@ const followUpTestSchema = z.object({ nodeId: z.uuid({ error: "Passo inválido."
  * fluxos tem o proprio (sendFlowMessageTest).
  */
 export async function sendFollowUpTestToMe(input: { nodeId: string; noticeId: string }): Promise<ActionResult<{ sent: true }>> {
-  return runAdminAction("messaging.write", followUpTestSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.write", "conteudo", followUpTestSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
     const notice = await requireCampaign(db, data.noticeId);
     const loaded = await loadNoticeFlow(db, notice.id);
