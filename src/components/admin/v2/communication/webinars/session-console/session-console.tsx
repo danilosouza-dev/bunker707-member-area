@@ -62,7 +62,7 @@ import {
 } from "@/server/webinars/live-actions";
 import { LIVE_CONSOLE_COPY, banLabels, desiredLobby, handRows, liveControlsFor, type LiveConsolePerson } from "@/server/webinars/live-console-model";
 import { NO_BAN } from "@/server/webinars/live-model";
-import type { ChatMode, QuestionStatus, SlowModeSeconds } from "@/server/webinars/model";
+import type { ChatMode, QuestionStatus, SimulatedCountVary, SlowModeSeconds } from "@/server/webinars/model";
 import { LIVE_SCRIPT_LATE_MAX_MS } from "@/server/webinars/persona-model";
 import {
   answerQuestion,
@@ -852,14 +852,15 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
    * O Aplicar e o Tirar dos participantes simulados (D79): saveSimulatedAudience pelo console (sem frase nem caixa, D86);
    * o banner na falha; no sucesso, o aviso de que a sala recebe em segundos e o retrato de novo.
    */
-  function applyAudience(input: { extra: number }): Promise<boolean> {
+  function applyAudience(input: { extra: number; vary: SimulatedCountVary | null }): Promise<boolean> {
     if (!sessionId) {
       return Promise.resolve(false);
     }
     return run(
       "audience",
-      () => saveSimulatedAudience({ extra: input.extra, sessionId, source: "console" }),
-      () => adminToast.success(plateiaCopy.aplicado(input.extra))
+      // Com o "Variar sozinho" (rodada v9, docs/30 D90), o pedido leva a variacao junto do numero.
+      () => saveSimulatedAudience({ extra: input.extra, sessionId, source: "console", vary: input.vary }),
+      () => adminToast.success(input.vary && input.extra > 0 ? plateiaCopy.variar.aplicado(input.extra, input.vary.percent) : plateiaCopy.aplicado(input.extra))
     );
   }
 

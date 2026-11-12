@@ -137,7 +137,31 @@ export const SIMULACAO_COPY = {
     previa: "A simulação não aparece na prévia.",
     historico: "Mudanças",
     mudancaLinha: (quando: string, valor: string, nome: string) => `${quando} · ${valor} · ${nome}`,
-    antes: "antes do começo"
+    antes: "antes do começo",
+    /* "Variar sozinho" (rodada v9, pedido do produtor de 12/11/2026; docs/30 D90). */
+    variar: {
+      titulo: "Variar sozinho",
+      dica: "O número sobe e desce sozinho em volta do que você somou, igual para todos os alunos.",
+      ate: "Até (%)",
+      direcao: "Para onde varia",
+      direcoes: { both: "Para mais e para menos", down: "Só para menos", up: "Só para mais" },
+      aCadaDe: "A cada, de (segundos)",
+      aCadaAte: "Até (segundos)",
+      exemplo: (numero: number, percentual: number, minimo: number, maximo: number) =>
+        `Com +${numero.toLocaleString("pt-BR")} e ${percentual}%, o número fica entre ${minimo.toLocaleString("pt-BR")} e ${maximo.toLocaleString("pt-BR")}.`,
+      ritmo: (de: number, ate: number) => (de === ate ? `Muda a cada ${de} s.` : `Muda a cada ${de} a ${ate} s, em horas sorteadas.`),
+      exemploSemNumero: "Digite o número que soma ao real para ver o exemplo.",
+      percentualInvalido: (minimo: number, maximo: number) => `Use de ${minimo} a ${maximo}%.`,
+      segundosInvalidos: (minimo: number, maximo: number) => `Use de ${minimo} a ${maximo} segundos.`,
+      ordemInvalida: "O segundo número precisa ser maior ou igual ao primeiro.",
+      resumo: (percentual: number, direcao: string, de: number, ate: number) =>
+        `Varia sozinho até ${percentual}%, ${direcao}, a cada ${de === ate ? `${de} s` : `${de} a ${ate} s`}.`,
+      resumoDirecoes: { both: "para mais e para menos", down: "só para menos", up: "só para mais" },
+      curto: (percentual: number) => `varia até ${percentual}%`,
+      aplicado: (n: number, percentual: number) => `Participantes simulados: +${n.toLocaleString("pt-BR")}, variando até ${percentual}%. A sala recebe em segundos.`,
+      igual: "Esse já é o número e a variação de agora.",
+      soComNumero: "A variação vale quando o número somado é maior que zero."
+    }
   },
   aluno: {
     entrou: (nome: string) => `${nome} entrou`,

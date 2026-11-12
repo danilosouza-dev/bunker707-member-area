@@ -42,9 +42,9 @@ import { isSameVersion } from "@/server/communications/campaign-model";
 import { isPendingMigrationError } from "@/server/db/pending-migration";
 import { invalidateWebinars } from "./cache";
 import { WEBINARS_AUDIENCE_MIGRATION, WEBINARS_OFFERS_MIGRATION, WEBINARS_SCREEN_MIGRATION, WebinarError, WebinarFieldError, isMissingWebinarSchema, webinarsDb } from "./db";
-import { SIMULATION_LIMITS, type SessionSimulation, type SimulationChangeRecord, type WebinarSession } from "./model";
+import { SIMULATION_LIMITS, sameSimulatedCountVary, simulatedCountVaryOf, type SessionSimulation, type SimulationChangeRecord, type WebinarSession } from "./model";
 import { sessionFromRow, type SessionRow } from "./rows";
-import { simulationAudienceViewOf, type SimulationAudienceView } from "./simulation-audience-model";
+import { audienceVaryLabel, simulationAudienceViewOf, type SimulationAudienceView } from "./simulation-audience-model";
 import {
   clampSimulationAck,
   normalizeSimulationRules,
@@ -360,15 +360,21 @@ export async function saveSimulatedAudience(input: SaveSimulatedAudienceInput): 
     const session = sessionFromRow(row);
     const started = simulationSessionStarted(session, nowMs);
     const clockMs = simulationClockMs(session, nowMs);
-    const rule = simulationAudienceRule(data.extra);
-    if (simulationAudienceExtraOf(simulationAudienceRuleAt(simulation, started ? clockMs : Number.NaN)) === data.extra) {
-      throw new WebinarFieldError("extra", COPY.servidor.plateiaIgual);
+    // Com o "Variar sozinho" (D90), a regra leva a variacao (so com o numero maior que zero).
+    const rule = simulationAudienceRule(data.extra, data.vary);
+    const vary = simulatedCountVaryOf(rule);
+    const currentRule = simulationAudienceRuleAt(simulation, started ? clockMs : Number.NaN);
+    // O mesmo numero com a mesma variacao: nada mudaria.
+    if (simulationAudienceExtraOf(currentRule) === data.extra && sameSimulatedCountVary(vary, simulatedCountVaryOf(currentRule))) {
+      throw new WebinarFieldError("extra", vary ? COPY.plateia.variar.igual : COPY.servidor.plateiaIgual);
     }
 
     const flags = simulationAudienceFlagsOf({ joins: simulation.joins, saleNotices: simulation.saleNotices, showLiveBadge: row.show_live_badge === true });
     const responsible = getUserDisplayName(user).fullName;
     // Sem frase nem caixa na tela (D86, 12/11/2026): o servidor monta a frase da mudanca e a grava no registro.
-    const ackText = clampSimulationAck(simulationAudienceAckFor({ extra: data.extra, flags, live, nowMs, responsible }));
+    // A variacao entra no registro, depois da frase do numero.
+    const varyText = audienceVaryLabel(vary);
+    const ackText = clampSimulationAck([simulationAudienceAckFor({ extra: data.extra, flags, live, nowMs, responsible }), varyText].filter(Boolean).join(" "));
     const atMs = started ? Math.max(0, Math.floor(clockMs)) : null;
     // Antes do comeco, a regra da sessao passa a ser a nova. No ar, a regra de antes do comeco nunca muda, menos o "Só o
     // real", que vira "Real + 0" (o mesmo numero) na primeira mudanca que soma: o resumo do fim e a janela da sala
@@ -407,7 +413,8 @@ export async function saveSimulatedAudience(input: SaveSimulatedAudienceInput): 
         count_extra: data.extra,
         session_id: row.id,
         session_kind: row.kind,
-        source: data.source
+        source: data.source,
+        ...(vary ? { vary_direction: vary.direction, vary_every_max_seconds: vary.everyMaxSeconds, vary_every_min_seconds: vary.everyMinSeconds, vary_percent: vary.percent } : {})
       }
     });
     revalidatePath(`${LIST_PATH}/${row.webinar_id}`);

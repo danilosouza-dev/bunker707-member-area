@@ -7,11 +7,23 @@
 // tests/webinarios-plateia-modelo.test.mjs carrega direto pelo Node. Nada daqui entra num numero real (D6, M6).
 
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
-import { SIMULATION_LIMITS, type SessionSimulation, type SimulatedCountRule, type SimulationChangeRecord, type SimulationChangeSource } from "./model";
+import {
+  SIMULATION_LIMITS,
+  defaultSimulatedCountVary,
+  sameSimulatedCountVary,
+  simulatedCountVaryOf,
+  type SessionSimulation,
+  type SimulatedCountRule,
+  type SimulatedCountVary,
+  type SimulatedCountVaryDirection,
+  type SimulationChangeRecord,
+  type SimulationChangeSource
+} from "./model";
 import {
   simulationAudienceExtraOf,
   simulationAudienceRampEndMs,
   simulationAudienceRuleAt,
+  varyRange,
   type SimulationAudienceFlags
 } from "./simulation-model";
 
@@ -35,6 +47,8 @@ export type SimulationAudienceChangeView = {
   extra: number | null;
   id: string;
   source: SimulationChangeSource;
+  /** O "Variar sozinho" da mudanca (D90); ausente ou nulo, o numero parado. */
+  vary?: SimulatedCountVary | null;
 };
 
 /** O que o controle recebe do servidor (o console no retrato de 5 s; o card na leitura das regras). */
@@ -72,7 +86,8 @@ export function simulationAudienceViewOf(input: {
       changedByName: (record.changedBy ? input.names[record.changedBy] : null) ?? WEBINAR_COPY.simulacao.card.equipe,
       extra: simulationAudienceExtraOf(record.rule),
       id: record.id,
-      source: record.source
+      source: record.source,
+      ...(simulatedCountVaryOf(record.rule) ? { vary: simulatedCountVaryOf(record.rule) } : {})
     }));
   return {
     changes,
@@ -114,10 +129,91 @@ export function audienceInputOf(text: string): number | null {
 /** O momento da sessao para o controle: antes do comeco, no ar ou encerrada (a cancelada e o Replay nao tem controle). */
 export type AudiencePhase = "before" | "ended" | "on_air";
 
+/* ------------------------------------------------------------------------------------------------
+ * "Variar sozinho" (rodada v9, pedido do produtor de 12/11/2026; docs/30 D90)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Os campos do "Variar sozinho" (os numeros como texto enquanto a equipe digita). */
+export type AudienceVaryForm = { direction: SimulatedCountVaryDirection; everyMax: string; everyMin: string; on: boolean; percent: string };
+
+/** Os campos a partir do que vale agora: desligado, com os numeros do padrao (5 %, 20 a 60 s) prontos para ligar. */
+export function audienceVaryFormOf(vary: SimulatedCountVary | null | undefined): AudienceVaryForm {
+  const shown = vary ?? defaultSimulatedCountVary();
+  return { direction: shown.direction, everyMax: String(shown.everyMaxSeconds), everyMin: String(shown.everyMinSeconds), on: Boolean(vary), percent: String(shown.percent) };
+}
+
+export type AudienceVaryResult = {
+  errors: { everyMax?: string; everyMin?: string; percent?: string };
+  /** Os campos conferem (desligado confere sempre). */
+  valid: boolean;
+  /** A variacao a gravar; nula desligada ou com erro. */
+  vary: SimulatedCountVary | null;
+};
+
+/** Os campos de volta como a variacao, ou o erro de cada campo. Desligado: nula, sem erro. */
+export function audienceVaryOfForm(form: AudienceVaryForm): AudienceVaryResult {
+  if (!form.on) {
+    return { errors: {}, valid: true, vary: null };
+  }
+  const V = COPY.variar;
+  const errors: AudienceVaryResult["errors"] = {};
+  const integer = (text: string) => (/^\d{1,4}$/.test(text.trim()) ? Number(text.trim()) : Number.NaN);
+  const within = (value: number, min: number, max: number) => Number.isInteger(value) && value >= min && value <= max;
+  const percent = integer(form.percent);
+  const everyMin = integer(form.everyMin);
+  const everyMax = integer(form.everyMax);
+  if (!within(percent, SIMULATION_LIMITS.varyPercentMin, SIMULATION_LIMITS.varyPercentMax)) {
+    errors.percent = V.percentualInvalido(SIMULATION_LIMITS.varyPercentMin, SIMULATION_LIMITS.varyPercentMax);
+  }
+  if (!within(everyMin, SIMULATION_LIMITS.varyEverySecondsMin, SIMULATION_LIMITS.varyEverySecondsMax)) {
+    errors.everyMin = V.segundosInvalidos(SIMULATION_LIMITS.varyEverySecondsMin, SIMULATION_LIMITS.varyEverySecondsMax);
+  }
+  if (!within(everyMax, SIMULATION_LIMITS.varyEverySecondsMin, SIMULATION_LIMITS.varyEverySecondsMax)) {
+    errors.everyMax = V.segundosInvalidos(SIMULATION_LIMITS.varyEverySecondsMin, SIMULATION_LIMITS.varyEverySecondsMax);
+  } else if (!errors.everyMin && everyMax < everyMin) {
+    errors.everyMax = V.ordemInvalida;
+  }
+  if (Object.keys(errors).length > 0) {
+    return { errors, valid: false, vary: null };
+  }
+  return { errors, valid: true, vary: { direction: form.direction, everyMaxSeconds: everyMax, everyMinSeconds: everyMin, percent } };
+}
+
+/**
+ * A frase de exemplo com os numeros da tela ("Com +300 e 5%, o número fica entre 285 e 315. Muda a cada 20 a 60 s, em
+ * horas sorteadas."); sem numero maior que zero, o pedido do numero; com erro nos campos, nula (o erro ja aparece).
+ */
+export function audienceVaryExample(extra: number | null, form: AudienceVaryForm): string | null {
+  const { vary } = audienceVaryOfForm(form);
+  if (!form.on || !vary) {
+    return null;
+  }
+  if (extra === null || !(extra > 0)) {
+    return COPY.variar.exemploSemNumero;
+  }
+  const range = varyRange(extra, vary);
+  return `${COPY.variar.exemplo(extra, vary.percent, range.min, range.max)} ${COPY.variar.ritmo(vary.everyMinSeconds, vary.everyMaxSeconds)}`;
+}
+
+/** A variacao em uma frase, para debaixo do numero de agora ("Varia sozinho até 5%, para mais e para menos, a cada 20 a 60 s."). */
+export function audienceVaryLabel(vary: SimulatedCountVary | null | undefined): string | null {
+  return vary ? COPY.variar.resumo(vary.percent, COPY.variar.resumoDirecoes[vary.direction], vary.everyMinSeconds, vary.everyMaxSeconds) : null;
+}
+
+/** O valor de uma linha das mudancas: "+300" ou "+300, varia até 5%" ("—" na faixa que varia). */
+export function audienceChangeValue(change: Pick<SimulationAudienceChangeView, "extra" | "vary">): string {
+  if (change.extra === null) {
+    return "—";
+  }
+  return change.vary && change.extra > 0 ? `${COPY.valor(change.extra)}, ${COPY.variar.curto(change.vary.percent)}` : COPY.valor(change.extra);
+}
+
 /**
  * O estado do formulario: o numero, o erro do campo e se o Aplicar liga (o numero valido, diferente do de agora, a
  * sessao de pe, com permissao e sem outra acao em andamento). Sem frase nem caixa desde 12/11/2026 (D86): o servidor
- * grava a frase da mudanca sozinho.
+ * grava a frase da mudanca sozinho. Com o "Variar sozinho" (D90, `vary`: os campos da tela): o que vai no pedido e
+ * `applyExtra` e `vary`; o campo do numero vazio vale o numero de agora (ligar ou mudar a variacao sem digitar o
+ * numero de novo), e "igual" so quando o numero e a variacao sao os de agora.
  */
 export function audienceFormState(input: {
   busy: boolean;
@@ -126,17 +222,41 @@ export function audienceFormState(input: {
   pendingMigration: boolean;
   phase: AudiencePhase;
   text: string;
-}): { canApply: boolean; canRemove: boolean; error: string | null; extra: number | null; same: boolean } {
+  vary?: AudienceVaryForm;
+}): {
+  /** O +N que o Aplicar manda: o digitado ou, com o campo vazio, o de agora; nulo sem numero. */
+  applyExtra: number | null;
+  canApply: boolean;
+  canRemove: boolean;
+  error: string | null;
+  extra: number | null;
+  same: boolean;
+  /** A variacao que o Aplicar manda (nula: o numero parado). */
+  vary: SimulatedCountVary | null;
+  varyErrors: AudienceVaryResult["errors"];
+} {
   const extra = audienceInputOf(input.text);
-  const error = input.text.trim() === "" ? null : extra === null ? COPY.numeroInvalido(SIMULATION_LIMITS.countMax) : null;
+  const empty = input.text.trim() === "";
+  const error = empty ? null : extra === null ? COPY.numeroInvalido(SIMULATION_LIMITS.countMax) : null;
   const currentExtra = simulationAudienceExtraOf(input.current);
-  const same = extra !== null && currentExtra !== null && extra === currentExtra;
+  const currentVary = simulatedCountVaryOf(input.current);
+  const form = audienceVaryOfForm(input.vary ?? audienceVaryFormOf(null));
+  const applyExtra = extra !== null ? extra : empty && currentExtra !== null && currentExtra > 0 ? currentExtra : null;
+  // Com o +0 a variacao nao vale: o pedido vai sem ela.
+  const vary = applyExtra !== null && applyExtra > 0 ? form.vary : null;
+  const sameNumber = applyExtra !== null && currentExtra !== null && applyExtra === currentExtra;
+  const sameVary = sameSimulatedCountVary(vary, currentVary);
+  const same = sameNumber && sameVary;
   const writable = input.canPublish && !input.busy && !input.pendingMigration && input.phase !== "ended";
   return {
-    canApply: writable && extra !== null && !same,
+    applyExtra,
+    canApply: writable && applyExtra !== null && form.valid && !same,
     canRemove: writable && currentExtra !== 0,
     error,
     extra,
-    same
+    // A frase "já é o de agora" so com algo digitado (o campo vazio com a variacao igual nao tem o que avisar).
+    same: same && !empty,
+    vary,
+    varyErrors: form.errors
   };
 }

@@ -322,3 +322,86 @@ test("revisao v8, achado 8: as mudancas de varias sessoes passam das 1.000 linha
   assert.equal(daUltima.length, SIMULATION_LIMITS.countChangesMax);
   assert.deepEqual(daUltima.at(-1).rule, { base: 5199, jitter: 0, mode: "fixed", peak: 5199 }, "a mudanca que vale agora na ultima sessao");
 });
+
+/* "Variar sozinho" (rodada v9, pedido do produtor de 12/11/2026; docs/30 D90). */
+
+const VARIA = { direction: "both", everyMaxSeconds: 60, everyMinSeconds: 20, percent: 5 };
+const VARIA_NA_LINHA = { direction: "both", every_max_seconds: 60, every_min_seconds: 20, percent: 5 };
+
+test("Variar sozinho no ar: a mudanca grava a variacao na regra e na frase; o mesmo numero com a mesma variacao recusa; mudar ou desligar a variacao aplica; o +0 ignora", async () => {
+  const db = usar(bancoDaSimulacao({ tables: escolaAoVivo() }));
+
+  const salvo = ok(await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION, vary: VARIA }));
+  const [mudanca] = mudancas(db);
+  assert.deepEqual(mudanca.count_rule, { base: 300, jitter: 0, mode: "fixed", peak: 300, vary: VARIA_NA_LINHA });
+  assert.equal(mudanca.ack_text, `${frase(300)} Varia sozinho até 5%, para mais e para menos, a cada 20 a 60 s.`, "a variacao entra no registro (D80)");
+  assert.deepEqual(salvo.audience.current, { base: 300, jitter: 0, mode: "fixed", peak: 300, vary: VARIA });
+  assert.deepEqual(salvo.audience.changes[0].vary, VARIA);
+  const auditoria = db.tables.admin_audit_log.find((row) => row.action === "webinar.simulation_audience_changed");
+  assert.deepEqual([auditoria.metadata.vary_percent, auditoria.metadata.vary_direction, auditoria.metadata.vary_every_min_seconds, auditoria.metadata.vary_every_max_seconds], [5, "both", 20, 60]);
+
+  // A janela da sala depois da rampa: o numero dentro da faixa do exemplo, mudando sozinho.
+  const simulation = await store.fetchSessionSimulation(db, LIVE_SESSION);
+  const depois = mudanca.at_offset_ms + SIMULATION_LIMITS.countRampSeconds * 1000 + 15_000;
+  const vistos = new Set();
+  for (let offset = depois; offset < depois + 20 * MIN; offset += 5_000) {
+    const numero = model.simulationCounterNow({ durationMs: 60 * MIN, endMs: Number.POSITIVE_INFINITY, kind: "live", offsetMs: offset, simulation, status: "live" });
+    assert.ok(numero >= 285 && numero <= 315, `${offset}: ${numero}`);
+    vistos.add(numero);
+  }
+  assert.ok(vistos.size >= 5, "o numero muda sozinho");
+
+  // O mesmo numero com a mesma variacao: nada mudaria.
+  const igual = await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION, vary: { ...VARIA } });
+  assert.deepEqual([igual.status, igual.fieldErrors?.extra?.[0]], [400, WEBINAR_COPY.simulacao.plateia.variar.igual]);
+  assert.equal(mudancas(db).length, 1);
+
+  // O mesmo numero com outra variacao aplica; sem a variacao (desligar) tambem.
+  ok(await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION, vary: { ...VARIA, direction: "up", percent: 10 } }));
+  assert.deepEqual(mudancas(db).at(-1).count_rule.vary, { ...VARIA_NA_LINHA, direction: "up", percent: 10 });
+  const desligada = ok(await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION }));
+  assert.deepEqual(mudancas(db).at(-1).count_rule, { base: 300, jitter: 0, mode: "fixed", peak: 300 }, "sem a chave, o numero parado");
+  assert.equal(desligada.audience.current.vary, undefined);
+  assert.equal(mudancas(db).at(-1).ack_text, frase(300));
+  const parado = await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION, vary: null });
+  assert.deepEqual([parado.status, parado.fieldErrors?.extra?.[0]], [400, SERVIDOR.plateiaIgual]);
+
+  // Com o +0 (o Tirar) a variacao e ignorada.
+  ok(await actions.saveSimulatedAudience({ extra: 0, sessionId: LIVE_SESSION, vary: VARIA }));
+  assert.equal(mudancas(db).at(-1).count_rule, null);
+
+  // Fora dos limites: 400 no campo, nada gravado.
+  const total = mudancas(db).length;
+  const invalida = await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION, vary: { ...VARIA, percent: 80 } });
+  assert.equal(invalida.status, 400);
+  assert.equal(mudancas(db).length, total);
+});
+
+test("Variar sozinho antes do comeco: a regra da sessao leva a variacao e vale na hora; o resumo do fim (o tick) conta o pico da variacao", async () => {
+  const db = usar(bancoDaSimulacao({ tables: escolaAoVivo({ scheduled_at: new Date(Date.now() - 5 * MIN).toISOString(), started_at: null, status: "waiting" }) }));
+  ok(await actions.saveSimulatedAudience({ extra: 200, sessionId: LIVE_SESSION, source: "editor", vary: { ...VARIA, direction: "up", percent: 10 } }));
+  assert.deepEqual(linha(db, LIVE_SESSION).simulated_count_rule, { base: 200, jitter: 0, mode: "fixed", peak: 200, vary: { ...VARIA_NA_LINHA, direction: "up", percent: 10 } });
+  assert.equal(mudancas(db)[0].at_offset_ms, null);
+
+  // A sessao encerrada 30 min depois: o resumo e o maior numero que a turma viu, acima do fixo e dentro da faixa.
+  const startedAt = Date.now() - 50 * MIN;
+  const tabelas = escolaAoVivo({
+    ended_at: new Date(startedAt + 30 * MIN).toISOString(),
+    simulated_count_rule: { base: 200, jitter: 0, mode: "fixed", peak: 200, vary: { ...VARIA_NA_LINHA, direction: "up", percent: 10 } },
+    simulation_ack_text: "Decisão do produtor em 12/11/2026: …",
+    simulation_decided_at: new Date(startedAt).toISOString(),
+    simulation_decided_by: PRODUTORA,
+    started_at: new Date(startedAt).toISOString(),
+    status: "ended"
+  });
+  const encerrada = usar(bancoDaSimulacao({ tables: tabelas }));
+  const original = console.info;
+  console.info = () => undefined;
+  try {
+    await tick.runSimulationSummariesTick({ db: encerrada });
+  } finally {
+    console.info = original;
+  }
+  const resumo = linha(encerrada, LIVE_SESSION).simulation_summary;
+  assert.ok(resumo.counter_max > 200 && resumo.counter_max <= 220, `o pico da variacao entra no resumo honesto (${resumo.counter_max})`);
+});

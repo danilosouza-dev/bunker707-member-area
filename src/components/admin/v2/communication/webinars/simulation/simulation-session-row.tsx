@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { formatSaoPauloDateTime } from "@/server/communications/campaign-model";
 import { consoleAckSentence } from "@/server/webinars/console-model";
 import { WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
-import type { WebinarSession } from "@/server/webinars/model";
+import type { SimulatedCountVary, WebinarSession } from "@/server/webinars/model";
 import { saveSimulation } from "@/server/webinars/room-actions";
 import { saveSessionSimulation, saveSimulatedAudience, type SessionSimulationView } from "@/server/webinars/simulation-actions";
 import type { SimulationAudienceView } from "@/server/webinars/simulation-audience-model";
@@ -164,15 +164,16 @@ export function SimulationSessionRow({
   }
 
   /** O Aplicar e o Tirar do controle (D79), pelo card: a origem "editor"; a falha vai ao banner do card. */
-  async function applyAudience(input: { extra: number }): Promise<boolean> {
+  async function applyAudience(input: { extra: number; vary: SimulatedCountVary | null }): Promise<boolean> {
     onSaving(true);
-    const result = await saveSimulatedAudience({ extra: input.extra, sessionId: session.id, source: "editor" });
+    // Com o "Variar sozinho" (rodada v9, docs/30 D90), o pedido leva a variacao junto do numero.
+    const result = await saveSimulatedAudience({ extra: input.extra, sessionId: session.id, source: "editor", vary: input.vary });
     onSaving(false);
     if (!result.ok) {
       onFailure({ message: firstFieldError(result.fieldErrors) ?? result.error, status: result.status });
       return false;
     }
-    onSaved({ audience: result.data.audience, deciderName: result.data.deciderName, notice: PLATEIA.aplicado(input.extra), session: result.data.session, simulation: null });
+    onSaved({ audience: result.data.audience, deciderName: result.data.deciderName, notice: input.vary && input.extra > 0 ? PLATEIA.variar.aplicado(input.extra, input.vary.percent) : PLATEIA.aplicado(input.extra), session: result.data.session, simulation: null });
     return true;
   }
 

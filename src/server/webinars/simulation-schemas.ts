@@ -3,24 +3,46 @@
 // servidor monta e grava a frase da decisao; as mensagens passam pela lista PROIBIDAS_WEBINARIO.
 
 import { z } from "zod";
-import { CHAT_LIMITS, SIMULATED_COUNT_MODES, SIMULATION_LIMITS } from "./model";
+import { WEBINAR_COPY } from "../../lib/webinar-copy";
+import { CHAT_LIMITS, SIMULATED_COUNT_MODES, SIMULATED_COUNT_VARY_DIRECTIONS, SIMULATION_LIMITS } from "./model";
 
 export const SIMULATION_MESSAGES = {
   count: `Use números de 0 a ${SIMULATION_LIMITS.countMax}.`,
   invalid: "Pedido inválido.",
   peak: "O máximo precisa ser maior ou igual ao mínimo.",
   saleText: `Cada aviso tem de 1 a ${SIMULATION_LIMITS.saleNoticeText} caracteres.`,
-  saleTooMany: `No máximo ${SIMULATION_LIMITS.saleNoticesMax} avisos por sessão.`
+  saleTooMany: `No máximo ${SIMULATION_LIMITS.saleNoticesMax} avisos por sessão.`,
+  /* "Variar sozinho" (rodada v9, docs/30 D90). */
+  varyEvery: WEBINAR_COPY.simulacao.plateia.variar.segundosInvalidos(SIMULATION_LIMITS.varyEverySecondsMin, SIMULATION_LIMITS.varyEverySecondsMax),
+  varyOrder: WEBINAR_COPY.simulacao.plateia.variar.ordemInvalida,
+  varyPercent: WEBINAR_COPY.simulacao.plateia.variar.percentualInvalido(SIMULATION_LIMITS.varyPercentMin, SIMULATION_LIMITS.varyPercentMax)
 } as const;
 
 const count = z.number().int().min(0, SIMULATION_MESSAGES.count).max(SIMULATION_LIMITS.countMax, SIMULATION_MESSAGES.count);
+
+const varySeconds = z.number().int().min(SIMULATION_LIMITS.varyEverySecondsMin, SIMULATION_MESSAGES.varyEvery).max(SIMULATION_LIMITS.varyEverySecondsMax, SIMULATION_MESSAGES.varyEvery);
+
+/**
+ * "Variar sozinho" (rodada v9, docs/30 D90): ate `percent` % do numero fixo, para o lado de `direction`, uma mudanca a
+ * cada `everyMinSeconds` a `everyMaxSeconds` segundos. So vale no "Real + número fixo" maior que zero; nos outros
+ * modos e ignorado ao gravar (rows.simulatedCountRuleToRow).
+ */
+export const simulatedCountVarySchema = z
+  .object({
+    direction: z.enum(SIMULATED_COUNT_VARY_DIRECTIONS),
+    everyMaxSeconds: varySeconds,
+    everyMinSeconds: varySeconds,
+    percent: z.number().int().min(SIMULATION_LIMITS.varyPercentMin, SIMULATION_MESSAGES.varyPercent).max(SIMULATION_LIMITS.varyPercentMax, SIMULATION_MESSAGES.varyPercent)
+  })
+  .refine((vary) => vary.everyMaxSeconds >= vary.everyMinSeconds, { message: SIMULATION_MESSAGES.varyOrder, path: ["everyMaxSeconds"] });
 
 export const simulatedCountRuleSchema = z
   .object({
     base: count.default(0),
     jitter: z.number().int().min(0).max(SIMULATION_LIMITS.jitterMax).default(0),
     mode: z.enum(SIMULATED_COUNT_MODES).default("off"),
-    peak: count.default(0)
+    peak: count.default(0),
+    vary: simulatedCountVarySchema.nullable().optional()
   })
   .refine((rule) => rule.mode !== "curve" || rule.peak >= rule.base, { message: SIMULATION_MESSAGES.peak, path: ["peak"] });
 
@@ -86,7 +108,9 @@ export const saveSessionSimulationSchema = simulationRulesSchema.extend({
 export const saveSimulatedAudienceSchema = z.object({
   extra: count,
   sessionId: z.uuid({ error: SIMULATION_MESSAGES.invalid }),
-  source: z.enum(["console", "editor"]).default("console")
+  source: z.enum(["console", "editor"]).default("console"),
+  /** "Variar sozinho" (D90): ausente ou nula, o numero parado. Com o +0 (o Tirar), ignorada. */
+  vary: simulatedCountVarySchema.nullable().optional()
 });
 
 /** GET /api/webinars/[id]/simulation?sessao=&from=&to= (ms do relogio do video; no maximo a janela de 2 min). */

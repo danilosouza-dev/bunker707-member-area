@@ -18,7 +18,10 @@ import { LIVE_GRAVADA_NO_AR_DE_TESTE, limparWebinarios, seedEscolaDeTeste, seedL
 // - P11: Mostrar na tela uma mensagem (a consulta do chat com o carimbo velho traz o comentario numa chamada, com o
 //   nome, o texto e a foto pela regra do chat), o mesmo de novo nao grava nada, a pergunta troca a mensagem
 //   (`replaced`), apagar a mensagem ou dispensar a pergunta tira da tela (`removed`), Remover as mensagens do aluno
-//   tira o que e dele (a leitura do dono pelo embedding do PostgREST), Tirar da tela (`team`); o analista recebe 403.
+//   tira o que e dele (a leitura do dono pelo embedding do PostgREST), Tirar da tela (`team`); o analista recebe 403;
+// - P9 (D90): os participantes simulados com "Variar sozinho" na gravada no ar: a regra com a variacao fica no jsonb
+//   que ja existia (sem migracao), a janela da rota traz os pontos das mudancas e, depois da rampa, o numero fica
+//   dentro da faixa; a semente e a regra nunca vao para a aluna.
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
@@ -33,6 +36,9 @@ const { clearScreenItemColumnsMemory } = await import("../../src/server/webinars
 const { clearV9ColumnsMemory } = await import("../../src/server/webinars/chat-store.ts");
 const { clearAuthorPhotoCache } = await import("../../src/server/webinars/author-photos.ts");
 const { resetRoomLimits } = await import("../../src/server/webinars/room-limits.ts");
+const simulationRoute = await import("../../src/app/api/webinars/[id]/simulation/route.ts");
+const acoesDaSimulacao = await import("../../src/server/webinars/simulation-actions.ts");
+const { resetRoomAccessCache } = await import("../../src/server/webinars/room-route.ts");
 const { CHAT_CONSENT_VERSION } = await import("../../src/server/webinars/model.ts");
 const { WEBINAR_COPY } = await import("../../src/lib/webinar-copy.ts");
 
@@ -337,4 +343,37 @@ test("4. P11: Mostrar na tela a mensagem, o mesmo de novo nada, a pergunta troca
   const ultima = (await comentarios()).at(-1);
   assert.deepEqual([ultima.hidden_reason, ultima.hidden_by, ultima.shown_by], ["team", produtor.id, produtor.id]);
   assert.deepEqual(ok(await screenActions.hideScreenComment({ sessionId: GRAVADA.sessaoId })), { hidden: false, sessionId: GRAVADA.sessaoId }, "sem nada na tela, nada muda");
+});
+
+test("5. P9: Variar sozinho na gravada no ar: a regra com a variacao no jsonb de sempre, a janela da rota com os pontos das mudancas e o numero dentro da faixa depois da rampa", async () => {
+  const simulationActions = comoEquipe(acoesDaSimulacao);
+  const VARIA = { direction: "both", everyMaxSeconds: 12, everyMinSeconds: 5, percent: 10 };
+  const salvo = ok(await simulationActions.saveSimulatedAudience({ extra: 300, sessionId: GRAVADA.sessaoId, vary: VARIA }));
+  assert.deepEqual(salvo.audience.current.vary, VARIA);
+
+  const [linha] = unwrap(await db.from("webinar_simulation_changes").select("at_offset_ms, count_rule, ack_text, source").eq("session_id", GRAVADA.sessaoId), "Lendo a mudanca gravada");
+  assert.deepEqual(linha.count_rule, { base: 300, jitter: 0, mode: "fixed", peak: 300, vary: { direction: "both", every_max_seconds: 12, every_min_seconds: 5, percent: 10 } });
+  assert.match(linha.ack_text, /Varia sozinho até 10%, para mais e para menos, a cada 5 a 12 s\.$/);
+  assert.ok(linha.at_offset_ms >= 100_000, `no ar: o offset do relogio da Simulacao (${linha.at_offset_ms})`);
+
+  // A janela depois da rampa de 90 s, como a aluna pede.
+  const fromMs = Math.ceil((linha.at_offset_ms + 90_000) / 15_000) * 15_000 + 15_000;
+  resetRoomAccessCache();
+  actAs(aluna);
+  const resposta = await json(await simulationRoute.GET(new Request(`http://localhost/api/webinars/${GRAVADA.id}/simulation?sessao=${GRAVADA.sessaoId}&from=${fromMs}&to=${fromMs + 120_000}`), contexto));
+  assert.equal(resposta.status, 200, JSON.stringify(resposta.body));
+  const pontos = resposta.body.data.counter;
+  assert.equal(resposta.body.data.enabled, true);
+  assert.ok(pontos.length > 9 + 8, `os pontos de 15 s e os das mudancas (${pontos.length})`);
+  for (const ponto of pontos) {
+    assert.ok(ponto.extra >= 270 && ponto.extra <= 330, `${ponto.atMs}: ${ponto.extra}`);
+  }
+  assert.ok(new Set(pontos.map((ponto) => ponto.extra)).size >= 4, "o numero muda sozinho");
+  assert.doesNotMatch(JSON.stringify(resposta.body), /seed|percent|vary|every/, "nada da semente nem da regra vai para a aluna");
+
+  // O mesmo de novo recusa; desligar a variacao aplica e a regra volta a de sempre.
+  falhou(await simulationActions.saveSimulatedAudience({ extra: 300, sessionId: GRAVADA.sessaoId, vary: VARIA }), 400);
+  ok(await simulationActions.saveSimulatedAudience({ extra: 300, sessionId: GRAVADA.sessaoId }));
+  const linhas = unwrap(await db.from("webinar_simulation_changes").select("count_rule").eq("session_id", GRAVADA.sessaoId).order("created_at", { ascending: true }), "Lendo as mudancas");
+  assert.deepEqual(linhas.at(-1).count_rule, { base: 300, jitter: 0, mode: "fixed", peak: 300 });
 });

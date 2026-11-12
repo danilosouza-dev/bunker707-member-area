@@ -42,7 +42,7 @@ import {
   type SessionExport
 } from "./export-queries";
 import { offerClickedByUser } from "./export-model";
-import { SCRIPT_TRIGGERS, WEBINAR_EXPORT_REPORTS, toTime, type Poll, type QuestionStatus, type ScriptTrigger, type WebinarExportReport, type WebinarKind, type WebinarSession, type WebinarStatus } from "./model";
+import { SCRIPT_TRIGGERS, WEBINAR_EXPORT_REPORTS, simulatedCountVaryOf, toTime, type Poll, type QuestionStatus, type ScriptTrigger, type WebinarExportReport, type WebinarKind, type WebinarSession, type WebinarStatus } from "./model";
 import {
   absenteesNoticeReady,
   defaultReportSessionId,
@@ -340,7 +340,8 @@ export async function loadWebinarReportPage(db: WebinarsDb, webinarId: string, o
         changedAt: change.changedAt,
         changedByName: (change.changedBy ? people[change.changedBy]?.name : null) ?? WEBINAR_COPY.simulacao.card.equipe,
         extra: change.rule.mode === "off" ? 0 : change.rule.mode === "fixed" ? change.rule.base : null,
-        source: change.source
+        source: change.source,
+        ...(simulatedCountVaryOf(change.rule) ? { vary: simulatedCountVaryOf(change.rule) } : {})
       })),
       decidedAt: session.simulationDecidedAt,
       decidedByName: session.simulationDecidedBy ? (people[session.simulationDecidedBy]?.name ?? null) : null,

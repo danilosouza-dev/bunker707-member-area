@@ -97,7 +97,10 @@ test("o controle: o numero somado agora, quem mudou por ultimo, os atalhos, Apli
   assert.match(text, /No ar, o número sobe ou desce em linha reta em 1 min 30 s, igual para todos\./);
   assert.match(markup, /<a[^>]*data-simulation-audience-link=""[^>]*href="\/admin\/comunicacao\/webinarios\/w#webinar-card-simulacao"[^>]*>Ver no editor<\/a>/, "o atalho para o card do editor");
   assert.match(text, /Mudanças \(2\) 10:00 · \+300 · Carla Produtora antes do começo · \+100 · Ana Souza/);
-  assert.doesNotMatch(markup, /data-simulation-audience-sentence|data-simulation-audience-confirm|type="checkbox"/, "sem frase e sem caixa (decisao do produtor em 12/11/2026, D86)");
+  assert.doesNotMatch(markup, /data-simulation-audience-sentence|data-simulation-audience-confirm/, "sem frase e sem caixa de confirmacao (decisao do produtor em 12/11/2026, D86)");
+  // A unica caixa da tela e a do "Variar sozinho" (rodada v9, D90; tests/webinarios-v9-variar-sozinho.test.mjs).
+  assert.equal(count(markup, /type="checkbox"/g), 1);
+  assert.match(markup, /data-simulation-vary-toggle=""/);
   assert.doesNotMatch(text, /Decisão do produtor|Confirmo|Marque a confirmação/, "nenhuma frase de decisao na tela");
   assert.doesNotMatch(text, /personagem/i);
 });
@@ -132,7 +135,7 @@ test("a frase da mudanca continua a mesma conta do servidor (gravada no registro
   assert.match(sentence, /^Decisão do produtor em 11\/11\/2026: nesta live ao vivo, .* A partir de agora, os participantes simulados somam \+500 ao número de quem assiste\. Responsável: Produtora de Teste\.$/);
   const component = source("src/components/admin/v2/communication/webinars/simulation/simulation-audience-control.tsx");
   assert.doesNotMatch(component, /acknowledged|checkbox|needsAck|sentence/, "nada de caixa nem frase no controle");
-  assert.match(component, /onClick=\{\(\) => void apply\(0\)\}/, "o Tirar direto (o servidor grava a frase do +0)");
+  assert.match(component, /onClick=\{\(\) => void apply\(0, null\)\}/, "o Tirar direto, sem a variacao (o servidor grava a frase do +0)");
   // Com um numero no campo o Aplicar liga de primeira: o controle desenhado com o numero digitado nao existe no HTML do
   // servidor (o estado e do navegador), entao a regra fica no audienceFormState (webinarios-plateia-modelo).
 });
@@ -180,7 +183,8 @@ test("a fiacao do console: o selo do palco e o do topo abrem a Presença com o c
   assert.equal(count(consoleSource, /onPresent=\{audience \? openAudience : undefined\}/g), 2, "o topo e o palco");
   assert.match(consoleSource, /setPanelView\(\{ more: "presenca" \}\);[\s\S]*?document\.getElementById\(AUDIENCE_TITLE_ID\)/);
   assert.match(consoleSource, /consoleMoreEntriesFor\(\{ audience: audience !== null,/);
-  assert.match(consoleSource, /saveSimulatedAudience\(\{ extra: input\.extra, sessionId, source: "console" \}\)/, "sem frase nem caixa no pedido (D86)");
+  // Sem frase nem caixa no pedido (D86); desde a rodada v9, o pedido leva o "Variar sozinho" junto do numero (D90).
+  assert.match(consoleSource, /saveSimulatedAudience\(\{ extra: input\.extra, sessionId, source: "console", vary: input\.vary \}\)/);
   assert.match(consoleSource, /<SimulationAudienceControl[\s\S]*?link=\{\{ href: `\$\{webinarAdminHref\(webinar\.id\)\}#webinar-card-simulacao`, label: plateiaCopy\.verNoEditor \}\}[\s\S]*?titleId=\{AUDIENCE_TITLE_ID\}/);
   const presenca = consoleSource.slice(consoleSource.indexOf("presenca:"), consoleSource.indexOf("tela:", consoleSource.indexOf("presenca:")));
   assert.ok(presenca.indexOf("<SimulationAudienceControl") < presenca.indexOf("<ConsolePresencePanel"), "os participantes simulados no alto da Presença");

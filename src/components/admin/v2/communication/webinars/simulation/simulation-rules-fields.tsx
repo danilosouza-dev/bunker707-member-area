@@ -6,13 +6,16 @@ import { Button } from "@/components/ui/button";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { SIMULATION_LIMITS, type SimulatedCountMode } from "@/server/webinars/model";
 import { AdminField, PillGroup, adminInputClass, fieldDescribedBy } from "../../../form";
+import { audienceInputOf, audienceVaryExample, audienceVaryFormOf } from "@/server/webinars/simulation-audience-model";
 import { addSaleNotice, removeSaleNotice, simulationCountHint, updateSaleNotice, type SimulationForm } from "./simulation-card-model";
+import { SimulationVaryFields } from "./simulation-vary-fields";
 
 // Os tres blocos da Simulacao de uma sessao gravada (docs/30 §2.2, §4.3 e §6.6): Contador de plateia (So o real /
 // Real + numero fixo / Real + faixa que varia, com minimo, maximo e variacao), Entradas e saidas (desligadas / a cada
 // N s, no maximo M, com nomes genericos) e Notificacoes de venda (desligadas por padrao; a lista de texto + minuto do
 // video). So os campos: quem usa guarda o formulario (simulation-card-model.ts), mostra a frase de §8.6 e salva. O card
-// Simulacao usa por sessao; o "Comeca quando voce entra" (4e) pode usar no modelo da sessao.
+// Simulacao usa por sessao; o "Comeca quando voce entra" (4e) pode usar no modelo da sessao. No "Real + número fixo",
+// debaixo do numero, o "Variar sozinho" (rodada v9, docs/30 D90; simulation-vary-fields.tsx).
 
 const COPY = WEBINAR_COPY.simulacao.card;
 
@@ -101,6 +104,16 @@ export function SimulationRulesFields({ disabled, errors, form, hideCount = fals
               min={0}
               onChange={(base) => patch({ base, peak: base })}
               value={form.base}
+            />
+          ) : null}
+          {form.countMode === "fixed" ? (
+            <SimulationVaryFields
+              disabled={disabled}
+              errors={{ everyMax: errors.varyEveryMax, everyMin: errors.varyEveryMin, percent: errors.varyPercent }}
+              example={audienceVaryExample(audienceInputOf(form.base), form.vary ?? audienceVaryFormOf(null))}
+              form={form.vary ?? audienceVaryFormOf(null)}
+              idBase={`${idBase}-contador`}
+              onChange={(vary) => patch({ vary })}
             />
           ) : null}
           {form.countMode === "curve" ? (

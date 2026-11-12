@@ -33,11 +33,13 @@ import {
   defaultSimulatedCountRule,
   defaultSimulatedJoins,
   defaultSimulatedSaleNotices,
+  simulatedCountVaryOf,
   toTime,
   type SessionKind,
   type SessionSimulation,
   type SessionStatus,
   type SimulatedCountRule,
+  type SimulatedCountVary,
   type SimulationCountChange,
   type SimulatedJoins,
   type SimulatedSaleNotices,
@@ -87,7 +89,7 @@ export const SIMULATION_ROOM = {
 } as const;
 
 /** Os fluxos do gerador com semente (cada sorteio tem o seu: mudar um nao mexe nos outros). */
-const STREAM = { counterJitter: 1, entryTime: 2, names: 3, leaveChance: 4, leaveName: 5, leaveTime: 6 } as const;
+const STREAM = { counterJitter: 1, entryTime: 2, names: 3, leaveChance: 4, leaveName: 5, leaveTime: 6, varyTime: 7, varyValue: 8 } as const;
 
 /* ------------------------------------------------------------------------------------------------
  * O gerador com semente
@@ -127,8 +129,54 @@ function curveShape(fraction: number): number {
   return 1 - fallShare * Math.min(1, (fraction - fallStart) / (1 - fallStart));
 }
 
+/* "Variar sozinho" (rodada v9, docs/30 D90): o numero fixo que sobe e desce sozinho, pela semente. */
+
 /**
- * A parte simulada do contador no offset (ms do video): "off" 0; "fixed" a base; "curve" de base ate peak nos
+ * A hora da mudanca `index` do "Variar sozinho", em ms do relogio da Simulacao. As mudancas ficam numa grade de passo
+ * igual a media do intervalo ((min + max) / 2), cada uma deslocada pela semente em ate um quarto da folga (max - min)
+ * para cada lado: a distancia entre duas seguidas fica sempre entre o minimo e o maximo, e a hora de qualquer uma sai
+ * direto do indice (sem somar as anteriores). Igual para todos os alunos.
+ */
+export function varyChangeAtMs(vary: SimulatedCountVary, seed: number, index: number): number {
+  const minMs = vary.everyMinSeconds * 1000;
+  const maxMs = Math.max(minMs, vary.everyMaxSeconds * 1000);
+  const period = (minMs + maxMs) / 2;
+  const spread = (maxMs - minMs) / 2;
+  return Math.round(index * period + (seededUnit(seed, STREAM.varyTime, index) - 0.5) * spread);
+}
+
+/** O indice da ultima mudanca do "Variar sozinho" que ja caiu no offset (pode ser -1: antes da primeira). */
+export function varyIndexAt(vary: SimulatedCountVary, seed: number, offsetMs: number): number {
+  const period = ((vary.everyMinSeconds + Math.max(vary.everyMinSeconds, vary.everyMaxSeconds)) * 1000) / 2;
+  let index = Math.floor(offsetMs / period) + 1;
+  while (varyChangeAtMs(vary, seed, index) > offsetMs) {
+    index -= 1;
+  }
+  return index;
+}
+
+/** Ate quanto o numero se afasta do fixo: `percent` % dele, arredondado (300 e 5 %: 15). */
+export function varyDelta(base: number, vary: Pick<SimulatedCountVary, "percent">): number {
+  return Math.round((Math.max(0, Math.trunc(base)) * vary.percent) / 100);
+}
+
+/** A faixa em que o numero fica ("Com +300 e 5%, o número fica entre 285 e 315."). */
+export function varyRange(base: number, vary: Pick<SimulatedCountVary, "direction" | "percent">): { max: number; min: number } {
+  const fixed = Math.max(0, Math.trunc(base));
+  const delta = varyDelta(fixed, vary);
+  return { max: vary.direction === "down" ? fixed : fixed + delta, min: vary.direction === "up" ? fixed : Math.max(0, fixed - delta) };
+}
+
+/** O numero fixo com o "Variar sozinho" no offset: o fixo mais o desvio sorteado pela semente para a mudanca em curso. */
+function variedExtraAt(base: number, vary: SimulatedCountVary, seed: number, offsetMs: number): number {
+  const unit = seededUnit(seed, STREAM.varyValue, varyIndexAt(vary, seed, Math.max(0, offsetMs)));
+  const share = vary.direction === "both" ? unit * 2 - 1 : vary.direction === "up" ? unit : -unit;
+  return Math.max(0, base + Math.round(share * varyDelta(base, vary)));
+}
+
+/**
+ * A parte simulada do contador no offset (ms do video): "off" 0; "fixed" a base (com o "Variar sozinho", a base mais o
+ * desvio da mudanca em curso, D90); "curve" de base ate peak nos
  * primeiros 20 % da duracao, fica e desce de leve nos ultimos 10 %, mais a variacao sorteada pela semente a cada 15 s
  * (de -jitter a +jitter). Um passo de 15 s tem um numero so (todos veem o mesmo); antes do zero vale o numero do zero;
  * do fim do video em diante, 0. Nunca negativo. `hold` (a Live ao vivo, R7): passada a duracao prevista, o numero fica
@@ -140,7 +188,8 @@ export function counterExtraAt(rule: SimulatedCountRule, seed: number, offsetMs:
   }
   const base = Math.max(0, Math.trunc(rule.base));
   if (rule.mode === "fixed") {
-    return base;
+    const vary = simulatedCountVaryOf(rule);
+    return vary ? variedExtraAt(base, vary, seed, offsetMs) : base;
   }
   const peak = Math.max(base, Math.trunc(rule.peak));
   const at = Math.max(0, Math.floor(offsetMs / STEP_MS) * STEP_MS);
@@ -168,12 +217,43 @@ export function counterPointsBetween(
   if (rule.mode === "off" || !(toMs >= fromMs)) {
     return [];
   }
-  const points: { atMs: number; extra: number }[] = [];
   const last = Math.min(toMs, fromMs + WINDOW_MS);
-  for (let at = Math.floor(fromMs / STEP_MS) * STEP_MS; at <= last; at += STEP_MS) {
-    points.push({ atMs: at, extra: at >= endMs ? 0 : counterExtraAt(rule, seed, at, durationMs, hold) });
+  const first = Math.floor(fromMs / STEP_MS) * STEP_MS;
+  return pointTimesBetween(first, last, [{ fromMs: Number.NEGATIVE_INFINITY, rule }], seed).map((at) => ({ atMs: at, extra: at >= endMs ? 0 : counterExtraAt(rule, seed, at, durationMs, hold) }));
+}
+
+/**
+ * As horas dos pontos do contador em [firstMs, lastMs] (`firstMs` ja na grade): um a cada 15 s, mais a hora exata de
+ * cada mudanca do "Variar sozinho" (D90) nos trechos em que a regra que vale tem a variacao (`spans`, na ordem: cada
+ * regra vale de `fromMs` ate o comeco da seguinte). Em ordem, sem repetir. E a mesma lista para a janela da sala e
+ * para o resumo do fim: o resumo e exatamente o que as janelas mostraram.
+ */
+function pointTimesBetween(firstMs: number, lastMs: number, spans: readonly { fromMs: number; rule: SimulatedCountRule }[], seed: number): number[] {
+  const times = new Set<number>();
+  for (let at = firstMs; at <= lastMs; at += STEP_MS) {
+    times.add(at);
   }
-  return points;
+  spans.forEach((span, index) => {
+    const vary = simulatedCountVaryOf(span.rule);
+    if (!vary) {
+      return;
+    }
+    const from = Math.max(firstMs, span.fromMs, 0);
+    const to = Math.min(lastMs, (spans[index + 1]?.fromMs ?? Number.POSITIVE_INFINITY) - 1);
+    if (!(to >= from)) {
+      return;
+    }
+    for (let k = varyIndexAt(vary, seed, from); ; k += 1) {
+      const at = varyChangeAtMs(vary, seed, k);
+      if (at > to) {
+        break;
+      }
+      if (at >= from) {
+        times.add(at);
+      }
+    }
+  });
+  return [...times].sort((a, b) => a - b);
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -241,10 +321,21 @@ export function countTimelineOf(simulation: Pick<SessionSimulation, "countChange
   const head = { base: simulation.countRule, durationMs, hold, seed: simulation.seed };
   const changes: TimelineChange[] = [];
   for (const change of sortedCountChanges(simulation.countChanges)) {
-    const point = Math.floor(change.atMs / STEP_MS) * STEP_MS;
-    changes.push({ ...change, fromExtra: extraWithChanges(head, changes, point) });
+    // O ultimo ponto que a sala recebeu ate a mudanca: o de 15 s ou, com o "Variar sozinho" valendo, a ultima mudanca dele.
+    const times = pointTimesBetween(Math.floor(change.atMs / STEP_MS) * STEP_MS, change.atMs, timelineSpans(head.base, changes), head.seed);
+    changes.push({ ...change, fromExtra: extraWithChanges(head, changes, times[times.length - 1]) });
   }
   return { ...head, changes };
+}
+
+/** Os trechos de cada regra na ordem do relogio: a de antes do comeco e a de cada mudanca, do offset dela em diante. */
+function timelineSpans(base: SimulatedCountRule, changes: readonly { atMs: number; rule: SimulatedCountRule }[]): { fromMs: number; rule: SimulatedCountRule }[] {
+  return [{ fromMs: Number.NEGATIVE_INFINITY, rule: base }, ...changes.map((change) => ({ fromMs: change.atMs, rule: change.rule }))];
+}
+
+/** As horas dos pontos do contador da sessao em [firstMs, lastMs] (pointTimesBetween com os trechos da sessao). */
+function timelinePointTimes(timeline: CountTimeline, firstMs: number, lastMs: number): number[] {
+  return pointTimesBetween(firstMs, lastMs, timelineSpans(timeline.base, timeline.changes), timeline.seed);
 }
 
 /** A parte simulada do contador no offset, com as mudancas no ar (a rampa de 90 s de cada uma). Nunca negativo. */
@@ -262,12 +353,8 @@ export function timelinePointsBetween(timeline: CountTimeline, fromMs: number, t
   if (!countTimelineOn({ countChanges: [...timeline.changes], countRule: timeline.base }) || !(toMs >= fromMs)) {
     return [];
   }
-  const points: { atMs: number; extra: number }[] = [];
   const last = Math.min(toMs, fromMs + WINDOW_MS);
-  for (let at = Math.floor(fromMs / STEP_MS) * STEP_MS; at <= last; at += STEP_MS) {
-    points.push({ atMs: at, extra: at >= endMs ? 0 : timelineExtraAt(timeline, at) });
-  }
-  return points;
+  return timelinePointTimes(timeline, Math.floor(fromMs / STEP_MS) * STEP_MS, last).map((at) => ({ atMs: at, extra: at >= endMs ? 0 : timelineExtraAt(timeline, at) }));
 }
 
 /** A regra que vale no offset (a da ultima mudanca que ja caiu, senao a de antes do comeco): o "+300" do console. */
@@ -288,10 +375,18 @@ export function simulationAudienceRampEndMs(simulation: Pick<SessionSimulation, 
   return offsetMs < end ? end : null;
 }
 
-/** A regra de uma mudanca do console ou do card: "Real + número fixo" com o +N; 0 e "Só o real" (o Tirar). */
-export function simulationAudienceRule(extra: number): SimulatedCountRule {
+/**
+ * A regra de uma mudanca do console ou do card: "Real + número fixo" com o +N; 0 e "Só o real" (o Tirar). Com o
+ * "Variar sozinho" (D90), a regra leva a variacao (so quando vale: o numero maior que zero, dentro dos limites).
+ */
+export function simulationAudienceRule(extra: number, vary?: SimulatedCountVary | null): SimulatedCountRule {
   const base = Math.max(0, Math.min(SIMULATION_LIMITS.countMax, Math.trunc(Number.isFinite(extra) ? extra : 0)));
-  return base > 0 ? { base, jitter: 0, mode: "fixed", peak: base } : defaultSimulatedCountRule();
+  if (!(base > 0)) {
+    return defaultSimulatedCountRule();
+  }
+  const rule: SimulatedCountRule = { base, jitter: 0, mode: "fixed", peak: base };
+  const valid = simulatedCountVaryOf({ ...rule, vary });
+  return valid ? { ...rule, vary: valid } : rule;
 }
 
 /** O +N da regra (fixed: a base; off: 0); a faixa que varia nao tem um numero so (nulo). */
@@ -554,7 +649,8 @@ export function simulationTotals(
   // Os trechos de cada regra juntos (D80): o maior numero dos pontos de 15 s que a sala recebeu, com as rampas.
   if (countTimelineOn(simulation)) {
     const timeline = countTimelineOf(simulation, videoMs, live);
-    for (let at = 0; at < endMs; at += STEP_MS) {
+    // Os mesmos pontos das janelas da sala: os de 15 s e a hora de cada mudanca do "Variar sozinho" (D90).
+    for (const at of timelinePointTimes(timeline, 0, endMs - 1)) {
       counterMax = Math.max(counterMax, timelineExtraAt(timeline, at));
     }
   }
@@ -580,13 +676,20 @@ export type SimulationRules = {
  * As regras na forma em que ficam gravadas (e comparaveis): "off" e "fixed" sem o que nao usam, as entradas e os avisos
  * desligados com o padrao, os avisos ligados sem nenhum item contam como desligados, os itens na ordem do minuto.
  */
+/** O numero fixo como fica gravado: sem o que nao usa, com o "Variar sozinho" so quando vale. */
+function simulationAudienceFixedRule(count: SimulatedCountRule): SimulatedCountRule {
+  const rule: SimulatedCountRule = { base: count.base, jitter: 0, mode: "fixed", peak: count.base };
+  const vary = simulatedCountVaryOf({ ...rule, vary: count.vary });
+  return vary ? { ...rule, vary } : rule;
+}
+
 export function normalizeSimulationRules(rules: SimulationRules): SimulationRules {
   const count = rules.countRule;
   const countRule: SimulatedCountRule =
     count.mode === "off"
       ? defaultSimulatedCountRule()
       : count.mode === "fixed"
-        ? { base: count.base, jitter: 0, mode: "fixed", peak: count.base }
+        ? simulationAudienceFixedRule(count)
         : { base: count.base, jitter: count.jitter, mode: "curve", peak: Math.max(count.base, count.peak) };
   const joins: SimulatedJoins = rules.joins.enabled ? { enabled: true, everySeconds: rules.joins.everySeconds, max: rules.joins.max, names: "generic" } : defaultSimulatedJoins();
   const items = rules.saleNotices.items.map((item) => ({ offsetMs: item.offsetMs, text: item.text.trim() })).sort((a, b) => a.offsetMs - b.offsetMs);
