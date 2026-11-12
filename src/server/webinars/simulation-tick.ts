@@ -10,7 +10,7 @@
 // 10/11/2026 (R7): as sessoes `live` encerradas entram tambem, com o zero no started_at, a forma da faixa pela duracao
 // prevista do webinario e o fim no Encerrar live (simulationTotals com `live`); a live encerrada direto da espera (sem
 // started_at) congela zeros. Os participantes simulados mudados no ar (D79 e D80, 11/11/2026): as mudancas do lote
-// (webinar_simulation_changes, uma leitura por tick; banco sem a 202611110002, nenhuma) entram na conta, e o resumo
+// (webinar_simulation_changes, uma leitura por tick; banco sem a 202611140002, nenhuma) entram na conta, e o resumo
 // junta os trechos de cada regra com as rampas, o maior numero que a turma viu. A sessao sem contador que ganhou
 // mudanca no ar ficou com "Real + 0" (saveSimulatedAudience), entao o filtro das regras ja a encontra.
 

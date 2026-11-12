@@ -24,7 +24,7 @@ import { adminInputClass } from "../../../form";
 // 90 s, quem mudou por ultimo e quando, o campo "Somar à plateia" com os atalhos (+50, +100, +300, +500: o campo fica
 // com o numero), a frase da mudanca (a da decisao com o numero novo, a mesma conta do servidor) com a caixa, o Aplicar
 // (so com a caixa marcada quando soma algo) e o Tirar (volta a +0, sem caixa: grava a frase do +0). Sem permissao
-// (messaging.publish), com a sessao encerrada ou sem a 202611110002, o numero sem os botoes e a frase do motivo. As
+// (messaging.publish), com a sessao encerrada ou sem a 202611140002, o numero sem os botoes e a frase do motivo. As
 // mudancas ficam num <details> com a hora, o +N e quem. O link leva ao outro lado (o console leva ao card do editor; o
 // card, ao console). Quem usa faz o pedido (`onApply`) e diz se deu certo (o formulario volta ao vazio). Nenhuma frase
 // escrita aqui; as cores pelos tokens do admin, como o resto do painel do console.

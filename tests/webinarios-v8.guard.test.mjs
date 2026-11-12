@@ -17,9 +17,9 @@ import {
 } from "./support/webinarios-migracao-guarda.mjs";
 
 // Guarda da migracao das pessoas que comentam e da pergunta simulada (pedido do produtor de 11/11/2026; docs/30 §4.1,
-// §4.2 e D75 a D78; docs/21 §9.14; docs/18 §1.2): a 202611110001_webinars_v8_pessoas.sql.
+// §4.2 e D75 a D78; docs/21 §9.14; docs/18 §1.2): a 202611140001_webinars_v8_pessoas.sql.
 // - as 66 migracoes ate a 202611100002 (aplicadas na nuvem de teste) continuam byte a byte (hash acumulado); a
-//   202611110001 vem logo depois e e o texto exato (hash);
+//   202611140001 vem logo depois e e o texto exato (hash);
 // - nove secoes MCP, idempotente; so acrescenta: o unico `drop` e o `drop not null` de webinar_questions.user_id (afrouxa
 //   para a pergunta simulada, sem aluno); a tabela nova e a funcao do nome so do service_role; os checks novos das
 //   tabelas que ja existem entram `not valid` e a secao 9 so os valida;
@@ -36,7 +36,7 @@ import {
 // - nenhuma coluna nova nas listas que o app sempre le (QUESTION_COLUMNS, SCRIPT_ITEM_COLUMNS); o aviso de migracao
 //   pendente aponta esta (WEBINARS_MIGRATION) e a lista tem a propria constante, igual a do modelo puro.
 
-const MIGRATION = "supabase/migrations/202611110001_webinars_v8_pessoas.sql";
+const MIGRATION = "supabase/migrations/202611140001_webinars_v8_pessoas.sql";
 const persona = await import("../src/server/webinars/persona-model.ts");
 const model = await import("../src/server/webinars/model.ts");
 const dbSource = read("src/server/webinars/db.ts");
@@ -56,20 +56,23 @@ function sectionsOf(source) {
 
 const sections = sectionsOf(migration);
 
-test("as 66 migracoes ate a 202611100002 continuam byte a byte; a 202611110001 vem logo depois e e o texto exato", () => {
+test("as 66 migracoes ate a 202611100002 continuam byte a byte; a 202611140001 vem depois e e o texto exato", () => {
   const applied = cumulativeHash("202611100002_webinars_v7_na_tela.sql");
   assert.equal(applied.count, 66);
   assert.equal(applied.hash, "9292354986d87ef4d7d03efff3c382b374b4937b1fc2ca421e423987a5b834bb", "uma migracao ja aplicada mudou: a correcao vai numa migracao nova");
   const files = migrationFiles();
-  assert.equal(files[files.indexOf("202611100002_webinars_v7_na_tela.sql") + 1], "202611110001_webinars_v8_pessoas.sql", "logo depois da Na tela");
+  // Depois da Na tela e de todas as que ja estavam na dev (as do produto licenciado, 202611100003 a 202611130001, vieram
+  // antes desta pela ordem dos arquivos; a 202611110001 de antes colidia com a da licenca e virou 202611140001).
+  assert.ok(files.indexOf("202611140001_webinars_v8_pessoas.sql") > files.indexOf("202611100002_webinars_v7_na_tela.sql"), "depois da Na tela");
+  assert.ok(files.indexOf("202611140001_webinars_v8_pessoas.sql") > files.indexOf("202611130001_license_sales.sql"), "depois das do produto licenciado");
   assert.equal(
     fileHash(MIGRATION),
     "8ec4b5bf89463d5ef428d834e1d77baaa8c92c13cff50aeafee9929c1d14ed4c",
-    "a 202611110001 mudou: depois de aplicada na nuvem de teste (docs/21 §9.14), a correcao vai numa migracao nova; antes, aplique de novo e atualize este hash junto"
+    "a 202611140001 mudou: depois de aplicada na nuvem de teste (docs/21 §9.14), a correcao vai numa migracao nova; antes, aplique de novo e atualize este hash junto"
   );
 });
 
-test("a 202611110001: nove secoes MCP, idempotente, so acrescenta (o unico drop e o drop not null do user_id da pergunta); tabela e funcao so do service_role", () => {
+test("a 202611140001: nove secoes MCP, idempotente, so acrescenta (o unico drop e o drop not null do user_id da pergunta); tabela e funcao so do service_role", () => {
   assertSections(migration, 9);
   assert.equal(sections.length, 9);
   assert.equal(migration.split(DROP_NOT_NULL).length, 2, "o drop not null uma vez so");
@@ -211,11 +214,11 @@ test("a secao 9 so valida os cinco checks novos; nenhuma coluna nova nas listas 
     "alter table public.webinar_questions validate constraint webinar_questions_persona_v8;",
     "alter table public.webinar_questions validate constraint webinar_questions_persona_fk_v8;"
   ]);
-  // O aviso geral aponta a mais nova dos webinarios (desde 11/11/2026 a 202611110002 dos participantes simulados, que vem
+  // O aviso geral aponta a mais nova dos webinarios (desde 11/11/2026 a 202611140002 dos participantes simulados, que vem
   // depois desta pela ordem dos arquivos): aplicar ate ela inclui esta.
-  assert.ok((dbSource.match(/export const WEBINARS_MIGRATION = "(\d+)";/)?.[1] ?? "") >= "202611110001");
-  assert.match(dbSource, /export const WEBINARS_PERSONAS_MIGRATION = "202611110001";/);
-  assert.equal(persona.PERSONAS_MIGRATION_ID, "202611110001", "o aviso da tela (persona-model) e o do servidor (db.ts) apontam a mesma");
+  assert.ok((dbSource.match(/export const WEBINARS_MIGRATION = "(\d+)";/)?.[1] ?? "") >= "202611140001");
+  assert.match(dbSource, /export const WEBINARS_PERSONAS_MIGRATION = "202611140001";/);
+  assert.equal(persona.PERSONAS_MIGRATION_ID, "202611140001", "o aviso da tela (persona-model) e o do servidor (db.ts) apontam a mesma");
   for (const [list, novas] of [
     ["QUESTION_COLUMNS", /\bsource\b|persona_id|persona_role|persona_avatar_path/],
     ["SCRIPT_ITEM_COLUMNS", /persona_id|persona_avatar_path/]

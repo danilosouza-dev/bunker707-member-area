@@ -23,7 +23,7 @@
 // da decisao com o numero novo, simulationAudienceAckFor; o Tirar grava a frase do +0 sem caixa), grava uma linha em
 // webinar_simulation_changes (antes do comeco sem offset, trocando tambem a regra da sessao; no ar, o offset do relogio
 // da Simulacao, e a sala chega no numero em 90 s) e depois a decisao na sessao (quem, quando e a frase), que muda o
-// carimbo que a sala ja le na consulta de 5 s. Banco sem a 202611110002: 409 com a frase dela, antes de gravar.
+// carimbo que a sala ja le na consulta de 5 s. Banco sem a 202611140002: 409 com a frase dela, antes de gravar.
 // loadSessionSimulations leva tambem a vista do controle de cada sessao (o numero de agora e as mudancas com o nome).
 // Correcao da revisao v8 (11/11/2026, achado 6): a vista leva a hora da decisao lida com as regras (`decidedAt`), o card
 // a manda de volta (`expectedDecidedAt`) e o saveSessionSimulation recusa com 409 ("A simulação desta sessão mudou em
@@ -135,7 +135,7 @@ function audienceViewOf(input: {
   });
 }
 
-/** Le as mudancas sem cair no aviso: sem a tabela (banco sem a 202611110002), nenhuma e `pending`. */
+/** Le as mudancas sem cair no aviso: sem a tabela (banco sem a 202611140002), nenhuma e `pending`. */
 async function changesOrPending(db: ReturnType<typeof webinarsDb>, sessionIds: readonly string[]): Promise<{ pending: boolean; records: SimulationChangeRecord[] }> {
   try {
     return { pending: false, records: await listSimulationChanges(db, sessionIds) };
@@ -321,7 +321,7 @@ const REAL_PLUS_ZERO = { base: 0, jitter: 0, mode: "fixed", peak: 0 } as const;
  * quando, a frase), que muda o carimbo da sala. As entradas e os avisos de venda nao mudam aqui.
  */
 export async function saveSimulatedAudience(input: SaveSimulatedAudienceInput): Promise<ActionResult<SavedSimulatedAudience>> {
-  return runAdminAction("messaging.publish", saveSimulatedAudienceSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.publish", "conteudo", saveSimulatedAudienceSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const nowMs = now.getTime();
@@ -353,7 +353,7 @@ export async function saveSimulatedAudience(input: SaveSimulatedAudienceInput): 
     if (!simulation) {
       throw new WebinarError(COPY.servidor.naoExiste, 404);
     }
-    // A tabela das mudancas antes de gravar qualquer coisa: sem ela, o aviso da 202611110002 e nada muda.
+    // A tabela das mudancas antes de gravar qualquer coisa: sem ela, o aviso da 202611140002 e nada muda.
     let records: SimulationChangeRecord[];
     try {
       records = await listSimulationChanges(db, [row.id]);

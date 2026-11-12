@@ -106,7 +106,7 @@ function escolaAoVivo(sessaoDaLive = {}) {
   return tables;
 }
 
-/** O banco sem a 202611110002: a tabela das mudancas nao existe (PGRST205). */
+/** O banco sem a 202611140002: a tabela das mudancas nao existe (PGRST205). */
 function semATabela(db) {
   const from = db.from.bind(db);
   db.from = (name) => {
@@ -190,7 +190,7 @@ test("antes do comeco: a linha sem offset e a regra da sessao passa a ser a nova
   assert.equal(linha(gravada, SESSION).simulation_ack_text, textoGravada);
 });
 
-test("recusas sem gravar: quem nao publica (403), a encerrada, o Replay, a sessao que nao existe, o banco sem a 202611110002 e o teto de mudancas", async () => {
+test("recusas sem gravar: quem nao publica (403), a encerrada, o Replay, a sessao que nao existe, o banco sem a 202611140002 e o teto de mudancas", async () => {
   const db = usar(bancoDaSimulacao({ tables: escolaAoVivo() }));
   estado.semPublicar = true;
   const negado = await actions.saveSimulatedAudience({ ackText: frase(300), acknowledged: true, extra: 300, sessionId: LIVE_SESSION });
@@ -213,7 +213,7 @@ test("recusas sem gravar: quem nao publica (403), a encerrada, o Replay, a sessa
 
   const semTabela = usar(semATabela(bancoDaSimulacao({ tables: escolaAoVivo() })));
   const pendente = await actions.saveSimulatedAudience({ ackText: frase(300), acknowledged: true, extra: 300, sessionId: LIVE_SESSION });
-  assert.deepEqual([pendente.status, pendente.error], [409, SERVIDOR.precisaMigracaoPlateia("202611110002")]);
+  assert.deepEqual([pendente.status, pendente.error], [409, SERVIDOR.precisaMigracaoPlateia("202611140002")]);
   assert.equal(linha(semTabela, LIVE_SESSION).simulation_ack_text, null, "nada muda na sessao");
   assert.equal(semTabela.calls.writes.length, 0, "nenhuma escrita");
   // Sem a tabela, a leitura da Simulacao segue (as mudancas vazias).

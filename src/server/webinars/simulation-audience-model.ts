@@ -20,7 +20,7 @@ import {
 const COPY = WEBINAR_COPY.simulacao.plateia;
 
 /** A migracao das mudancas (a mesma de WEBINARS_AUDIENCE_MIGRATION em db.ts, que tem "server-only"; a guarda confere). */
-export const AUDIENCE_MIGRATION = "202611110002";
+export const AUDIENCE_MIGRATION = "202611140002";
 
 /** Os atalhos do controle: o numero que soma ao real (o campo fica com ele). */
 export const AUDIENCE_SHORTCUTS = [50, 100, 300, 500] as const;
@@ -47,7 +47,7 @@ export type SimulationAudienceView = {
   current: SimulatedCountRule;
   /** O que a frase da mudanca diz alem do numero. */
   flags: SimulationAudienceFlags;
-  /** Banco sem a 202611110002: o numero aparece, os botoes nao. */
+  /** Banco sem a 202611140002: o numero aparece, os botoes nao. */
   pendingMigration: boolean;
   /** Ate que offset a rampa da ultima mudanca anda (a sala chega no numero novo); nulo sem rampa. */
   rampEndsAtMs: number | null;

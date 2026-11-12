@@ -751,7 +751,7 @@ export type ScriptItem = {
   personaAvatarPath?: string | null;
   /**
    * A pessoa da lista do webinario (11/11/2026, D75; webinar_personas): a fonte do nome, do papel e da foto, que o item
-   * guarda como copia. Nula sem pessoa (saiu da lista, ou o banco sem a 202611110001; lida a parte, persona-store.ts).
+   * guarda como copia. Nula sem pessoa (saiu da lista, ou o banco sem a 202611140001; lida a parte, persona-store.ts).
    */
   personaId?: string | null;
   personaName: string;
@@ -854,7 +854,7 @@ export type WebinarQuestion = {
   offsetMs: number;
   sessionId: string;
   /**
-   * A pergunta simulada (11/11/2026, D77; source 'scripted' na 202611110001): feita por uma pessoa da lista, sem aluno
+   * A pergunta simulada (11/11/2026, D77; source 'scripted' na 202611140001): feita por uma pessoa da lista, sem aluno
    * (`userId` nulo), com o nome e a foto da pessoa; fica fora de todo numero e so a equipe responde no fio. O selo
    * "Simulada" aparece so no console. Lida pelo user_id nulo (so a simulada tem), sem coluna nova nas listas de sempre.
    */
@@ -1190,7 +1190,7 @@ export type SimulatedSaleNotices = { enabled: boolean; items: SimulatedSaleNotic
 export type SimulationTotals = { counterMax: number; joinsShown: number; saleNoticesShown: number };
 
 /**
- * Uma mudanca dos participantes simulados no ar (docs/30 D79; webinar_simulation_changes, migracao 202611110002): a
+ * Uma mudanca dos participantes simulados no ar (docs/30 D79; webinar_simulation_changes, migracao 202611140002): a
  * regra do contador que vale a partir de `atMs` no relogio da Simulacao (simulationClockMs), com a subida ou a descida
  * em linha reta (SIMULATION_LIMITS.countRampSeconds) a partir do numero que a turma via. Na ordem do relogio.
  */

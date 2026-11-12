@@ -14,7 +14,7 @@
 //   live" que venceram e ainda nao entraram (liveScriptDue), no maximo 5 min atrasados (o tick que ficou fora do ar);
 //   o que passou disso fica para o "Soltar agora". "Quando o apresentador diz" nao existe na live (sem transcricao
 //   durante a transmissao).
-// - As pessoas que comentam (pedido do produtor de 11/11/2026; docs/30 D75 a D78; migracao 202611110001): a lista de
+// - As pessoas que comentam (pedido do produtor de 11/11/2026; docs/30 D75 a D78; migracao 202611140001): a lista de
 //   cada webinario (webinar_personas), que o editor e o console leem e gravam. A pessoa e a unidade: o item do roteiro
 //   ligado a ela (personaId) guarda a copia do nome, do papel e da foto, e editar a pessoa troca a copia de todos os
 //   itens dela (withPersonaCopy; no banco, persona-store.syncPersonaCopies). O nome e unico no webinario pelo
@@ -92,9 +92,9 @@ export type WebinarPersona = {
  * A migracao da lista, para o aviso da tela no banco sem ela (a mesma de db.WEBINARS_PERSONAS_MIGRATION, que e
  * "server-only"; a guarda tests/webinarios-v8.guard.test.mjs confere as duas).
  */
-export const PERSONAS_MIGRATION_ID = "202611110001";
+export const PERSONAS_MIGRATION_ID = "202611140001";
 
-/** A lista lida: `available` falso no banco sem a 202611110001 (nenhuma pessoa, e nada pode ser gravado nela). */
+/** A lista lida: `available` falso no banco sem a 202611140001 (nenhuma pessoa, e nada pode ser gravado nela). */
 export type PersonaList = { available: boolean; personas: WebinarPersona[] };
 
 export const NO_PERSONA_LIST: PersonaList = { available: false, personas: [] };

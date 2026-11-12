@@ -6,7 +6,7 @@ import { createLocalAdminClient, readLocalSupabaseConfig, unwrap } from "../supp
 import { LIVE_AO_VIVO_DE_TESTE, limparWebinarios, seedEscolaDeTeste, seedLiveAoVivoDeTeste, SENHA_DE_TESTE, usuarioDeTeste } from "../fixtures/escola-de-teste.mjs";
 
 // Os participantes simulados mudados a qualquer momento (docs/30 D79 e D80; teste do produtor de 11/11/2026) contra o
-// banco LOCAL de verdade, com a migracao 202611110002 aplicada, na Live ao vivo de teste no ar:
+// banco LOCAL de verdade, com a migracao 202611140002 aplicada, na Live ao vivo de teste no ar:
 // - o aluno logado nao le webinar_simulation_changes (so o service_role);
 // - aplicar +300 com a live no ar grava a mudanca (o offset desde o Começar para todos, a regra, a frase, quem e de
 //   onde), a decisao da sessao passa a ser a frase dela e a consulta de 5 s do chat leva a sala o resumo novo da decisao

@@ -18,7 +18,7 @@ import {
 } from "../fixtures/escola-de-teste.mjs";
 
 // As pessoas que comentam e a pergunta simulada (pedido do produtor de 11/11/2026; docs/30 D75 a D78) contra o banco
-// LOCAL de verdade, com a migracao 202611110001 aplicada (docs/18 §2.3). Escrito na rodada v8 e rodado por quem junta.
+// LOCAL de verdade, com a migracao 202611140001 aplicada (docs/18 §2.3). Escrito na rodada v8 e rodado por quem junta.
 // - o nome comparavel do banco (webinar_persona_name_key) e o do app (personaNameKey) dao o mesmo texto;
 // - a aluna logada nao le webinar_personas nem roda a funcao do nome (so o service_role);
 // - criar, editar (as copias dos itens mudam), o nome repetido recusado (no app e no indice unico), remover (os itens
@@ -76,7 +76,7 @@ function sql(script) {
 
 /** A secao 5 da migracao (o preenchimento), como esta no arquivo. */
 function secaoDoPreenchimento() {
-  const texto = readFileSync(new URL("../../supabase/migrations/202611110001_webinars_v8_pessoas.sql", import.meta.url), "utf8");
+  const texto = readFileSync(new URL("../../supabase/migrations/202611140001_webinars_v8_pessoas.sql", import.meta.url), "utf8");
   const inicio = texto.indexOf("do $$", texto.indexOf(" * 5. "));
   const fim = texto.indexOf("$$;", texto.indexOf("end if;", inicio)) + 3;
   return texto.slice(inicio, fim);

@@ -20,14 +20,14 @@
 // carregou (`loadedIds`): o que o console guardou depois fica.
 //
 // As pessoas que comentam e a pergunta simulada (pedido do produtor de 11/11/2026; docs/30 D75 a D78; migracao
-// 202611110001): o item do roteiro ligado a uma pessoa da lista (persona_id) grava a copia dela (o nome, o papel e a
+// 202611140001): o item do roteiro ligado a uma pessoa da lista (persona_id) grava a copia dela (o nome, o papel e a
 // foto), no Salvar do editor e no "Guardar na lista"; o "Novo comentário" escolhe a pessoa da lista ou cria a nova, que
 // entra na lista ao enviar ou guardar (persona-writes.commentPersona); o "Usar esta foto em todos os comentários de
 // {nome}" saiu (a pessoa e a unidade: editar a pessoa troca a copia dos itens dela, persona-actions.ts). O Tipo Pergunta:
 // o "Enviar agora" grava a pergunta simulada na aba Perguntas da sessao (sem mensagem no chat), e o item Pergunta, quando
 // entra (o "Soltar agora", o tick da live e a abertura da gravada), grava a mensagem `scripted` de kind 'question' como
 // antes (o registro de que entrou, que a sala e o console nao mostram no chat) e abre a pergunta ligada a ela
-// (persona-writes.openScriptedQuestion). Banco sem a 202611110001: o comentario segue com o Nome digitado, sem lista, e a
+// (persona-writes.openScriptedQuestion). Banco sem a 202611140001: o comentario segue com o Nome digitado, sem lista, e a
 // Pergunta volta 409 com a frase da migracao. Correcoes da revisao v8 (11/11/2026): importar o CSV liga cada linha a
 // pessoa da lista com o mesmo nome e cria as que faltam (persona-writes.importPersonas; achado 3), e o Salvar le a lista
 // inteira e busca pelo id a pessoa que a leitura nao trouxe antes de soltar um item (personasOfItems; achado 4).
@@ -372,7 +372,7 @@ export async function saveScriptItems(input: SaveScriptItemsInput): Promise<Acti
     if (!avatars.available && data.items.some((item) => item.personaAvatarPath)) {
       throw new WebinarError(PERSONA_MIGRATION_MESSAGE, 409);
     }
-    // A Pergunta (D77) abre a pergunta simulada quando entra: pede a 202611110001.
+    // A Pergunta (D77) abre a pergunta simulada quando entra: pede a 202611140001.
     if (!avatars.linked && data.items.some((item) => item.kind === "question")) {
       throw new WebinarError(SCRIPTED_QUESTION_MIGRATION_MESSAGE, 409);
     }
@@ -429,7 +429,7 @@ export async function importScriptCsv(input: { csv: string; replace?: boolean; w
 
     // Cada linha com a pessoa da lista do mesmo nome; o nome que falta entra na lista (o papel da linha, sem foto) e a
     // copia da pessoa vai para o item, como no Salvar do editor (correcao da revisao v8, achado 3). Banco sem a
-    // 202611110001: as linhas com o Nome e o Papel do arquivo, sem pessoa, como antes.
+    // 202611140001: as linhas com o Nome e o Papel do arquivo, sem pessoa, como antes.
     const found = avatars.linked
       ? await importPersonas(db, { names: parsed.items.map((item) => ({ name: item.personaName, role: item.personaRole })), userId: user.id, webinarId: row.id })
       : { available: false, byKey: new Map<string, WebinarPersona>(), created: 0 };
@@ -860,7 +860,7 @@ export async function sendScriptedComment(input: ScriptCommentInput): Promise<Ac
  * [messaging.write] O "Guardar na lista" do "Novo comentário" (R8; 11/11/2026, D76 e D77): um item "Pelo botão da
  * equipe", pronto, no fim do roteiro do webinario da sessao (fica para o "Soltar agora" desta e das proximas sessoes),
  * ligado a pessoa da lista (a escolhida ou a nova, que entra na lista agora) e com a copia dela; o Tipo Pergunta vira
- * o item Pergunta (abre a pergunta simulada quando entra; pede a 202611110001). Ate 5.000 itens; o webinario arquivado
+ * o item Pergunta (abre a pergunta simulada quando entra; pede a 202611140001). Ate 5.000 itens; o webinario arquivado
  * fica so de leitura. Auditoria `webinar.script_item_added` (sem o texto).
  */
 export async function saveScriptComment(input: ScriptCommentInput): Promise<ActionResult<SavedScriptComment>> {

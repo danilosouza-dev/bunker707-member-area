@@ -1,4 +1,4 @@
-// As mudancas dos participantes simulados no banco (docs/30 §4.3, D79 e D80; migracao 202611110002): a linha de
+// As mudancas dos participantes simulados no banco (docs/30 §4.3, D79 e D80; migracao 202611140002): a linha de
 // webinar_simulation_changes no formato do app, lida com o mesmo cuidado das colunas simulated_* (a regra passa pelo
 // simulatedCountRuleOfRow, o offset e a origem sao conferidos, o resto vira nulo ou o padrao). Modulo puro (sem
 // "server-only", imports relativos): os testes carregam direto pelo Node. So o codigo da Simulacao e o bloco Simulacao

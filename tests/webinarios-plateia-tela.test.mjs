@@ -115,11 +115,11 @@ test("o controle com a rampa em curso diz que a sala esta chegando; antes do com
   assert.doesNotMatch(antes, /data-simulation-audience-history/);
 });
 
-test("sem permissao, com a sessao encerrada ou sem a 202611110002: o numero sem os botoes e a frase do motivo", () => {
+test("sem permissao, com a sessao encerrada ou sem a 202611140002: o numero sem os botoes e a frase do motivo", () => {
   for (const [extra, motivo] of [
     [{ canPublish: false }, COPY.semPermissao],
     [{ phase: "ended" }, COPY.encerrada],
-    [{ audience: audiencia({ pendingMigration: true }) }, WEBINAR_COPY.simulacao.servidor.precisaMigracaoPlateia("202611110002")]
+    [{ audience: audiencia({ pendingMigration: true }) }, WEBINAR_COPY.simulacao.servidor.precisaMigracaoPlateia("202611140002")]
   ]) {
     const markup = controle(extra);
     assert.ok(textOf(markup).includes(motivo), motivo);

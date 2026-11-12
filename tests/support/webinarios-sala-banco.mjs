@@ -1,6 +1,6 @@
 // O banco falso das rotas da Sala (tests/webinarios-sala-rotas.test.mjs e tests/webinarios-na-tela-rotas.test.mjs;
 // docs/18 §2.2): tabelas como listas, os filtros do PostgREST que as rotas usam, as chaves unicas das tabelas da
-// 202610290001 (e o nome unico da pessoa que comenta da 202611110001, com o insert de varias linhas atomico), a RPC
+// 202610290001 (e o nome unico da pessoa que comenta da 202611140001, com o insert de varias linhas atomico), a RPC
 // webinar_chat_window com a linha mestre deslocada pela ancora e a escola de mentira (uma Live
 // gravada publicada para todos, com a gravacao da Bunny e a live de origem). Cada `from` fica em `calls.from` e cada
 // escrita em `calls.writes`: os testes contam as consultas. Nada aqui e importado por src/.
@@ -24,7 +24,7 @@ export const iso = (time) => new Date(time).toISOString();
 
 export const UNIQUE = {
   webinar_chat_consents: [["user_id"]],
-  // O indice unico (webinar_id, name_key) da 202611110001: name_key e a coluna gerada (webinar_persona_name_key).
+  // O indice unico (webinar_id, name_key) da 202611140001: name_key e a coluna gerada (webinar_persona_name_key).
   webinar_personas: [["webinar_id", "name_key"]],
   webinar_poll_answers: [["poll_id", "user_id"]],
   webinar_presence_samples: [["session_id", "user_id", "bucket"]],

@@ -386,7 +386,7 @@ test("R8 e R9 console: o Roteiro da live com 'Aos 12 minutos da live', a foto de
   assert.match(lista, /<ol[^>]*data-console-script=""/, "com item, a lista");
   assert.doesNotMatch(html(createElement(ConsoleScript, { ...props, onComment: undefined })), /data-console-script-new/, "sem a acao, sem o botao");
 
-  // Sem a lista no retrato (o banco sem a 202611110001), o Nome digitado como antes.
+  // Sem a lista no retrato (o banco sem a 202611140001), o Nome digitado como antes.
   const form = html(createElement(ConsoleScript, { ...props, initialComment: { body: "Que aula!", kind: "message", personaAvatarPath: FOTO, personaId: null, personaName: "Bia C.", personaRole: "team" } }));
   const formText = textOf(form);
   assert.match(form, /data-console-script-comment=""/);
@@ -510,7 +510,7 @@ test("pessoas no editor: a lista 'Pessoas que comentam' (foto ou iniciais, Apare
   assert.match(textOf(criando), /Nova pessoa Nome Foto \(opcional\)[\s\S]*Aparece como Aluno Equipe Adicionar à lista Cancelar/);
   // No banco sem a lista: a frase da migracao no lugar dela e os campos de antes em cada linha.
   const semLista = html(createElement(ScriptCard, { disabled: false, hasRecording: true, initialItems: items, initialTranscript: null, sessions: [session()], webinarId: WEBINAR }));
-  assert.match(textOf(semLista), /A lista de pessoas que comentam precisa da atualização do banco \(migração 202611110001\)\./);
+  assert.match(textOf(semLista), /A lista de pessoas que comentam precisa da atualização do banco \(migração 202611140001\)\./);
   assert.doesNotMatch(semLista, /data-persona-picker/);
   assert.equal(count(semLista, /data-persona-photo=""/g), 3);
 });

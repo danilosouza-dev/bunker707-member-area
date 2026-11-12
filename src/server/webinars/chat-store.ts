@@ -299,7 +299,7 @@ export type ScriptItemUpsert = {
   resolved_transcript_id?: string | null;
   /** A foto de quem comenta (R9): so com a 202611100002; sem a coluna no banco, a chave fica de fora. */
   persona_avatar_path?: string | null;
-  /** A pessoa da lista (11/11/2026, D75): so com a 202611110001; sem a coluna no banco, a chave fica de fora. */
+  /** A pessoa da lista (11/11/2026, D75): so com a 202611140001; sem a coluna no banco, a chave fica de fora. */
   persona_id?: string | null;
   status: string;
   trigger_kind: string;
@@ -547,7 +547,7 @@ export async function insertQuestionRow(db: WebinarsDb, row: QuestionInsert): Pr
 }
 
 /**
- * A pergunta simulada (11/11/2026, docs/30 D77; a 202611110001): a pergunta de uma pessoa da lista, sem aluno (user_id
+ * A pergunta simulada (11/11/2026, docs/30 D77; a 202611140001): a pergunta de uma pessoa da lista, sem aluno (user_id
  * nulo, source 'scripted'), com a copia do nome (display_name), do papel e da foto da pessoa. `message_id`: a mensagem
  * do item Pergunta do roteiro que a abriu (o "Soltar agora" e o tick da live); nula no "Enviar agora". A mesma mensagem
  * abre uma pergunta so (o indice unico parcial): a segunda volta nula. Banco sem a migracao: PendingMigrationError.

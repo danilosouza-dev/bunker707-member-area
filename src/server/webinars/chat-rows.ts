@@ -328,7 +328,7 @@ export type QuestionRow = {
   status: string;
   updated_at: string;
   upvotes: number;
-  /** Nulo so na pergunta simulada (source 'scripted', 202611110001; o check do banco liga as duas coisas). */
+  /** Nulo so na pergunta simulada (source 'scripted', 202611140001; o check do banco liga as duas coisas). */
   user_id: string | null;
 };
 

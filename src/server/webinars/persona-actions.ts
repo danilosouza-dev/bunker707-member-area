@@ -2,22 +2,22 @@
 
 // Server Actions da lista "Pessoas que comentam" (pedido do produtor de 11/11/2026; docs/30 §2.2, §2.4, §5.2 e D75):
 // criar, editar e remover uma pessoa do webinario, do card Roteiro do editor e da entrada Roteiro do console (a mesma
-// lista). A mesma permissao e o mesmo cuidado das acoes do roteiro (script-actions.ts): runAdminAction com
-// messaging.write, o webinario arquivado so de leitura, so a Live gravada e a Live ao vivo, recordAudit so com ids e
+// lista). A mesma permissao e o mesmo cuidado das acoes do roteiro (script-actions.ts): runWebinarAction (o modulo dos
+// Webinarios na licenca, classe conteudo) com messaging.write, o webinario arquivado so de leitura, so a Live gravada e a Live ao vivo, recordAudit so com ids e
 // contagens (nunca o nome digitado) e a revalidacao da pagina do webinario e do console. Editar troca a copia (o nome, o
 // papel e a foto) de todos os itens do roteiro da pessoa; remover deixa os itens com a copia, fora da lista. Banco sem
-// a 202611110001: 409 com a frase da migracao (persona-writes.ts). A foto vai pelo uploadPersonaPhoto de sempre
+// a 202611140001: 409 com a frase da migracao (persona-writes.ts). A foto vai pelo uploadPersonaPhoto de sempre
 // (script-actions.ts), que devolve so o caminho.
 
 import { revalidatePath } from "next/cache";
 import type { ActionResult } from "@/lib/action-result";
-import { runAdminAction } from "@/server/actions/run-action";
 import { recordAudit } from "@/server/audit/log";
 import { deletePersonaSchema, savePersonaSchema, type SavePersonaInput } from "./chat-schemas";
 import { WebinarError, webinarsDb } from "./db";
 import type { WebinarPersona } from "./persona-model";
 import { fetchPersonaRow } from "./persona-store";
 import { removePersonaRow, savePersonaRow, withPersonaTable } from "./persona-writes";
+import { runWebinarAction } from "./run-webinar-action";
 import { assertWebinarNotArchived, requireWebinarRow } from "./store";
 
 const LIST_PATH = "/admin/comunicacao/webinarios";
@@ -49,7 +49,7 @@ async function requirePersonaWebinar(id: string) {
  * `webinar.persona_saved`.
  */
 export async function savePersona(input: SavePersonaInput): Promise<ActionResult<SavedPersona>> {
-  return runAdminAction("messaging.write", savePersonaSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", savePersonaSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const webinar = await requirePersonaWebinar(data.webinarId);
     const saved = await savePersonaRow(db, { avatarPath: data.avatarPath, id: data.id, name: data.name, role: data.role, userId: user.id, webinarId: webinar.id });
@@ -73,7 +73,7 @@ export async function savePersona(input: SavePersonaInput): Promise<ActionResult
  * `webinar.persona_removed`.
  */
 export async function deletePersona(input: { id: string }): Promise<ActionResult<RemovedPersona>> {
-  return runAdminAction("messaging.write", deletePersonaSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", deletePersonaSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const row = await withPersonaTable(() => fetchPersonaRow(db, data.id));
 

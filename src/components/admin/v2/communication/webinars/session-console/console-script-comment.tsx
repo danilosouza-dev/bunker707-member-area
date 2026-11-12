@@ -70,7 +70,7 @@ export type ConsoleScriptCommentProps = {
   initialSent?: boolean;
   /** A foto subindo ao abrir (o teste de tela). */
   initialUploading?: boolean;
-  /** O banco tem a lista de pessoas (a 202611110001); sem ela, so o Nome digitado. */
+  /** O banco tem a lista de pessoas (a 202611140001); sem ela, so o Nome digitado. */
   listAvailable?: boolean;
   onBack: () => void;
   /** "Enviar agora" ou "Guardar na lista"; devolve o resultado (nulo: outra acao em andamento). */

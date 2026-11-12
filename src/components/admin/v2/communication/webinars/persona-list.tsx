@@ -170,7 +170,7 @@ export type PersonaListProps = {
   initialForm?: string | null;
   /** A pessoa com a confirmacao do Remover aberta ao desenhar (o teste de tela). */
   initialRemoving?: string | null;
-  /** O banco tem a lista (a 202611110001); sem ela, so a frase da migracao. */
+  /** O banco tem a lista (a 202611140001); sem ela, so a frase da migracao. */
   available: boolean;
   /** "Comentar como {nome}" (so no console): abre o Novo comentário com a pessoa. */
   onCommentAs?: (persona: WebinarPersona) => void;

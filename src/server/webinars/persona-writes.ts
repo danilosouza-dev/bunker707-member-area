@@ -1,12 +1,12 @@
 import "server-only";
 
 // As escritas das pessoas que comentam e da pergunta simulada (pedido do produtor de 11/11/2026; docs/30 D75 a D78;
-// migracao 202611110001), que as Server Actions do roteiro (script-actions.ts), as da lista (persona-actions.ts) e o
+// migracao 202611140001), que as Server Actions do roteiro (script-actions.ts), as da lista (persona-actions.ts) e o
 // tick da live (live-script-tick.ts) dividem. Tudo pela service role, com as conferencias do servidor (o nome unico no
 // webinario antes do indice unico do banco, a pessoa do mesmo webinario) e as frases da migracao pendente:
 // - commentPersona: a pessoa de um comentario do console. Com `personaId`, a da lista (a copia dela: o nome, o papel e
 //   a foto); sem ela, a pessoa nova, que entra na lista (D76: "a nova entra na lista ao enviar ou guardar"). No banco
-//   sem a 202611110001 nao ha lista: o comentario segue com o Nome, o papel e a foto enviados, como antes, sem pessoa;
+//   sem a 202611140001 nao ha lista: o comentario segue com o Nome, o papel e a foto enviados, como antes, sem pessoa;
 // - savePersonaRow e removePersonaRow: o CRUD da lista. Editar troca a copia de todos os itens do roteiro ligados a
 //   pessoa (syncPersonaCopies; o que a turma ja viu nao muda: a mensagem e a pergunta guardam a copia); remover deixa
 //   os itens com a copia e sem a pessoa (a ligacao sai antes, e o on delete set null do banco garante);
@@ -39,9 +39,9 @@ import {
 
 const PESSOAS = WEBINAR_COPY.pessoas;
 
-/** O aviso da lista no banco sem a 202611110001. */
+/** O aviso da lista no banco sem a 202611140001. */
 export const PERSONAS_MIGRATION_MESSAGE = PESSOAS.erros.migracao(WEBINARS_PERSONAS_MIGRATION);
-/** O aviso da pergunta simulada no banco sem a 202611110001. */
+/** O aviso da pergunta simulada no banco sem a 202611140001. */
 export const SCRIPTED_QUESTION_MIGRATION_MESSAGE = PESSOAS.erros.perguntaMigracao(WEBINARS_PERSONAS_MIGRATION);
 const PERSONA_MISSING_MESSAGE = PESSOAS.erros.sumiu;
 
@@ -49,7 +49,7 @@ function isMissing(error: unknown) {
   return isPendingMigrationError(error) || isMissingWebinarSchema(error);
 }
 
-/** Uma escrita da lista que esbarra no banco sem a 202611110001 vira 409 com a frase da migracao. */
+/** Uma escrita da lista que esbarra no banco sem a 202611140001 vira 409 com a frase da migracao. */
 export async function withPersonaTable<T>(work: () => Promise<T>, message: string = PERSONAS_MIGRATION_MESSAGE): Promise<T> {
   try {
     return await work();
@@ -166,7 +166,7 @@ const IMPORT_PERSONAS_BATCH = 500;
  * personaNameKey) vira a pessoa da lista com o mesmo nome, e os que faltam entram na lista com o papel da primeira linha
  * deles e sem foto. As novas vao em lotes; a corrida com outra importacao (o indice unico (webinar_id, name_key) recusa o
  * lote) grava uma por vez, e o nome que outra importacao ja gravou e reaproveitado (relido no fim). Devolve as pessoas
- * pelo nome comparavel e quantas entraram agora; no banco sem a 202611110001, `available` falso (sem lista, como antes).
+ * pelo nome comparavel e quantas entraram agora; no banco sem a 202611140001, `available` falso (sem lista, como antes).
  */
 export async function importPersonas(
   db: WebinarsDb,

@@ -4,9 +4,9 @@ import "./support/resolve-extensionless-ts.mjs";
 import { assertOnlyAdds, assertSections, assertServiceRoleOnly, cumulativeHash, fileHash, migrationFiles, read, sqlCodeOf, sqlList, statementsOf } from "./support/webinarios-migracao-guarda.mjs";
 
 // Guarda da migracao dos participantes simulados mudados a qualquer momento (docs/30 D79 e D80, §4.1 e §4.3; docs/21
-// §9.15; docs/18 §1.2): a 202611110002_webinars_v8_plateia.sql.
-// - as 66 migracoes ate a 202611100002 continuam byte a byte (hash acumulado); a 202611110002 vem depois dela (a
-//   202611110001 de outra frente da mesma rodada pode ficar no meio) e e o texto exato (hash);
+// §9.15; docs/18 §1.2): a 202611140002_webinars_v8_plateia.sql.
+// - as 66 migracoes ate a 202611100002 continuam byte a byte (hash acumulado); a 202611140002 vem depois dela (a
+//   202611140001 de outra frente da mesma rodada pode ficar no meio) e e o texto exato (hash);
 // - duas secoes MCP, idempotente, so acrescenta (nenhum drop); a tabela nova so do service_role;
 // - os limites do SQL sao os do app (o offset de CHAT_LIMITS, a frase de CHAT_LIMITS.simulationAck, as origens de
 //   SIMULATION_CHANGE_SOURCES, as colunas que simulation-change-rows.ts le e grava);
@@ -14,7 +14,7 @@ import { assertOnlyAdds, assertSections, assertServiceRoleOnly, cumulativeHash, 
 //   (WEBINARS_AUDIENCE_MIGRATION, a mesma de AUDIENCE_MIGRATION, que o controle mostra), e WEBINARS_MIGRATION passa a ser
 //   esta, a mais nova dos webinarios (a guarda tests/webinarios-quem-pode-migracao.guard.test.mjs pede).
 
-const MIGRATION = "supabase/migrations/202611110002_webinars_v8_plateia.sql";
+const MIGRATION = "supabase/migrations/202611140002_webinars_v8_plateia.sql";
 const model = await import("../src/server/webinars/model.ts");
 const rows = await import("../src/server/webinars/simulation-change-rows.ts");
 const audience = await import("../src/server/webinars/simulation-audience-model.ts");
@@ -23,20 +23,20 @@ const dbSource = read("src/server/webinars/db.ts");
 const migration = read(MIGRATION);
 const code = sqlCodeOf(migration);
 
-test("as 66 migracoes ate a 202611100002 continuam byte a byte; a 202611110002 vem depois e e o texto exato", () => {
+test("as 66 migracoes ate a 202611100002 continuam byte a byte; a 202611140002 vem depois e e o texto exato", () => {
   const applied = cumulativeHash("202611100002_webinars_v7_na_tela.sql");
   assert.equal(applied.count, 66);
   assert.equal(applied.hash, "9292354986d87ef4d7d03efff3c382b374b4937b1fc2ca421e423987a5b834bb", "uma migracao ja aplicada mudou: a correcao vai numa migracao nova");
   const files = migrationFiles();
-  assert.ok(files.indexOf("202611110002_webinars_v8_plateia.sql") > files.indexOf("202611100002_webinars_v7_na_tela.sql"), "depois da Na tela");
+  assert.ok(files.indexOf("202611140002_webinars_v8_plateia.sql") > files.indexOf("202611100002_webinars_v7_na_tela.sql"), "depois da Na tela");
   assert.equal(
     fileHash(MIGRATION),
     "3bc28131d3548c3d2bae9c591e6bfcd4daa642edbd587b3f5a7dcb02bcc1eb2e",
-    "a 202611110002 mudou: depois de aplicada na nuvem de teste (docs/21 §9.15), a correcao vai numa migracao nova; antes, aplique de novo e atualize este hash junto"
+    "a 202611140002 mudou: depois de aplicada na nuvem de teste (docs/21 §9.15), a correcao vai numa migracao nova; antes, aplique de novo e atualize este hash junto"
   );
 });
 
-test("a 202611110002: duas secoes MCP, idempotente, so acrescenta; a tabela so do service_role; nenhuma coluna nova na sessao", () => {
+test("a 202611140002: duas secoes MCP, idempotente, so acrescenta; a tabela so do service_role; nenhuma coluna nova na sessao", () => {
   assertSections(migration, 2);
   assertOnlyAdds(migration);
   assertServiceRoleOnly(code, "webinar_simulation_changes");
@@ -63,7 +63,7 @@ test("os limites do SQL sao os do app (simulation-change-rows.ts, model.ts)", ()
 });
 
 test("o aviso de migracao pendente aponta esta (WEBINARS_AUDIENCE_MIGRATION = AUDIENCE_MIGRATION) e WEBINARS_MIGRATION e esta, a mais nova", () => {
-  assert.match(dbSource, /export const WEBINARS_AUDIENCE_MIGRATION = "202611110002";/);
-  assert.equal(audience.AUDIENCE_MIGRATION, "202611110002");
-  assert.match(dbSource, /export const WEBINARS_MIGRATION = "202611110002";/, "a mais nova dos webinarios: aplicar ate ela inclui todas as de antes");
+  assert.match(dbSource, /export const WEBINARS_AUDIENCE_MIGRATION = "202611140002";/);
+  assert.equal(audience.AUDIENCE_MIGRATION, "202611140002");
+  assert.match(dbSource, /export const WEBINARS_MIGRATION = "202611140002";/, "a mais nova dos webinarios: aplicar ate ela inclui todas as de antes");
 });

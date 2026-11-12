@@ -542,7 +542,7 @@ export type ConsoleSnapshot = {
   /**
    * As pessoas que comentam do webinario (11/11/2026, D75): a mesma lista do card Roteiro do editor, que o Roteiro do
    * console cria, edita, remove e escolhe. So com o roteiro e nunca no Replay; ausente ou `available` falso (o banco sem
-   * a 202611110001), o "Novo comentário" segue com o Nome digitado.
+   * a 202611140001), o "Novo comentário" segue com o Nome digitado.
    */
   personas?: PersonaList;
   questions: WebinarQuestion[];

@@ -179,7 +179,7 @@ function usar(tables = cenario()) {
 
 /**
  * O banco sem a 202611100002 para a foto: 42703 em qualquer leitura que pede persona_avatar_path e em qualquer escrita
- * que a leva (o resto do banco segue igual). Sem ela tambem nao ha a 202611110001 (vem depois): a lista de pessoas
+ * que a leva (o resto do banco segue igual). Sem ela tambem nao ha a 202611140001 (vem depois): a lista de pessoas
  * (webinar_personas) e o persona_id do item e da pergunta tambem nao existem.
  */
 function semAColunaDaFoto(db) {
@@ -414,8 +414,8 @@ test("R8 tick: a espera (sem started_at), a gravada e o Replay ficam de fora; o 
   });
   const [pendente, avisos] = await silenciando(() => tick.runLiveScriptTick({ db: semTabela, now: new Date() }));
   assert.deepEqual(pendente, { failed: 0, pendingMigration: true, released: 0, sessions: 0, skipped: 0 });
-  // O log aponta a mais nova dos webinarios (WEBINARS_MIGRATION; desde 11/11/2026 a 202611110002).
-  assert.ok(avisos.some((linha) => linha.includes("migracao 202611110002 pendente")));
+  // O log aponta a mais nova dos webinarios (WEBINARS_MIGRATION; desde 11/11/2026 a 202611140002).
+  assert.ok(avisos.some((linha) => linha.includes("migracao 202611140002 pendente")));
 });
 
 test("R8 tick: a corrida com o Soltar agora (a chave unica) nao repete; o banco sem a coluna da foto solta sem a foto", async () => {

@@ -350,7 +350,7 @@ export type WebinarEditorData = {
   replaySession: WebinarScreenSession | null;
   runningSessionId: string | null;
   scriptItems: ScriptItem[];
-  /** As pessoas que comentam do webinario (11/11/2026, D75; banco sem a 202611110001: `available` falso e vazia). */
+  /** As pessoas que comentam do webinario (11/11/2026, D75; banco sem a 202611140001: `available` falso e vazia). */
   personas: PersonaList;
   /** As sessoes como vao para a tela: `roomName` sempre nulo (webinarScreenSession). */
   sessions: WebinarScreenSession[];

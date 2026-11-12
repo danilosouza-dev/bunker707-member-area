@@ -17,7 +17,7 @@
 // o roteiro (com o que ja entrou) tambem na sessao da Live ao vivo, com a foto de quem comenta de cada item, e a foto de
 // quem comenta nas mensagens do roteiro (lida a parte pelo id: a coluna nao entra em CHAT_MESSAGE_COLUMNS). As pessoas
 // que comentam (11/11/2026, D75 a D78): o retrato leva a lista do webinario (`personas`, so com o roteiro e nunca no
-// Replay; banco sem a 202611110001, `available` falso), e a pergunta simulada vem nas perguntas com a foto da pessoa e
+// Replay; banco sem a 202611140001, `available` falso), e a pergunta simulada vem nas perguntas com a foto da pessoa e
 // so quando a hora dela chega; a mensagem do item Pergunta (o registro de que o item entrou) fica fora do chat.
 
 import "server-only";
@@ -513,7 +513,7 @@ async function loadConsolePresence(session: WebinarSession, offsetMs: number, no
  * inclusa) e a vista do controle "Participantes simulados" (o numero de agora, a rampa e as mudancas com o nome), na
  * gravada e na Live ao vivo de pe ou encerrada (nunca no Replay nem na cancelada), mesmo sem decisao. Uma leitura das
  * regras pela chave e uma das mudancas so nesse caso; banco sem a 202610300003 ou a leitura que falha: nulo nos dois (o
- * selo fica so com o real e o controle nao aparece); sem a 202611110002, o controle sem os botoes.
+ * selo fica so com o real e o controle nao aparece); sem a 202611140002, o controle sem os botoes.
  */
 async function loadConsoleSimulated(
   db: WebinarsDb,
@@ -568,7 +568,7 @@ async function loadConsoleSimulated(
   }
 }
 
-/** As mudancas da sessao para o controle; sem a tabela (banco sem a 202611110002), nenhuma e `pending`. */
+/** As mudancas da sessao para o controle; sem a tabela (banco sem a 202611140002), nenhuma e `pending`. */
 async function loadAudienceChanges(db: WebinarsDb, sessionId: string): Promise<{ pending: boolean; records: SimulationChangeRecord[] }> {
   try {
     return { pending: false, records: await listSimulationChanges(db, [sessionId]) };

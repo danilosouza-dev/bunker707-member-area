@@ -24,7 +24,7 @@
 
 import { revalidatePath } from "next/cache";
 import { GENERIC_ACTION_ERROR, toActionError, type ActionErrorStatus, type ActionResult } from "@/lib/action-result";
-import { runAdminAction } from "@/server/actions/run-action";
+import { runWebinarAction } from "./run-webinar-action";
 import { recordAudit } from "@/server/audit/log";
 import { getUserDisplayName } from "@/server/auth/session";
 import { isPendingMigrationError } from "@/server/db/pending-migration";
@@ -775,7 +775,7 @@ export async function setSessionChatMode(input: { chatMode: ChatMode; sessionId:
  * que fica sem ele ter carregado: passou, 409 antes de gravar.
  */
 export async function savePolls(input: { loadedIds?: string[]; polls: PollDraft[]; webinarId: string }): Promise<ActionResult<SavedPolls>> {
-  return runAdminAction("messaging.write", savePollsSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", savePollsSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const webinar = await requireWebinarRow(db, data.webinarId);
     assertWebinarNotArchived(webinar);
@@ -996,7 +996,7 @@ export async function createConsolePoll(input: {
   question: string;
   sessionId: string;
 }): Promise<ActionResult<CreatedConsolePoll>> {
-  return runAdminAction("messaging.write", createConsolePollSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", createConsolePollSchema, input, async ({ input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const { session, webinar } = await loadSession(db, data.sessionId);

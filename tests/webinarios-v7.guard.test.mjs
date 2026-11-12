@@ -29,7 +29,7 @@ import {
 // - R9: a foto do personagem no item do roteiro e na mensagem scripted (so o caminho webinars/personas/<24 hex>.webp);
 //   webinar_open_session mantem o corpo inteiro da 202610290001 e so ganha a foto e a live fora do roteiro ao abrir;
 // - os checks novos das tabelas que ja existem entram `not valid` e a secao 7 so os valida;
-// - o aviso de migracao pendente aponta esta ou uma mais nova (WEBINARS_MIGRATION; desde 11/11/2026 a 202611110001 das
+// - o aviso de migracao pendente aponta esta ou uma mais nova (WEBINARS_MIGRATION; desde 11/11/2026 a 202611140001 das
 //   pessoas que comentam), e a Na tela tem a propria constante
 //   (WEBINARS_SCREEN_MIGRATION).
 
@@ -189,7 +189,7 @@ test("a secao 7 so valida os tres checks novos (de novo, nada muda)", () => {
 });
 
 test("o aviso de migracao pendente aponta uma migracao que inclui a 202611100002, e a Na tela tem a propria constante", () => {
-  // O aviso aponta a migracao mais nova dos webinarios (desde 11/11/2026 a das pessoas que comentam, 202611110001,
+  // O aviso aponta a migracao mais nova dos webinarios (desde 11/11/2026 a das pessoas que comentam, 202611140001,
   // tests/webinarios-v8.guard.test.mjs): aplicar ate ela inclui esta.
   assert.ok((dbSource.match(/export const WEBINARS_MIGRATION = "(\d+)";/)?.[1] ?? "") >= "202611100002");
   assert.match(dbSource, /export const WEBINARS_SCREEN_MIGRATION = "202611100002";/);

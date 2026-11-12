@@ -5,6 +5,8 @@ import { badRequest, guardRoomRequest, loadCachedRoomContext, ok, roomErrorRespo
 import { emptySimulationFeed, liveSimulationEndOffsetMs, liveSimulationShapeMs, simulationDecisionRecorded, simulationEndOffsetMs, simulationFeed } from "@/server/webinars/simulation-model";
 import { simulationFeedQuerySchema } from "@/server/webinars/simulation-schemas";
 import { fetchSessionSimulationFeed } from "@/server/webinars/simulation-store";
+import { WEBINARS_FEATURE } from "@/server/licensing/features";
+import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // A Simulacao da sala da Live gravada (docs/30 §1.6, §4.3, §6.6 e §8.6; D6, D10): GET ?sessao=&from=&to= (ms do relogio
 // do video, no maximo 120 s) devolve { data: SimulationFeed }: a parte simulada do contador a cada 15 s, as entradas e

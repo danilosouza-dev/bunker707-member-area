@@ -9,7 +9,7 @@ import "server-only";
 // 202610300004 (quem respondeu) devolve o CSV sem elas, nunca quebra; o resto sobe como PendingMigrationError (a rota
 // responde 503 com a migracao). Os numeros reais vem das RPCs (webinar_panel, webinar_report); as linhas simuladas so
 // pelo CSV Simulacao (as funcoes *Simulation* abaixo), nunca noutro (D6, M6). A equipe (admin_roles) fica fora. A
-// pergunta simulada (11/11/2026, D77; a 202611110001: a unica sem aluno, user_id nulo) nunca entra no Q&A: a leitura
+// pergunta simulada (11/11/2026, D77; a 202611140001: a unica sem aluno, user_id nulo) nunca entra no Q&A: a leitura
 // pede so as perguntas com aluno, o que vale tambem no banco sem a migracao (ali toda pergunta tem aluno).
 
 import { WEBINAR_COPY } from "../../lib/webinar-copy";

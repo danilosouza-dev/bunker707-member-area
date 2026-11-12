@@ -6,10 +6,10 @@
 // sessao `live` tambem grava as regras e congela o resumo (check webinar_sessions_simulation_live_v7 da 202611100002:
 // nunca o selo "Ao vivo" na live); no banco sem ela, o check antigo recusa a live e a escrita vira
 // LiveSimulationPendingError (409 com a frase da migracao em quem chama). Os participantes simulados mudados a qualquer
-// momento (D79 e D80; 202611110002): cada mudanca e uma linha de webinar_simulation_changes (so acrescenta; a regra, o
+// momento (D79 e D80; 202611140002): cada mudanca e uma linha de webinar_simulation_changes (so acrescenta; a regra, o
 // offset em que vale, a frase confirmada, quem e de onde), e a leitura da Simulacao traz as que valem no ar em
 // `countChanges`. Banco sem a tabela: a leitura das mudancas devolve vazio (a Simulacao segue como antes) e so a escrita
-// vira PendingMigrationError (409 com a frase da 202611110002 em quem chama). Correcoes da revisao v8 (11/11/2026): a
+// vira PendingMigrationError (409 com a frase da 202611140002 em quem chama). Correcoes da revisao v8 (11/11/2026): a
 // janela da sala le a decisao, a situacao e o fim da linha de agora junto com as regras (fetchSessionSimulationFeed;
 // achado 1), o card do editor so grava por cima da decisao que carregou (expectedDecidedAt, SimulationChangedError;
 // achado 6) e as mudancas sao lidas em paginas, todas (listSimulationChanges; achado 8).
@@ -94,7 +94,7 @@ export async function listSessionSimulations(db: WebinarsDb, sessionIds: readonl
 }
 
 /* ------------------------------------------------------------------------------------------------
- * As mudancas dos participantes simulados (D79 e D80; 202611110002)
+ * As mudancas dos participantes simulados (D79 e D80; 202611140002)
  * ---------------------------------------------------------------------------------------------- */
 
 /** A Simulacao com as mudancas que valem no ar (as de antes do comeco ja estao na regra da sessao). */
@@ -127,7 +127,7 @@ export async function listSimulationChanges(db: WebinarsDb, sessionIds: readonly
   return rows.map(simulationChangeFromRow);
 }
 
-/** As mudancas para a conta e para a tela: sem a tabela (banco sem a 202611110002), nenhuma, e a Simulacao segue. */
+/** As mudancas para a conta e para a tela: sem a tabela (banco sem a 202611140002), nenhuma, e a Simulacao segue. */
 export async function readSimulationChanges(db: WebinarsDb, sessionIds: readonly string[]): Promise<SimulationChangeRecord[]> {
   try {
     return await listSimulationChanges(db, sessionIds);

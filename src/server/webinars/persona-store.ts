@@ -5,8 +5,8 @@
 // migracao, em quem chama).
 //
 // - readScriptPersonaAvatars: as fotos dos itens de um webinario (o card Roteiro, o console, o tick da live, o salvar)
-//   e, desde 11/11/2026, a pessoa de cada item (persona_id, da 202611110001), na mesma leitura; no banco sem a
-//   202611110001 a leitura volta sem a pessoa (`linked` falso) e com a foto, e sem a 202611100002, sem nada;
+//   e, desde 11/11/2026, a pessoa de cada item (persona_id, da 202611140001), na mesma leitura; no banco sem a
+//   202611140001 a leitura volta sem a pessoa (`linked` falso) e com a foto, e sem a 202611100002, sem nada;
 // - readScriptItemPersonaAvatar: a foto de um item (o "Soltar agora" copia para a mensagem);
 // - loadScriptedMessageAvatars: a foto das mensagens `scripted` pelo id (a sala, o console e a fixada). A foto de uma
 //   mensagem nunca muda depois de gravada (a copia do item na hora em que entrou), entao a leitura fica na memoria do
@@ -17,7 +17,7 @@
 //   console): os itens do webinario com o mesmo nome (samePersonaName) recebiam a foto. Saiu em 11/11/2026, com a caixa
 //   da tela: a pessoa da lista virou a unidade (syncPersonaCopies, abaixo).
 //
-// As pessoas que comentam (pedido do produtor de 11/11/2026; docs/30 D75 a D78; migracao 202611110001):
+// As pessoas que comentam (pedido do produtor de 11/11/2026; docs/30 D75 a D78; migracao 202611140001):
 // - listPersonas: a lista do webinario (o editor, o console e as acoes), pelo nome, inteira em paginas de 1.000 (a
 //   revisao v8, achado 4); banco sem a tabela, `available` falso e a lista vazia (o editor e o console seguem com o Nome
 //   digitado, como antes); fetchPersonasByIds: as que uma leitura de antes nao trouxe;
@@ -40,7 +40,7 @@ import { isPersonaAvatarPath, personaNameKey, type PersonaList, type WebinarPers
 
 /**
  * As fotos e as pessoas dos itens lidas: `available` falso no banco sem a 202611100002 (nenhuma foto, e nenhuma foto pode
- * ser gravada); `linked` falso no banco sem a 202611110001 (nenhum item ligado a uma pessoa).
+ * ser gravada); `linked` falso no banco sem a 202611140001 (nenhum item ligado a uma pessoa).
  */
 export type PersonaAvatars = { available: boolean; linked: boolean; paths: Map<string, string | null>; personaIds: Map<string, string | null> };
 
@@ -85,7 +85,7 @@ async function readScriptPersonaRows(db: WebinarsDb, webinarId: string, columns:
 }
 
 /**
- * As fotos e as pessoas dos itens do roteiro de um webinario, pelo id do item. Uma leitura com a pessoa (202611110001);
+ * As fotos e as pessoas dos itens do roteiro de um webinario, pelo id do item. Uma leitura com a pessoa (202611140001);
  * sem ela, de novo so com a foto (202611100002); sem as duas, nada.
  */
 export async function readScriptPersonaAvatars(db: WebinarsDb, webinarId: string): Promise<PersonaAvatars> {
@@ -127,7 +127,7 @@ export async function readScriptItemPersonaAvatar(db: WebinarsDb, itemId: string
   }
 }
 
-/** A pessoa de um item (nula sem pessoa ou no banco sem a 202611110001). */
+/** A pessoa de um item (nula sem pessoa ou no banco sem a 202611140001). */
 export async function readScriptItemPersonaId(db: WebinarsDb, itemId: string): Promise<string | null> {
   try {
     const { data, error } = await db.from("webinar_chat_script_items").select("persona_id").eq("id", itemId).maybeSingle();
@@ -230,14 +230,14 @@ export async function loadScriptedMessageAvatars(db: WebinarsDb, messageIds: rea
 
 /**
  * A foto das perguntas simuladas pelo id (so as que tem; a copia da pessoa gravada na pergunta, D77). Nunca lanca: no
- * banco sem a 202611110001 nao ha pergunta simulada, e a falha da leitura deixa as iniciais.
+ * banco sem a 202611140001 nao ha pergunta simulada, e a falha da leitura deixa as iniciais.
  */
 export async function loadScriptedQuestionAvatars(db: WebinarsDb, questionIds: readonly (string | null | undefined)[], nowMs: number = Date.now()): Promise<Map<string, string>> {
   return questionAvatars.load(db, questionIds, nowMs);
 }
 
 /* ------------------------------------------------------------------------------------------------
- * As pessoas que comentam (202611110001)
+ * As pessoas que comentam (202611140001)
  * ---------------------------------------------------------------------------------------------- */
 
 export const PERSONA_COLUMNS = "id, webinar_id, name, role, avatar_path, created_at, updated_at";
@@ -269,7 +269,7 @@ export function personaFromRow(row: PersonaRow): WebinarPersona {
  * A lista do webinario pelo nome, inteira: em paginas de 1.000 numa ordem total (o nome e o id), porque o PostgREST
  * corta toda resposta em 1.000 linhas sem erro e a pessoa que nao viesse seria tratada como inexistente (o Salvar
  * roteiro soltaria itens, a edicao voltaria 404 e o Duplicar copiaria so 1.000; correcao da revisao v8, achado 4).
- * Banco sem a 202611110001: `available` falso e vazia.
+ * Banco sem a 202611140001: `available` falso e vazia.
  */
 export async function listPersonas(db: WebinarsDb, webinarId: string): Promise<PersonaList> {
   try {
