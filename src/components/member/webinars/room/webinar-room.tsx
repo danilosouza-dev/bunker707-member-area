@@ -75,6 +75,7 @@ import { RoomDock } from "./vertical/room-dock";
 import { VerticalChat } from "./vertical/vertical-chat";
 import { VerticalComposer } from "./vertical/vertical-composer";
 import { VerticalDrawer, type VerticalDrawerTab } from "./vertical/vertical-drawer";
+import { usePanelMotion } from "./use-panel-motion";
 import { drawerTabFor, roomSkeleton, themeForDesign, verticalBadge, type RoomDesign } from "./vertical/vertical-model";
 import { VerticalTopBar } from "./vertical/vertical-top-bar";
 
@@ -913,7 +914,9 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const composerNotice = readOnly ? null : mutedPhrase(ban, nowMs);
   const headerPhase = phase === "replay" ? "live" : phase;
   // Com o painel fechado o palco cresce para ocupar a coluna (abaixo de lg; no computador ele ja ocupa).
-  const skeleton = roomSkeleton(design, { cinema: false, panelShown, stageGrows: !panelShown });
+  // Fechando, o painel continua no lugar ate a saida terminar (rodada v9, P12): o palco muda de tamanho uma vez so.
+  const panelMotion = usePanelMotion(panelShown);
+  const skeleton = roomSkeleton(design, { cinema: false, panelShown: panelMotion.laid, stageGrows: !panelMotion.laid });
   // O selo do momento no palco (V2-4), pela mesma regra do topo do vertical (D10).
   const momentBadge = verticalBadge({ kind, phase: headerPhase, showLiveBadge: session.session.showLiveBadge });
   const topLeft: RoomStageTopLeft =
@@ -1243,6 +1246,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
               firstFocus={firstFocus === "tab"}
               id={ROOM_PANEL_ID}
               kind={kind}
+              motion={panelMotion}
               onClose={() => setPanelOpen(false)}
               onTab={setTab}
               open={panelShown}

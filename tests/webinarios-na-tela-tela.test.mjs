@@ -541,6 +541,8 @@ test("o cartao do banner: a secao nao modal com o nome, a largura pelo tamanho (
   for (const classe of ["h-8", "relative", "after:absolute", "after:-inset-1.5", "lg:after:hidden"]) {
     assert.ok(classesDe(`<a${links[0].attrs}>`).includes(classe), `${classe}: o botao de 32 px com a area de toque de 44 px abaixo de lg (A7)`);
   }
+  assert.ok(classesDe(`<a${links[0].attrs}>`).includes("min-w-24"), "o botao com pelo menos 96 px: o texto curto (BTN) nao vira uma bola (rodada v9, P4)");
+  assert.ok(classesDe(`<a${links[0].attrs}>`).includes("justify-center"), "o texto centralizado no botao");
   assert.match(html, /<button aria-label="Fechar o banner"[^>]*data-room-screen-close=""[^>]*>/, "o X, um botao");
   assert.ok(html.indexOf("Fechar o banner") > html.lastIndexOf("</a>"), "o X fora do link");
   assert.doesNotMatch(html, /Este banner sai quando a equipe tirar/);

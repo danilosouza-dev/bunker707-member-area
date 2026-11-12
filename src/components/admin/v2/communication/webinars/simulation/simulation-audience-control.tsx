@@ -22,8 +22,8 @@ import { adminInputClass } from "../../../form";
 // tudo mais"), o mesmo no console da sessao (no alto da entrada Presença, aberto tambem pelo selo dos presentes) e no
 // card Simulacao do editor depois do comeco: o numero somado agora ("+300"), a sala chegando nele durante a rampa de
 // 90 s, quem mudou por ultimo e quando, o campo "Somar à plateia" com os atalhos (+50, +100, +300, +500: o campo fica
-// com o numero), a frase da mudanca (a da decisao com o numero novo, a mesma conta do servidor) com a caixa, o Aplicar
-// (so com a caixa marcada quando soma algo) e o Tirar (volta a +0, sem caixa: grava a frase do +0). Sem permissao
+// com o numero), o Aplicar direto e o Tirar (volta a +0). Sem frase nem caixa desde 12/11/2026 (decisao do produtor,
+// docs/30 D85): o servidor grava sozinho a frase da mudanca no registro (quem, quando e o numero). Sem permissao
 // (messaging.publish), com a sessao encerrada ou sem a 202611140002, o numero sem os botoes e a frase do motivo. As
 // mudancas ficam num <details> com a hora, o +N e quem. O link leva ao outro lado (o console leva ao card do editor; o
 // card, ao console). Quem usa faz o pedido (`onApply`) e diz se deu certo (o formulario volta ao vazio). Nenhuma frase
@@ -40,16 +40,11 @@ export type SimulationAudienceControlProps = {
   idBase: string;
   /** O atalho para o outro lado: o card do editor (no console) ou o console (no card). */
   link?: { href: string; label: string } | null;
-  live: boolean;
-  /** A hora do servidor na tela (a data da frase). */
-  nowMs: number;
   /** O relogio da Simulacao agora (simulationClockMs): a rampa em curso. */
   offsetMs: number;
-  /** O pedido: o +N e a frase marcada (nula no Tirar). Devolve se deu certo. */
-  onApply: (input: { ackText: string | null; extra: number }) => Promise<boolean>;
+  /** O pedido: o +N (0 no Tirar). Devolve se deu certo. */
+  onApply: (input: { extra: number }) => Promise<boolean>;
   phase: AudiencePhase;
-  /** O nome de quem esta na tela (o mesmo que o servidor poe na frase). */
-  responsible: string;
   /** O id do titulo (o selo dos presentes leva o foco a ele). */
   titleId?: string;
 };
@@ -57,42 +52,31 @@ export type SimulationAudienceControlProps = {
 export function SimulationAudienceControl(props: SimulationAudienceControlProps) {
   const { audience, idBase } = props;
   const [text, setText] = useState("");
-  const [acknowledged, setAcknowledged] = useState(false);
   const [sending, setSending] = useState(false);
   const busy = props.busy || sending;
   const state = audienceFormState({
-    acknowledged,
     busy,
     canPublish: props.canPublish,
     current: audience.current,
-    flags: audience.flags,
-    live: props.live,
-    nowMs: props.nowMs,
     pendingMigration: audience.pendingMigration,
     phase: props.phase,
-    responsible: props.responsible,
     text
   });
   const titleId = props.titleId ?? `${idBase}-titulo`;
   const fieldId = `${idBase}-somar`;
-  const checkboxId = `${idBase}-confirmo`;
   const last = audience.changes[0] ?? null;
   const target = audienceCurrentLabel(audience.current);
   const ramping = props.phase === "on_air" && audience.rampEndsAtMs !== null && Number.isFinite(props.offsetMs) && props.offsetMs < audience.rampEndsAtMs;
   const reason = props.phase === "ended" ? COPY.encerrada : !props.canPublish ? COPY.semPermissao : audience.pendingMigration ? WEBINAR_COPY.simulacao.servidor.precisaMigracaoPlateia(AUDIENCE_MIGRATION) : null;
 
-  const edit = (next: string) => {
-    setText(next);
-    setAcknowledged(false);
-  };
+  const edit = (next: string) => setText(next);
 
-  async function apply(extra: number, ackText: string | null) {
+  async function apply(extra: number) {
     setSending(true);
-    const ok = await props.onApply({ ackText, extra });
+    const ok = await props.onApply({ extra });
     setSending(false);
     if (ok) {
       setText("");
-      setAcknowledged(false);
     }
   }
 
@@ -125,7 +109,7 @@ export function SimulationAudienceControl(props: SimulationAudienceControlProps)
             className="px-3"
             data-simulation-audience-remove=""
             disabled={busy}
-            onClick={() => void apply(0, null)}
+            onClick={() => void apply(0)}
             type="button"
             variant="secondary"
           >
@@ -202,27 +186,6 @@ export function SimulationAudienceControl(props: SimulationAudienceControlProps)
             )}
           </div>
 
-          {state.sentence && state.extra !== null && !state.same ? (
-            <div className="flex min-w-0 flex-col gap-2 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-2)] p-3" data-simulation-audience-confirm="">
-              <p className="text-[13px] leading-5 text-[var(--text-primary)]" data-simulation-audience-sentence="">
-                {state.sentence}
-              </p>
-              {state.needsAck ? (
-                <label className="flex min-w-0 items-start gap-2 text-[13px] leading-5 text-[var(--text-primary)]" htmlFor={checkboxId}>
-                  <input
-                    checked={acknowledged}
-                    className="mt-0.5 size-4 shrink-0 accent-[var(--text-primary)]"
-                    disabled={busy}
-                    id={checkboxId}
-                    onChange={(event) => setAcknowledged(event.target.checked)}
-                    type="checkbox"
-                  />
-                  {COPY.caixa}
-                </label>
-              ) : null}
-            </div>
-          ) : null}
-
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <Button
               className="px-4"
@@ -230,14 +193,13 @@ export function SimulationAudienceControl(props: SimulationAudienceControlProps)
               disabled={!state.canApply}
               onClick={() => {
                 if (state.extra !== null) {
-                  void apply(state.extra, state.needsAck ? state.sentence : null);
+                  void apply(state.extra);
                 }
               }}
               type="button"
             >
               {sending ? COPY.aplicando : COPY.aplicar}
             </Button>
-            {state.needsAck && !acknowledged && state.sentence && !state.same ? <span className="text-xs leading-5 text-[var(--text-secondary)]">{COPY.marqueACaixa}</span> : null}
           </div>
           <p className="text-xs leading-5 text-[var(--text-tertiary)]">{props.phase === "before" ? COPY.antesDoComeco : COPY.noAr}</p>
         </div>

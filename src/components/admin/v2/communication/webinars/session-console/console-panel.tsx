@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { RoomTabList } from "@/components/member/webinars/room/room-panel";
 import { RoomTooltip } from "@/components/member/webinars/room/room-tooltip";
 import { ROOM_FOCUS, RoomIconButton } from "@/components/member/webinars/room/room-ui";
+import { usePanelSwapClass, type PanelMotion } from "@/components/member/webinars/room/use-panel-motion";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
@@ -44,6 +45,8 @@ export type ConsolePanelProps = {
   entries: readonly ConsoleMoreEntry[];
   /** O conteudo de cada entrada do ⋯. */
   more: Partial<Record<ConsoleMoreEntry, ReactNode>>;
+  /** A transicao de abrir e fechar (usePanelMotion, rodada v9 P12); sem ela, vale o `open` na hora. */
+  motion?: PanelMotion;
   onClose: () => void;
   onView: (view: ConsolePanelView) => void;
   /** O painel na tela (fechado, o aside fica hidden e montado). */
@@ -63,13 +66,24 @@ export function consolePanelTitle(view: ConsolePanelView): string {
   return "tab" in view ? copy.abas[view.tab] : copy.entradas[view.more];
 }
 
-export function ConsolePanel({ className, closable, counts, entries, more, onClose, onView, open, panes, rail, tabs, view }: ConsolePanelProps) {
+export function ConsolePanel({ className, closable, counts, entries, more, motion, onClose, onView, open, panes, rail, tabs, view }: ConsolePanelProps) {
   const tab = "tab" in view ? view.tab : null;
   const chosen = "more" in view ? view.more : null;
   const count = tab === "perguntas" ? counts.perguntas : tab === "maos" ? counts.maos : chosen === "tela" ? (counts.tela ?? 0) : null;
+  // A aba ou a entrada nova esmaece ao aparecer (as partes ficam montadas e escondidas: sair do `hidden` toca a entrada),
+  // so depois da primeira troca feita pela pessoa.
+  const swapClass = usePanelSwapClass(tab ?? `mais:${chosen ?? ""}`);
 
   return (
-    <aside aria-labelledby="console-panel-title" className={className} data-console-slot="panel" hidden={!open} id={CONSOLE_PANEL_ID}>
+    <aside
+      aria-labelledby="console-panel-title"
+      className={cn(className, motion?.className)}
+      data-console-panel-motion={motion && motion.phase !== "idle" ? motion.phase : undefined}
+      data-console-slot="panel"
+      // Fechando, o painel fica na tela ate a saida terminar (motion.laid); o palco so cresce depois.
+      hidden={motion ? !motion.laid : !open}
+      id={CONSOLE_PANEL_ID}
+    >
       <div className={cn("flex shrink-0 items-center gap-2 pb-4 lg:px-3 lg:pt-3", rail ? "lg:hidden" : null)} data-console-tabs="">
         <RoomTabList
           firstFocusValue={null}
@@ -103,7 +117,7 @@ export function ConsolePanel({ className, closable, counts, entries, more, onClo
           <div
             aria-labelledby={`${CONSOLE_TAB_ID_PREFIX}-tabbtn-${value}`}
             // O Chat enche a aba a partir de lg (a lista rola por dentro, a caixa fica no fim); as outras crescem e o corpo rola.
-            className={cn("flex min-w-0 flex-col gap-4", value === "chat" ? "lg:min-h-0 lg:flex-1" : "lg:px-4 lg:pb-4")}
+            className={cn("flex min-w-0 flex-col gap-4", value === "chat" ? "lg:min-h-0 lg:flex-1" : "lg:px-4 lg:pb-4", swapClass)}
             data-console-tab={value}
             hidden={tab !== value}
             id={`${CONSOLE_TAB_ID_PREFIX}-tab-${value}`}
@@ -114,7 +128,7 @@ export function ConsolePanel({ className, closable, counts, entries, more, onClo
           </div>
         ))}
         {entries.map((entry) => (
-          <section aria-label={copy.entradas[entry]} className="flex min-w-0 flex-col gap-4 lg:px-4 lg:pb-4" data-console-more={entry} hidden={chosen !== entry} key={entry} role="group">
+          <section aria-label={copy.entradas[entry]} className={cn("flex min-w-0 flex-col gap-4 lg:px-4 lg:pb-4", swapClass)} data-console-more={entry} hidden={chosen !== entry} key={entry} role="group">
             {more[entry]}
           </section>
         ))}

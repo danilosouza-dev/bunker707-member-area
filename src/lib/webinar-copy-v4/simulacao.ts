@@ -91,7 +91,6 @@ export const SIMULACAO_COPY = {
     precisaMigracaoLive: (migracao: string) => `A Simulação na live ao vivo precisa da atualização do banco (migração ${migracao}).`,
     /* Os participantes simulados mudados a qualquer momento (D79). */
     plateiaEncerrada: "Essa sessão já terminou: os participantes simulados não mudam mais.",
-    plateiaFraseNaoBate: "A confirmação não bate com a frase do número novo. Marque de novo.",
     plateiaIgual: "Esse já é o número somado agora.",
     plateiaLimite: (limite: number) => `Esta sessão chegou ao limite de ${limite} mudanças dos participantes simulados.`,
     precisaMigracaoPlateia: (migracao: string) => `Mudar os participantes simulados precisa da atualização do banco (migração ${migracao}).`,
@@ -120,8 +119,6 @@ export const SIMULACAO_COPY = {
     aplicando: "Aplicando…",
     tirar: "Tirar",
     tirarRotulo: "Tirar os participantes simulados (volta a +0)",
-    caixa: "Confirmo a decisão acima.",
-    marqueACaixa: "Marque a confirmação para aplicar.",
     igual: "Esse já é o número somado agora.",
     numeroInvalido: (maximo: number) => `Use um número inteiro de 0 a ${maximo.toLocaleString("pt-BR")}.`,
     antesDoComeco: "Antes do começo, o número novo vale na hora.",

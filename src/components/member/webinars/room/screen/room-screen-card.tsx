@@ -15,7 +15,8 @@ import { useScreenShownRef, type ScreenWatch } from "./use-room-screen";
 // O banner e o QR Code no palco de 640 px ou mais (Na tela, R3 e R4; especificacao de 10/11/2026, §3.2, §3.5 e §3.7):
 // o cartao sobre o video na celula escolhida (a camada room-screen-layer.tsx decide onde), e as pecas que a faixa e a
 // doca do vertical (room-screen-strip.tsx) usam tambem: o link da equipe (outra aba, rel "noopener noreferrer
-// nofollow", so https conferido de novo aqui; o clique manda o "clicou" sem segurar o link), o desenho do QR Code
+// nofollow", so https conferido de novo aqui; o clique manda o "clicou" sem segurar o link; o botao com pelo menos 96 px de
+// largura, para o texto curto nao virar uma bola, pedido do produtor em 12/11/2026), o desenho do QR Code
 // (QRCodeSVG, nivel M, modulos pretos no quadro branco com a margem de 4 modulos nos dois temas, role="img" com o nome
 // "QR Code do link {domínio}") e o X (alvo de 44 px, fora do link; "Fechar o banner" / "Fechar o QR Code"). Sem poder
 // fechar, nada de X: o leitor de tela ouve "Este banner sai quando a equipe tirar.".
@@ -133,7 +134,7 @@ function BannerContent({ form, handlers, item }: { form: ScreenEventForm; handle
       )}
       {action === "button" && href && item.buttonLabel ? (
         <div className={cn("px-3 pb-3", text ? "pt-2" : "pt-3")}>
-          <RoomScreenLink className={roomPillClassName({ className: cn(ROOM_TOUCH_44, "max-w-full"), size: "s", tone: "white" })} href={href} onClick={() => handlers?.onClick?.(item.displayId, form, "button")}>
+          <RoomScreenLink className={roomPillClassName({ className: cn(ROOM_TOUCH_44, "min-w-24 max-w-full"), size: "s", tone: "white" })} href={href} onClick={() => handlers?.onClick?.(item.displayId, form, "button")}>
             <span className="truncate">{item.buttonLabel}</span>
           </RoomScreenLink>
         </div>

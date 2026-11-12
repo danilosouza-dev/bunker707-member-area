@@ -9,9 +9,7 @@
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { SIMULATION_LIMITS, type SessionSimulation, type SimulatedCountRule, type SimulationChangeRecord, type SimulationChangeSource } from "./model";
 import {
-  simulationAudienceAckFor,
   simulationAudienceExtraOf,
-  simulationAudienceNeedsAck,
   simulationAudienceRampEndMs,
   simulationAudienceRuleAt,
   type SimulationAudienceFlags
@@ -117,37 +115,28 @@ export function audienceInputOf(text: string): number | null {
 export type AudiencePhase = "before" | "ended" | "on_air";
 
 /**
- * O estado do formulario: o numero, o erro do campo, a frase que vai ser gravada (a de simulationAudienceAckFor, a mesma
- * conta do servidor), se pede a caixa e se o Aplicar liga (o numero valido, diferente do de agora, a caixa marcada
- * quando soma algo, a sessao de pe, com permissao e sem outra acao em andamento).
+ * O estado do formulario: o numero, o erro do campo e se o Aplicar liga (o numero valido, diferente do de agora, a
+ * sessao de pe, com permissao e sem outra acao em andamento). Sem frase nem caixa desde 12/11/2026 (D85): o servidor
+ * grava a frase da mudanca sozinho.
  */
 export function audienceFormState(input: {
-  acknowledged: boolean;
   busy: boolean;
   canPublish: boolean;
   current: SimulatedCountRule;
-  flags: SimulationAudienceFlags;
-  live: boolean;
-  nowMs: number;
   pendingMigration: boolean;
   phase: AudiencePhase;
-  responsible: string;
   text: string;
-}): { canApply: boolean; canRemove: boolean; error: string | null; extra: number | null; needsAck: boolean; same: boolean; sentence: string | null } {
+}): { canApply: boolean; canRemove: boolean; error: string | null; extra: number | null; same: boolean } {
   const extra = audienceInputOf(input.text);
   const error = input.text.trim() === "" ? null : extra === null ? COPY.numeroInvalido(SIMULATION_LIMITS.countMax) : null;
   const currentExtra = simulationAudienceExtraOf(input.current);
   const same = extra !== null && currentExtra !== null && extra === currentExtra;
-  const needsAck = extra !== null && simulationAudienceNeedsAck(extra);
-  const sentence = extra === null ? null : simulationAudienceAckFor({ extra, flags: input.flags, live: input.live, nowMs: input.nowMs, responsible: input.responsible });
   const writable = input.canPublish && !input.busy && !input.pendingMigration && input.phase !== "ended";
   return {
-    canApply: writable && extra !== null && !same && (!needsAck || input.acknowledged),
+    canApply: writable && extra !== null && !same,
     canRemove: writable && currentExtra !== 0,
     error,
     extra,
-    needsAck,
-    same,
-    sentence
+    same
   };
 }

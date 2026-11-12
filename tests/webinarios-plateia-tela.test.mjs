@@ -5,8 +5,8 @@ import test from "node:test";
 import "./support/transpile-tsx.mjs";
 
 // Os participantes simulados desenhados (docs/30 D79; docs/31 §13.2; docs/18 §2.2), no Node e sem navegador: o controle
-// "Participantes simulados" (o numero somado agora, os atalhos, o Aplicar desligado sem a confirmacao, a frase com o
-// numero novo, o Tirar, quem mudou por ultimo, as mudancas, sem permissao sem botoes, encerrada e sem a migracao), o
+// "Participantes simulados" (o numero somado agora, os atalhos, o Aplicar direto sem frase nem caixa desde 12/11/2026
+// (D85), o Tirar, quem mudou por ultimo, as mudancas, sem permissao sem botoes, encerrada e sem a migracao), o
 // selo dos presentes do topo do console que abre o controle (e o do palco, pela fiacao do console), a Presença com o
 // controle no alto, e a aba Participantes do "ver como" com a frase de que a simulacao nao aparece na previa.
 
@@ -71,17 +71,14 @@ const controle = (extra = {}) =>
       canPublish: true,
       idBase: "t",
       link: { href: "/admin/comunicacao/webinarios/w#webinar-card-simulacao", label: COPY.verNoEditor },
-      live: true,
-      nowMs: NOW,
       offsetMs: 20 * 60_000,
       onApply: async () => true,
       phase: "on_air",
-      responsible: "Produtora de Teste",
       ...extra
     })
   );
 
-test("o controle: o numero somado agora, quem mudou por ultimo, os atalhos, Aplicar desligado sem a confirmacao, o Tirar e as mudancas", () => {
+test("o controle: o numero somado agora, quem mudou por ultimo, os atalhos, Aplicar desligado so sem numero, o Tirar e as mudancas; sem frase nem caixa (D85)", () => {
   const markup = controle();
   const text = textOf(markup);
   assert.match(markup, /<h3[^>]*id="t-titulo"[^>]*tabindex="-1"[^>]*>Participantes simulados<\/h3>/, "o titulo recebe o foco do selo dos presentes");
@@ -100,7 +97,8 @@ test("o controle: o numero somado agora, quem mudou por ultimo, os atalhos, Apli
   assert.match(text, /No ar, o número sobe ou desce em linha reta em 1 min 30 s, igual para todos\./);
   assert.match(markup, /<a[^>]*data-simulation-audience-link=""[^>]*href="\/admin\/comunicacao\/webinarios\/w#webinar-card-simulacao"[^>]*>Ver no editor<\/a>/, "o atalho para o card do editor");
   assert.match(text, /Mudanças \(2\) 10:00 · \+300 · Carla Produtora antes do começo · \+100 · Ana Souza/);
-  assert.doesNotMatch(markup, /data-simulation-audience-sentence/, "sem numero novo, sem frase");
+  assert.doesNotMatch(markup, /data-simulation-audience-sentence|data-simulation-audience-confirm|type="checkbox"/, "sem frase e sem caixa (decisao do produtor em 12/11/2026, D85)");
+  assert.doesNotMatch(text, /Decisão do produtor|Confirmo|Marque a confirmação/, "nenhuma frase de decisao na tela");
   assert.doesNotMatch(text, /personagem/i);
 });
 
@@ -129,15 +127,14 @@ test("sem permissao, com a sessao encerrada ou sem a 202611140002: o numero sem 
   }
 });
 
-test("a frase da mudanca e a mesma conta do servidor (o numero novo dito nela), e a caixa e pedida a cada mudanca", () => {
-  // O formulario so desenha a frase com um numero digitado: o estado inicial vazio nao mostra; a conta e a do modelo.
+test("a frase da mudanca continua a mesma conta do servidor (gravada no registro, D80), mas a tela nao a mostra nem pede a caixa (D85)", () => {
   const sentence = model.simulationAudienceAckFor({ extra: 500, flags: FLAGS, live: true, nowMs: NOW, responsible: "Produtora de Teste" });
   assert.match(sentence, /^Decisão do produtor em 11\/11\/2026: nesta live ao vivo, .* A partir de agora, os participantes simulados somam \+500 ao número de quem assiste\. Responsável: Produtora de Teste\.$/);
-  // O componente: o campo, a frase e a caixa vem de audienceFormState (testado em webinarios-plateia-modelo); aqui, a fiacao.
   const component = source("src/components/admin/v2/communication/webinars/simulation/simulation-audience-control.tsx");
-  assert.match(component, /const edit = \(next: string\) => \{\s*setText\(next\);\s*setAcknowledged\(false\);/, "cada mudanca do numero desmarca a caixa");
-  assert.match(component, /void apply\(state\.extra, state\.needsAck \? state\.sentence : null\)/, "a frase marcada vai com o pedido");
-  assert.match(component, /onClick=\{\(\) => void apply\(0, null\)\}/, "o Tirar sem frase (o servidor grava a do +0)");
+  assert.doesNotMatch(component, /acknowledged|checkbox|needsAck|sentence/, "nada de caixa nem frase no controle");
+  assert.match(component, /onClick=\{\(\) => void apply\(0\)\}/, "o Tirar direto (o servidor grava a frase do +0)");
+  // Com um numero no campo o Aplicar liga de primeira: o controle desenhado com o numero digitado nao existe no HTML do
+  // servidor (o estado e do navegador), entao a regra fica no audienceFormState (webinarios-plateia-modelo).
 });
 
 test("o topo do console: os presentes sao o botao que abre os participantes simulados; sem o controle, so texto", () => {
@@ -183,7 +180,7 @@ test("a fiacao do console: o selo do palco e o do topo abrem a Presença com o c
   assert.equal(count(consoleSource, /onPresent=\{audience \? openAudience : undefined\}/g), 2, "o topo e o palco");
   assert.match(consoleSource, /setPanelView\(\{ more: "presenca" \}\);[\s\S]*?document\.getElementById\(AUDIENCE_TITLE_ID\)/);
   assert.match(consoleSource, /consoleMoreEntriesFor\(\{ audience: audience !== null,/);
-  assert.match(consoleSource, /saveSimulatedAudience\(\{ ackText: input\.ackText \?\? undefined, acknowledged: input\.ackText !== null, extra: input\.extra, sessionId, source: "console" \}\)/);
+  assert.match(consoleSource, /saveSimulatedAudience\(\{ extra: input\.extra, sessionId, source: "console" \}\)/, "sem frase nem caixa no pedido (D85)");
   assert.match(consoleSource, /<SimulationAudienceControl[\s\S]*?link=\{\{ href: `\$\{webinarAdminHref\(webinar\.id\)\}#webinar-card-simulacao`, label: plateiaCopy\.verNoEditor \}\}[\s\S]*?titleId=\{AUDIENCE_TITLE_ID\}/);
   const presenca = consoleSource.slice(consoleSource.indexOf("presenca:"), consoleSource.indexOf("tela:", consoleSource.indexOf("presenca:")));
   assert.ok(presenca.indexOf("<SimulationAudienceControl") < presenca.indexOf("<ConsolePresencePanel"), "os participantes simulados no alto da Presença");

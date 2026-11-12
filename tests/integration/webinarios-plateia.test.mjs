@@ -12,7 +12,8 @@ import { LIVE_AO_VIVO_DE_TESTE, limparWebinarios, seedEscolaDeTeste, seedLiveAoV
 //   onde), a decisao da sessao passa a ser a frase dela e a consulta de 5 s do chat leva a sala o resumo novo da decisao
 //   (simulationKey); a janela da Simulacao pela rota devolve +300 depois da rampa de 90 s; o retrato do console traz o
 //   controle com o numero de agora e quem mudou;
-// - sem a frase confirmada, recusa (400); sem messaging.publish, recusa (403); nada gravado;
+// - sem messaging.publish, recusa (403); nada gravado (a frase e a caixa sairam da tela em 12/11/2026, D85: o servidor
+//   grava a frase sozinho);
 // - depois do Encerrar live, recusa (409); o tick do resumo junta os trechos de cada regra (o maior numero que a turma
 //   viu, igual a conta do modelo com as linhas do banco) e o relatorio da live lista as mudancas.
 // - (revisao v8, achado 6) o card do editor aberto antes de uma mudanca feita no console, na espera, recebe 409 com a
@@ -84,14 +85,9 @@ test("1. o aluno logado nao le webinar_simulation_changes (so o service_role)", 
   await cliente.auth.signOut();
 });
 
-test("2. sem a frase confirmada ou sem messaging.publish, recusa e nada e gravado", async () => {
-  actAs(produtor);
-  const semFrase = await simulationActions.saveSimulatedAudience({ extra: 300, sessionId: AO_VIVO.sessaoId });
-  assert.equal(semFrase.status, 400, JSON.stringify(semFrase));
-  const fraseErrada = await simulationActions.saveSimulatedAudience({ ackText: frase(500), acknowledged: true, extra: 300, sessionId: AO_VIVO.sessaoId });
-  assert.equal(fraseErrada.fieldErrors?.acknowledged?.[0], WEBINAR_COPY.simulacao.servidor.plateiaFraseNaoBate);
+test("2. sem messaging.publish, recusa e nada e gravado", async () => {
   actAs(analista);
-  const semPermissao = await simulationActions.saveSimulatedAudience({ ackText: frase(300), acknowledged: true, extra: 300, sessionId: AO_VIVO.sessaoId });
+  const semPermissao = await simulationActions.saveSimulatedAudience({ extra: 300, sessionId: AO_VIVO.sessaoId });
   assert.equal(semPermissao.status, 403, JSON.stringify(semPermissao));
   const linhas = unwrap(await db.from("webinar_simulation_changes").select("id").eq("session_id", AO_VIVO.sessaoId), "Lendo as mudancas");
   assert.equal(linhas.length, 0);
@@ -102,7 +98,7 @@ test("3. +300 com a live no ar: a mudanca no banco, a decisao da sessao, a sala 
   const antes = await estadoPeloChat();
   actAs(produtor);
   const texto = frase(300);
-  const salvo = await simulationActions.saveSimulatedAudience({ ackText: texto, acknowledged: true, extra: 300, sessionId: AO_VIVO.sessaoId });
+  const salvo = await simulationActions.saveSimulatedAudience({ extra: 300, sessionId: AO_VIVO.sessaoId });
   assert.equal(salvo.ok, true, JSON.stringify(salvo));
 
   const [mudanca] = unwrap(await db.from("webinar_simulation_changes").select("at_offset_ms, count_rule, ack_text, changed_by, source").eq("session_id", AO_VIVO.sessaoId), "Lendo a mudanca");
@@ -148,7 +144,7 @@ test("4. depois do Encerrar live, recusa; o resumo do fim junta os trechos de ca
 
   const encerrou = await liveActions.endLiveSession({ sessionId: AO_VIVO.sessaoId });
   assert.equal(encerrou.ok, true, JSON.stringify(encerrou));
-  const recusada = await simulationActions.saveSimulatedAudience({ ackText: frase(100), acknowledged: true, extra: 100, sessionId: AO_VIVO.sessaoId });
+  const recusada = await simulationActions.saveSimulatedAudience({ extra: 100, sessionId: AO_VIVO.sessaoId });
   assert.deepEqual([recusada.status, recusada.error], [409, WEBINAR_COPY.simulacao.servidor.plateiaEncerrada]);
 
   const tick = await runSimulationSummariesTick({ db, now: new Date() });
@@ -181,13 +177,12 @@ test("5. revisao v8, achado 6: o card do editor aberto antes da mudanca feita no
   assert.equal(carregado.decidedAt, null);
 
   // No console, antes do Começar para todos: +200 (a regra da sessao passa a ser a nova).
-  const doConsole = await simulationActions.saveSimulatedAudience({ ackText: frase(200), acknowledged: true, extra: 200, sessionId: AO_VIVO.sessaoId });
+  const doConsole = await simulationActions.saveSimulatedAudience({ extra: 200, sessionId: AO_VIVO.sessaoId });
   assert.equal(doConsole.ok, true, JSON.stringify(doConsole));
 
   // O card aberto antes salva o numero dele: recusado, o +200 fica.
   const regras = { countRule: { base: 40, jitter: 0, mode: "fixed", peak: 40 }, joins: { enabled: false, everySeconds: 60, max: 30, names: "generic" }, saleNotices: { enabled: false, items: [] }, showLiveBadge: false };
-  const fraseDoCard = () => simulationModel.simulationAckFor({ live: true, nowMs: Date.now(), responsible: contas.produtor.nome, rules: simulationModel.normalizeSimulationRules(regras) });
-  const recusado = await simulationActions.saveSessionSimulation({ ...regras, ackText: fraseDoCard(), acknowledged: true, expectedDecidedAt: carregado.decidedAt, sessionId: AO_VIVO.sessaoId });
+  const recusado = await simulationActions.saveSessionSimulation({ ...regras, expectedDecidedAt: carregado.decidedAt, sessionId: AO_VIVO.sessaoId });
   assert.deepEqual([recusado.status, recusado.error], [409, WEBINAR_COPY.simulacao.servidor.mudouEmOutroLugar]);
   const sessao = unwrap(await db.from("webinar_sessions").select("simulated_count_rule").eq("id", AO_VIVO.sessaoId).single(), "Lendo a sessao");
   assert.equal(sessao.simulated_count_rule.base, 200, "o +200 do console fica");
@@ -195,7 +190,7 @@ test("5. revisao v8, achado 6: o card do editor aberto antes da mudanca feita no
   // Lido de novo (o Recarregar): a hora como o banco devolve vai de volta, e a escrita condicional do PostgREST passa.
   const recarregado = await ler();
   assert.ok(recarregado.decidedAt);
-  const salvo = await simulationActions.saveSessionSimulation({ ...regras, ackText: fraseDoCard(), acknowledged: true, expectedDecidedAt: recarregado.decidedAt, sessionId: AO_VIVO.sessaoId });
+  const salvo = await simulationActions.saveSessionSimulation({ ...regras, expectedDecidedAt: recarregado.decidedAt, sessionId: AO_VIVO.sessaoId });
   assert.equal(salvo.ok, true, JSON.stringify(salvo));
   const depois = unwrap(await db.from("webinar_sessions").select("simulated_count_rule").eq("id", AO_VIVO.sessaoId).single(), "Lendo a sessao");
   assert.equal(depois.simulated_count_rule.base, 40);

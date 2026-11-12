@@ -177,15 +177,9 @@ test("a frase da mudanca e a da decisao com o numero novo; sem `audience`, a fra
   );
   assert.equal(ack.simulationAudienceClause(undefined), "");
 
-  const base = { extra: 1300, flags, live: true, nowMs: NOW, responsible: "Produtora de Teste" };
-  assert.equal(model.simulationAudienceAckMatches({ ...base, ackText: live }), true);
-  assert.equal(model.simulationAudienceAckMatches({ ...base, ackText: live, nowMs: NOW + 24 * HOUR }), true, "a tela aberta antes da meia-noite");
-  assert.equal(model.simulationAudienceAckMatches({ ...base, ackText: live, extra: 1400 }), false, "outro numero, outra frase");
-  assert.equal(model.simulationAudienceAckMatches({ ...base, ackText: live, live: false }), false, "a da live nao serve na gravada");
-  assert.equal(model.simulationAudienceAckMatches({ ...base, ackText: live, responsible: "Outra Pessoa" }), false);
-  assert.equal(model.simulationAudienceAckMatches({ ...base, ackText: "" }), false);
-  assert.equal(model.simulationAudienceNeedsAck(300), true);
-  assert.equal(model.simulationAudienceNeedsAck(0), false, "o Tirar nao pede a caixa");
+  // Desde 12/11/2026 (D85) a tela nao mostra a frase nem pede a caixa: o servidor a monta e grava no registro.
+  assert.equal("simulationAudienceNeedsAck" in model, false, "a caixa saiu (D85)");
+  assert.equal("simulationAudienceAckMatches" in model, false, "a conferencia da frase digitada saiu (D85)");
   assert.ok(live.length <= 600, "cabe em simulation_ack_text");
 });
 
@@ -220,35 +214,29 @@ test("a vista do controle: a regra de agora, a rampa em curso, as mudancas mais 
   assert.deepEqual([...audience.AUDIENCE_SHORTCUTS], [50, 100, 300, 500]);
 });
 
-test("o formulario: Aplicar so com o numero valido, diferente do de agora e a caixa marcada; Tirar sem caixa; sem permissao, encerrada ou sem a migracao, nada", () => {
+test("o formulario (D85, sem frase nem caixa): Aplicar direto com o numero valido e diferente do de agora; Tirar; sem permissao, encerrada ou sem a migracao, nada", () => {
   const base = {
-    acknowledged: false,
     busy: false,
     canPublish: true,
     current: fixed(100),
-    flags: { badgeOn: false, joinsSimulated: false, saleNoticesSimulated: false },
-    live: true,
-    nowMs: NOW,
     pendingMigration: false,
     phase: "on_air",
-    responsible: "Produtora de Teste",
     text: "300"
   };
-  const semCaixa = audience.audienceFormState(base);
-  assert.equal(semCaixa.canApply, false, "Aplicar desligado sem a confirmacao");
-  assert.equal(semCaixa.needsAck, true);
-  assert.equal(semCaixa.sentence, model.simulationAudienceAckFor({ extra: 300, flags: base.flags, live: true, nowMs: NOW, responsible: "Produtora de Teste" }));
-  assert.equal(audience.audienceFormState({ ...base, acknowledged: true }).canApply, true);
-  assert.equal(audience.audienceFormState({ ...base, acknowledged: true, text: "100" }).canApply, false, "o mesmo numero");
+  const direto = audience.audienceFormState(base);
+  assert.equal(direto.canApply, true, "Aplicar ligado direto, sem confirmacao (decisao do produtor em 12/11/2026)");
+  assert.equal("needsAck" in direto, false, "sem caixa");
+  assert.equal("sentence" in direto, false, "sem frase na tela");
+  assert.equal(audience.audienceFormState({ ...base, text: "100" }).canApply, false, "o mesmo numero");
   assert.equal(audience.audienceFormState({ ...base, text: "100" }).same, true);
-  assert.equal(audience.audienceFormState({ ...base, acknowledged: true, text: "abc" }).error, "Use um número inteiro de 0 a 100.000.");
-  assert.equal(audience.audienceFormState({ ...base, acknowledged: true, text: "100001" }).canApply, false);
+  assert.equal(audience.audienceFormState({ ...base, text: "abc" }).error, "Use um número inteiro de 0 a 100.000.");
+  assert.equal(audience.audienceFormState({ ...base, text: "100001" }).canApply, false);
   assert.equal(audience.audienceFormState({ ...base, text: "" }).error, null, "vazio nao e erro, so nao aplica");
-  assert.equal(audience.audienceFormState({ ...base, text: "0" }).canApply, true, "+0 pelo campo e o Tirar: sem caixa");
-  assert.equal(semCaixa.canRemove, true, "o Tirar com algo somado");
+  assert.equal(audience.audienceFormState({ ...base, text: "0" }).canApply, true, "+0 pelo campo e o Tirar");
+  assert.equal(direto.canRemove, true, "o Tirar com algo somado");
   assert.equal(audience.audienceFormState({ ...base, current: off }).canRemove, false, "nada para tirar");
   for (const travado of [{ canPublish: false }, { phase: "ended" }, { pendingMigration: true }, { busy: true }]) {
-    const state = audience.audienceFormState({ ...base, acknowledged: true, ...travado });
+    const state = audience.audienceFormState({ ...base, ...travado });
     assert.deepEqual([state.canApply, state.canRemove], [false, false], JSON.stringify(travado));
   }
 });

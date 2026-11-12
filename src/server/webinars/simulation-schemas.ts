@@ -1,13 +1,11 @@
 // Schemas zod da Simulacao completa (fase 4b; docs/30 §2.2, §4.3, §6.6, §8.6 e D10). Modulo puro (sem "server-only",
-// imports relativos; zod v4). O salvar exige a caixa de §8.6 marcada sempre que algo simulado fica ligado (o selo, o
-// contador, as entradas ou os avisos de venda); as mensagens passam pela lista PROIBIDAS_WEBINARIO.
+// imports relativos; zod v4). O salvar nao pede mais a caixa de §8.6 (decisao do produtor em 12/11/2026, D85): o
+// servidor monta e grava a frase da decisao; as mensagens passam pela lista PROIBIDAS_WEBINARIO.
 
 import { z } from "zod";
 import { CHAT_LIMITS, SIMULATED_COUNT_MODES, SIMULATION_LIMITS } from "./model";
 
 export const SIMULATION_MESSAGES = {
-  ack: "Marque a caixa com a decisão para ligar o selo ou os números simulados.",
-  ackAudience: "Marque a confirmação com a frase do número novo para somar participantes.",
   count: `Use números de 0 a ${SIMULATION_LIMITS.countMax}.`,
   invalid: "Pedido inválido.",
   peak: "O máximo precisa ser maior ou igual ao mínimo.",
@@ -55,16 +53,19 @@ export const simulationRulesSchema = z.object({
 });
 export type SimulationRulesInput = z.input<typeof simulationRulesSchema>;
 
-/** Algo simulado ligado (o selo, o contador, as entradas ou os avisos de venda): pede a caixa de §8.6. */
+/**
+ * Algo simulado ligado (o selo, o contador, as entradas ou os avisos de venda). O card Simulacao nao pede mais a caixa
+ * (D85); o "Começa quando você entra" (jit-schemas.ts) ainda pede a dele.
+ */
 export function simulationNeedsAck(rules: z.infer<typeof simulationRulesSchema>): boolean {
   return rules.showLiveBadge || rules.countRule.mode !== "off" || rules.joins.enabled || (rules.saleNotices.enabled && rules.saleNotices.items.length > 0);
 }
 
-/** saveSessionSimulation [messaging.publish] (docs/30 §5.2): a sessao gravada, as regras e a caixa marcada. */
-export const saveSessionSimulationSchema = simulationRulesSchema
-  .extend({
-    ackText: z.string().trim().max(CHAT_LIMITS.simulationAck).optional(),
-    acknowledged: z.boolean().default(false),
+/**
+ * saveSessionSimulation [messaging.publish] (docs/30 §5.2): a sessao e as regras. Sem frase nem caixa desde 12/11/2026
+ * (decisao do produtor, D85): o servidor monta e grava sozinho a frase da decisao, com o nome de quem salva e a data.
+ */
+export const saveSessionSimulationSchema = simulationRulesSchema.extend({
     /**
      * A hora da decisao que o card carregou (nula: a sessao sem decisao). Diferente da gravada agora, a Simulacao mudou
      * em outro lugar (o console ou outra aba) e o salvar volta 409 (a revisao v8, achado 6). Ausente (a pagina de
@@ -72,30 +73,21 @@ export const saveSessionSimulationSchema = simulationRulesSchema
      */
     expectedDecidedAt: z.iso.datetime({ offset: true }).nullable().optional(),
     sessionId: z.uuid({ error: SIMULATION_MESSAGES.invalid })
-  })
-  .superRefine((input, context) => {
-    if (simulationNeedsAck(input) && (!input.acknowledged || !input.ackText)) {
-      context.addIssue({ code: "custom", message: SIMULATION_MESSAGES.ack, path: ["acknowledged"] });
-    }
-  });
+});
 
 /**
  * saveSimulatedAudience [messaging.publish] (docs/30 D79): os participantes simulados da sessao a partir de agora (o +N;
  * 0 e o Tirar), com a frase da mudanca marcada sempre que soma algo, e de onde veio (o console ou o card do editor).
  */
-export const saveSimulatedAudienceSchema = z
-  .object({
-    ackText: z.string().trim().max(CHAT_LIMITS.simulationAck).optional(),
-    acknowledged: z.boolean().default(false),
-    extra: count,
-    sessionId: z.uuid({ error: SIMULATION_MESSAGES.invalid }),
-    source: z.enum(["console", "editor"]).default("console")
-  })
-  .superRefine((input, context) => {
-    if (input.extra > 0 && (!input.acknowledged || !input.ackText)) {
-      context.addIssue({ code: "custom", message: SIMULATION_MESSAGES.ackAudience, path: ["acknowledged"] });
-    }
-  });
+/**
+ * Os participantes simulados a partir de agora (D79). Sem frase nem caixa desde 12/11/2026 (decisao do produtor, D85):
+ * o servidor grava sozinho a frase da mudanca no registro (webinar_simulation_changes.ack_text).
+ */
+export const saveSimulatedAudienceSchema = z.object({
+  extra: count,
+  sessionId: z.uuid({ error: SIMULATION_MESSAGES.invalid }),
+  source: z.enum(["console", "editor"]).default("console")
+});
 
 /** GET /api/webinars/[id]/simulation?sessao=&from=&to= (ms do relogio do video; no maximo a janela de 2 min). */
 export const simulationFeedQuerySchema = z

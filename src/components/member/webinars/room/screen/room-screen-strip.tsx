@@ -86,7 +86,7 @@ export function RoomScreenRow({ expanded, handlers, item, onToggle }: { expanded
           {detail ? <span className="truncate text-xs leading-[18px] text-room-fg-subtle">{detail}</span> : null}
         </span>
         {action ? (
-          <RoomScreenLink className={roomPillClassName({ className: cn(ROOM_TOUCH_44, "max-w-[45%]"), size: "s", tone: "white" })} href={action.href} onClick={() => handlers?.onClick?.(item.displayId, "strip", action.target)}>
+          <RoomScreenLink className={roomPillClassName({ className: cn(ROOM_TOUCH_44, "min-w-24 max-w-[45%]"), size: "s", tone: "white" })} href={action.href} onClick={() => handlers?.onClick?.(item.displayId, "strip", action.target)}>
             <span className="truncate">{action.label}</span>
           </RoomScreenLink>
         ) : null}
@@ -194,7 +194,7 @@ export function RoomScreenCompactRow({ form, handlers, item }: { form: Extract<S
       <RowThumb className="size-9 rounded-[8px]" item={item} />
       <span className="min-w-0 flex-1 truncate text-sm font-semibold leading-5">{screenRowTitle(item)}</span>
       {action ? (
-        <RoomScreenLink className={roomPillClassName({ className: "h-11 max-w-[50%]", size: "s", tone: "white" })} href={action.href} onClick={() => handlers?.onClick?.(item.displayId, form, action.target)}>
+        <RoomScreenLink className={roomPillClassName({ className: "h-11 min-w-24 max-w-[50%]", size: "s", tone: "white" })} href={action.href} onClick={() => handlers?.onClick?.(item.displayId, form, action.target)}>
           <span className="truncate">{action.label}</span>
         </RoomScreenLink>
       ) : null}

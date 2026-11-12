@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePanelMotion } from "@/components/member/webinars/room/use-panel-motion";
 import { useConsolePanelOpen, useConsoleTheme } from "@/components/member/webinars/room/use-room-prefs";
 import { Button } from "@/components/ui/button";
 import type { ActionResult } from "@/lib/action-result";
@@ -843,16 +844,16 @@ export function SessionConsole({ currentUserId, currentUserName = null, data, in
   }
 
   /**
-   * O Aplicar e o Tirar dos participantes simulados (D79): saveSimulatedAudience pelo console (a frase marcada so quando
-   * soma algo); o banner na falha; no sucesso, o aviso de que a sala recebe em segundos e o retrato de novo.
+   * O Aplicar e o Tirar dos participantes simulados (D79): saveSimulatedAudience pelo console (sem frase nem caixa, D85);
+   * o banner na falha; no sucesso, o aviso de que a sala recebe em segundos e o retrato de novo.
    */
-  function applyAudience(input: { ackText: string | null; extra: number }): Promise<boolean> {
+  function applyAudience(input: { extra: number }): Promise<boolean> {
     if (!sessionId) {
       return Promise.resolve(false);
     }
     return run(
       "audience",
-      () => saveSimulatedAudience({ ackText: input.ackText ?? undefined, acknowledged: input.ackText !== null, extra: input.extra, sessionId, source: "console" }),
+      () => saveSimulatedAudience({ extra: input.extra, sessionId, source: "console" }),
       () => adminToast.success(plateiaCopy.aplicado(input.extra))
     );
   }
@@ -945,7 +946,9 @@ export function SessionConsole({ currentUserId, currentUserName = null, data, in
       : [];
   // Sem palco (a gravada e o Replay) o painel nunca fecha: ele e o corpo inteiro.
   const panelShown = live === null || panelOpen;
-  const skeleton = consoleSkeleton({ hasStage: live !== null, panelOpen });
+  // Fechando, o painel continua no lugar ate a saida terminar (rodada v9, P12): o palco muda de tamanho uma vez so.
+  const panelMotion = usePanelMotion(panelShown);
+  const skeleton = consoleSkeleton({ hasStage: live !== null, panelOpen: live === null || panelMotion.laid });
   const tabs = session ? consoleTabsFor({ kind: session.kind }) : [];
   const audience = snapshot?.audience ?? null;
   const entries = session ? consoleMoreEntriesFor({ audience: audience !== null, hasPresence: Boolean(snapshot?.presence), kind: session.kind, webinarKind: webinar.kind }) : [];
@@ -1123,6 +1126,7 @@ export function SessionConsole({ currentUserId, currentUserName = null, data, in
             <ConsolePanel
               className={skeleton.panel}
               closable={live !== null}
+              motion={panelMotion}
               rail={skeleton.rail !== null}
               counts={counts}
               entries={entries}
@@ -1207,12 +1211,9 @@ export function SessionConsole({ currentUserId, currentUserName = null, data, in
                           idBase="console-audience"
                           key={session.id}
                           link={{ href: `${webinarAdminHref(webinar.id)}#webinar-card-simulacao`, label: plateiaCopy.verNoEditor }}
-                          live={session.kind === "live"}
-                          nowMs={nowMs}
                           offsetMs={audienceOffsetMs}
                           onApply={applyAudience}
                           phase={audiencePhase}
-                          responsible={currentUserName ?? ""}
                           titleId={AUDIENCE_TITLE_ID}
                         />
                       ) : null}

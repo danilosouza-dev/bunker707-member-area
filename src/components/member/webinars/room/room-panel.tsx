@@ -8,11 +8,12 @@ import type { RoomMessage } from "@/lib/webinar-room-client";
 import { panelUnreadCount, panelUnreadMark, panelUnreadSeen, tabScrollLeft, type PanelUnreadMark, type RoomKind, type RoomPanelTab } from "./room-layout-model";
 import { RoomTooltip } from "./room-tooltip";
 import { ROOM_FOCUS, RoomIconButton } from "./room-ui";
+import { usePanelSwapClass, type PanelMotion } from "./use-panel-motion";
 
 // O painel da sala (docs/31 V2-7 e V2-8; a sala no estilo do YouTube), o mesmo na Live ao vivo, na gravada e no Replay
 // (desenho normal). A partir de lg o painel inteiro e o cartao do YouTube: o aside com o fundo --room-panel, o contorno
-// de 1 px e o raio 12 fixo (sem seguir Marca, V2-11), com a largura da grade do YouTube (clamp de 320 a 514 px, 27,5 %
-// da janela) e SEM overflow-hidden (o X fica a 2 px do contorno e o anel de foco dele sairia cortado; um filho que pinte
+// de 1 px e o raio 12 fixo (sem seguir Marca, V2-11), com a largura de 320 a 400 px (27,5 % da janela; o teto era 514
+// px ate 12/11/2026: em tela cheia sobrava uma faixa vazia ao lado das mensagens, rodada v9 P10) e SEM overflow-hidden (o X fica a 2 px do contorno e o anel de foco dele sairia cortado; um filho que pinte
 // fundo encostado na borda arredonda a si mesmo). Em cima, o cabecalho de 56 px: o h2 "room-panel-title" com o nome da aba e, quando a sala passa, o
 // numero (Participantes, Enquetes) e a acao da aba (`titleAction`), e o X "Fechar o painel" sem fundo, com a dica no
 // lugar do title. As abas viram o trilho a direita (room-rail.tsx), irmao deste aside; a linha das abas fica so abaixo
@@ -47,6 +48,11 @@ export type RoomPanelProps = {
   id: string;
   /** O Replay chama o Chat de "Chat da live". */
   kind: RoomKind;
+  /**
+   * A transicao de abrir e fechar (usePanelMotion, rodada v9 P12): as classes da entrada ou da saida e se o painel
+   * ainda ocupa lugar enquanto sai. Sem ela (os testes de tela, o HTML de antes), vale o `open` na hora.
+   */
+  motion?: PanelMotion;
   onClose: () => void;
   onTab: (tab: RoomPanelTab) => void;
   /** O painel na tela (fechado, o aside fica hidden e montado). */
@@ -166,6 +172,7 @@ export function RoomPanel({
   firstFocus,
   id,
   kind,
+  motion,
   onClose,
   onTab,
   open,
@@ -178,17 +185,22 @@ export function RoomPanel({
   titleCount = null
 }: RoomPanelProps) {
   const copy = WEBINAR_COPY.salaV2.painel;
+  // A aba nova esmaece ao entrar (so depois da primeira troca feita pela pessoa).
+  const swapClass = usePanelSwapClass(tab);
 
   return (
     <aside
       aria-labelledby="room-panel-title"
       className={cn(
         className,
-        "gap-2 max-lg:landscape:w-72 max-lg:landscape:flex-none lg:w-[clamp(320px,27.5vw,514px)] lg:flex-none lg:gap-0 lg:rounded-[12px] lg:border lg:border-room-panel-border lg:bg-room-panel",
-        closable ? null : "pt-2 lg:pt-0"
+        "gap-2 max-lg:landscape:w-72 max-lg:landscape:flex-none lg:w-[clamp(320px,27.5vw,400px)] lg:flex-none lg:gap-0 lg:rounded-[12px] lg:border lg:border-room-panel-border lg:bg-room-panel",
+        closable ? null : "pt-2 lg:pt-0",
+        motion?.className
       )}
+      data-room-panel-motion={motion && motion.phase !== "idle" ? motion.phase : undefined}
       data-testid="room-panel"
-      hidden={!open}
+      // Fechando, o painel fica na tela ate a saida terminar (motion.laid); o palco so cresce depois.
+      hidden={motion ? !motion.laid : !open}
       id={id}
     >
       {/* Abaixo de lg, a linha das abas (a partir de lg as abas sao o trilho). */}
@@ -234,9 +246,12 @@ export function RoomPanel({
         aria-labelledby={`room-tabbtn-${tab}`}
         className={cn(
           "mx-2 flex min-h-0 flex-1 flex-col rounded-t-[var(--member-cover-radius)] border border-b-0 border-room-border bg-room-surface max-lg:overflow-hidden lg:mx-0 lg:rounded-none lg:border-0 lg:bg-transparent",
-          contentClassName
+          contentClassName,
+          swapClass
         )}
         id={`room-tab-${tab}`}
+        // Um no por aba: o conteudo de cada aba ja e montado so com ela na tela, e o no novo toca a entrada.
+        key={tab}
         role="tabpanel"
       >
         {children}

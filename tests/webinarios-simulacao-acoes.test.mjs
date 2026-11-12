@@ -17,8 +17,8 @@ import {
 // As Server Actions do card Simulacao (docs/30 §2.2, §2.6, §4.3, §5.2 e §8.6; D10; docs/18 §2.2), sem banco: o banco
 // da Simulacao em memoria, a permissao por um duble (sem messaging.publish recusa o salvar com 403 e deixa ler), o nome
 // de quem decide pelo duble da sessao e "next/cache" so anotando. Aqui: ler as regras sem a semente (e o aviso da
-// 202610300003); salvar exige a caixa e a frase de hoje com o nome de quem decide (com algo simulado ligado), grava as
-// colunas de §4.3, quem e quando; tudo desligado salva sem caixa com a frase de tudo desligado; a live, o replay, a
+// 202610300003); salvar nao pede frase nem caixa desde 12/11/2026 (D85): o servidor monta a frase de hoje com o nome
+// de quem decide e a grava com as colunas de §4.3, quem e quando; tudo desligado grava a frase de tudo desligado; a live, o replay, a
 // encerrada e a que nao existe recusam; a auditoria leva so numeros e booleanos (dos avisos, so a contagem).
 
 const estado = (globalThis.__simulacaoAcoes ??= { revalidados: [], semPublicar: false });
@@ -69,7 +69,6 @@ actionStubs.role = { role: "owner", user: { email: "produtora@bunker707.test", i
 
 const actions = await import("../src/server/webinars/simulation-actions.ts");
 const model = await import("../src/server/webinars/simulation-model.ts");
-const { SIMULATION_MESSAGES } = await import("../src/server/webinars/simulation-schemas.ts");
 const { WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
 
 function usar(db) {
@@ -111,34 +110,32 @@ test("ler: as regras das sessoes gravadas do webinario sem a semente; banco sem 
   assert.equal((await actions.loadSessionSimulations({ webinarId: "nao-e-id" })).status, 400);
 });
 
-test("salvar: 403 sem messaging.publish; com algo simulado, a caixa e a frase de hoje com o nome de quem decide sao obrigatorias", async () => {
+test("salvar: 403 sem messaging.publish e nada gravado; com permissao, cada regra sozinha salva direto, sem frase nem caixa (D85)", async () => {
   const db = usar(bancoDaSimulacao({ tables: escolaDaSimulacao(AGENDADA) }));
   estado.semPublicar = true;
-  const negado = await actions.saveSessionSimulation({ ...regrasLigadas, ackText: fraseDeHoje(), acknowledged: true, sessionId: SESSION });
+  const negado = await actions.saveSessionSimulation({ ...regrasLigadas, sessionId: SESSION });
   assert.equal(negado.status, 403);
-  assert.equal(linha(db).simulated_count_rule, null);
-  estado.semPublicar = false;
-
-  const semCaixa = await actions.saveSessionSimulation({ ...regrasLigadas, sessionId: SESSION });
-  assert.deepEqual([semCaixa.status, semCaixa.fieldErrors?.acknowledged?.[0]], [400, SIMULATION_MESSAGES.ack]);
-  for (const so of [{ showLiveBadge: true }, { countRule: { base: 5, jitter: 0, mode: "fixed", peak: 5 } }, { joins: entradas }, { saleNotices: avisos }]) {
-    const resultado = await actions.saveSessionSimulation({ ...so, sessionId: SESSION });
-    assert.equal(resultado.status, 400, `${Object.keys(so)[0]} sozinho pede a caixa`);
-  }
-
-  const outroNome = await actions.saveSessionSimulation({ ...regrasLigadas, ackText: fraseDeHoje(regrasLigadas, "Outra Pessoa"), acknowledged: true, sessionId: SESSION });
-  assert.deepEqual([outroNome.status, outroNome.fieldErrors?.acknowledged?.[0]], [400, WEBINAR_COPY.simulacao.servidor.fraseNaoBate]);
-  const outrosNumeros = await actions.saveSessionSimulation({ ...regrasLigadas, ackText: fraseDeHoje({ ...regrasLigadas, saleNotices: { enabled: false, items: [] } }), acknowledged: true, sessionId: SESSION });
-  assert.equal(outrosNumeros.status, 400, "a frase diz que os avisos nao aparecem, mas eles estao ligados");
   assert.equal(linha(db).simulated_count_rule, null, "nada gravado");
   assert.equal(auditorias(db).length, 0);
+  estado.semPublicar = false;
+
+  // Antes de 12/11/2026 cada um destes pedia a caixa (400). Agora o pedido leva so as regras e a sessao.
+  for (const so of [{ showLiveBadge: true }, { countRule: { base: 5, jitter: 0, mode: "fixed", peak: 5 } }, { joins: entradas }, { saleNotices: avisos }]) {
+    usar(bancoDaSimulacao({ tables: escolaDaSimulacao(AGENDADA) }));
+    const resultado = await actions.saveSessionSimulation({ ...so, sessionId: SESSION });
+    assert.equal(resultado.ok, true, `${Object.keys(so)[0]} sozinho salva direto: ${JSON.stringify(resultado)}`);
+  }
+  // Uma frase mandada por uma pagina aberta antes da troca e ignorada: vale a que o servidor monta.
+  const comFraseVelha = usar(bancoDaSimulacao({ tables: escolaDaSimulacao(AGENDADA) }));
+  ok(await actions.saveSessionSimulation({ ...regrasLigadas, ackText: "uma frase qualquer", acknowledged: false, sessionId: SESSION }));
+  assert.equal(linha(comFraseVelha).simulation_ack_text, fraseDeHoje(), "a frase gravada e a do servidor");
 });
 
-test("salvar: grava o selo, as colunas de §4.3, a frase marcada, quem e quando; devolve a sessao e as regras sem a semente; a auditoria leva os valores", async () => {
+test("salvar: grava o selo, as colunas de §4.3, a frase montada pelo servidor, quem e quando; devolve a sessao e as regras sem a semente; a auditoria leva os valores", async () => {
   const db = usar(bancoDaSimulacao({ tables: escolaDaSimulacao(AGENDADA) }));
   const antes = Date.now();
   const frase = fraseDeHoje();
-  const salvo = ok(await actions.saveSessionSimulation({ ...regrasLigadas, ackText: `  ${frase} `, acknowledged: true, sessionId: SESSION }));
+  const salvo = ok(await actions.saveSessionSimulation({ ...regrasLigadas, sessionId: SESSION }));
 
   const row = linha(db);
   assert.deepEqual(row.simulated_count_rule, { base: 50, jitter: 10, mode: "curve", peak: 300 });
@@ -161,7 +158,6 @@ test("salvar: grava o selo, as colunas de §4.3, a frase marcada, quem e quando;
   assert.equal(auditoria.actor_id, PRODUTORA);
   assert.equal(auditoria.entity_id, WEBINAR);
   assert.deepEqual(auditoria.metadata, {
-    acknowledged: true,
     count_base: 50,
     count_jitter: 10,
     count_mode: "curve",
@@ -180,20 +176,20 @@ test("salvar: grava o selo, as colunas de §4.3, a frase marcada, quem e quando;
   assert.doesNotMatch(JSON.stringify(auditoria), /Carlos|Formação|Decisão/, "nem o texto dos avisos nem a frase na auditoria");
 });
 
-test("salvar tudo desligado: sem caixa, grava nulo nas regras e a frase de tudo desligado; avisos ligados sem nenhum item contam como desligados", async () => {
+test("salvar tudo desligado: grava nulo nas regras e a frase de tudo desligado; avisos ligados sem nenhum item contam como desligados", async () => {
   const db = usar(bancoDaSimulacao({ tables: escolaDaSimulacao({ minutosNoAr: -60, sessao: { status: "scheduled", show_live_badge: true, simulated_count_rule: { base: 9, jitter: 0, mode: "fixed", peak: 9 }, simulated_joins: { enabled: true, every_seconds: 30, max: 5, names: "generic" } } }) }));
   const salvo = ok(await actions.saveSessionSimulation({ saleNotices: { enabled: true, items: [] }, sessionId: SESSION }));
   const row = linha(db);
   assert.deepEqual([row.simulated_count_rule, row.simulated_joins, row.simulated_sale_notices, row.show_live_badge], [null, null, null, false]);
   assert.match(row.simulation_ack_text, /fica desligado, os números de plateia são reais e os avisos de venda não aparecem\. .*Responsável: Produtora de Teste\.$/);
   assert.equal(salvo.simulation.saleNotices.enabled, false);
-  assert.equal(auditorias(db)[0].metadata.acknowledged, false);
+  assert.equal("acknowledged" in auditorias(db)[0].metadata, false, "a auditoria nao leva mais a caixa (D85)");
   assert.equal(auditorias(db)[0].metadata.numbers_simulated, false);
 });
 
 test("salvar recusa: o replay (409, nunca simula), a encerrada (409, tambem a live encerrada), a que nao existe (404) e o banco sem a 202610300003 (409 com a frase)", async () => {
   const db = usar(bancoDaSimulacao({ tables: escolaDaSimulacao(AGENDADA) }));
-  const pedido = (sessionId) => actions.saveSessionSimulation({ ...regrasLigadas, ackText: fraseDeHoje(), acknowledged: true, sessionId });
+  const pedido = (sessionId) => actions.saveSessionSimulation({ ...regrasLigadas, sessionId });
 
   // R7 (adendo de 10/11/2026): a live tem Simulacao, mas a desta escola ja encerrou e fica registrada como estava.
   const live = await pedido(LIVE_SESSION);
@@ -213,7 +209,7 @@ test("salvar recusa: o replay (409, nunca simula), a encerrada (409, tambem a li
 });
 
 test("salvar recusa a troca de regra com a sessao ja comecada (no ar, ou com a hora marcada passada e o status atrasado): 409 e nada gravado", async () => {
-  const pedido = (sessionId) => actions.saveSessionSimulation({ ...regrasLigadas, ackText: fraseDeHoje(), acknowledged: true, sessionId });
+  const pedido = (sessionId) => actions.saveSessionSimulation({ ...regrasLigadas, sessionId });
   const decisaoDeAntes = { simulated_count_rule: { base: 30, jitter: 0, mode: "fixed", peak: 30 }, simulation_ack_text: "a decisao do comeco", simulation_decided_at: new Date(Date.now() - 2 * 3_600_000).toISOString() };
 
   // O tick ainda nao abriu a sessao (status agendada), mas o zero do video ja passou ha 10 min.
@@ -286,21 +282,17 @@ test("R7: ler no webinario ao vivo devolve so a sessao da live (nunca o Replay n
   assert.deepEqual(data.simulations[0].countRule, { base: 300, jitter: 0, mode: "fixed", peak: 300 });
 });
 
-test("R7: a live na espera grava as regras com a frase da live (sem o selo), quem e quando; a frase da gravada nao serve; o selo ligado e erro no campo", async () => {
+test("R7: a live na espera grava as regras direto, com a frase da live (sem o selo) montada pelo servidor, quem e quando; o selo ligado e erro no campo", async () => {
   const db = usar(bancoDaSimulacao({ tables: escolaAoVivo() }));
   const frase = fraseDaLive();
   assert.match(frase, /^Decisão do produtor em \d{2}\/\d{2}\/\d{4}: nesta live ao vivo, dentro da área de membros, os números de plateia são simulados e os avisos de venda são simulados\. Responsável: Produtora de Teste\.$/);
   assert.doesNotMatch(frase, /selo|Ao vivo"|sessão gravada/, "sem o trecho do selo");
 
-  const comSelo = await actions.saveSessionSimulation({ ...regrasDaLive, ackText: frase, acknowledged: true, sessionId: LIVE_SESSION, showLiveBadge: true });
+  const comSelo = await actions.saveSessionSimulation({ ...regrasDaLive, sessionId: LIVE_SESSION, showLiveBadge: true });
   assert.deepEqual([comSelo.status, comSelo.fieldErrors?.showLiveBadge?.[0]], [400, WEBINAR_COPY.simulacao.servidor.liveSemSelo]);
-  const fraseDaGravada = await actions.saveSessionSimulation({ ...regrasDaLive, ackText: fraseDeHoje(regrasDaLive), acknowledged: true, sessionId: LIVE_SESSION });
-  assert.deepEqual([fraseDaGravada.status, fraseDaGravada.fieldErrors?.acknowledged?.[0]], [400, WEBINAR_COPY.simulacao.servidor.fraseNaoBate]);
-  const semCaixa = await actions.saveSessionSimulation({ ...regrasDaLive, sessionId: LIVE_SESSION });
-  assert.equal(semCaixa.status, 400, "a caixa continua obrigatoria");
   assert.equal(linha(db, LIVE_SESSION).simulated_count_rule, null, "nada gravado ate aqui");
 
-  const salvo = ok(await actions.saveSessionSimulation({ ...regrasDaLive, ackText: frase, acknowledged: true, sessionId: LIVE_SESSION }));
+  const salvo = ok(await actions.saveSessionSimulation({ ...regrasDaLive, sessionId: LIVE_SESSION }));
   const row = linha(db, LIVE_SESSION);
   assert.deepEqual(row.simulated_count_rule, { base: 50, jitter: 10, mode: "curve", peak: 300 });
   assert.deepEqual(row.simulated_joins, { enabled: true, every_seconds: 45, max: 20, names: "generic" });
@@ -317,7 +309,7 @@ test("R7: a live na espera grava as regras com a frase da live (sem o selo), que
 
 test("R7: a live que ja comecou (started_at, no ar) recusa a troca com 409; na espera depois da hora marcada ainda muda", async () => {
   const noAr = usar(bancoDaSimulacao({ tables: escolaAoVivo({ started_at: new Date(Date.now() - 20 * MIN).toISOString(), status: "live" }) }));
-  const recusada = await actions.saveSessionSimulation({ ...regrasDaLive, ackText: fraseDaLive(), acknowledged: true, sessionId: LIVE_SESSION });
+  const recusada = await actions.saveSessionSimulation({ ...regrasDaLive, sessionId: LIVE_SESSION });
   assert.deepEqual([recusada.status, recusada.error], [409, WEBINAR_COPY.simulacao.servidor.liveComecou]);
   assert.equal(linha(noAr, LIVE_SESSION).simulated_count_rule, null);
 
@@ -329,7 +321,7 @@ test("R7: a live que ja comecou (started_at, no ar) recusa a troca com 409; na e
 
 test("R7: banco sem a 202611100002 (o check antigo da live): 409 com a frase da migracao, nada gravado; a gravada segue gravando", async () => {
   const db = usar(comOCheckAntigo(bancoDaSimulacao({ tables: escolaAoVivo() })));
-  const pendente = await actions.saveSessionSimulation({ ...regrasDaLive, ackText: fraseDaLive(), acknowledged: true, sessionId: LIVE_SESSION });
+  const pendente = await actions.saveSessionSimulation({ ...regrasDaLive, sessionId: LIVE_SESSION });
   assert.deepEqual([pendente.status, pendente.error], [409, WEBINAR_COPY.simulacao.servidor.precisaMigracaoLive("202611100002")]);
   assert.equal(linha(db, LIVE_SESSION).simulated_count_rule, null);
   assert.equal(auditorias(db).length, 0);
@@ -348,13 +340,14 @@ test("revisao v8, achado 6: o card que carregou antes da mudanca feita no consol
   // No console, antes do comeco, a equipe soma +200 (a regra da sessao passa a ser a nova).
   const semNada = { badgeOn: false, joinsSimulated: false, saleNoticesSimulated: false };
   const doConsole = model.simulationAudienceAckFor({ extra: 200, flags: semNada, nowMs: Date.now(), responsible: "Produtora de Teste" });
-  ok(await actions.saveSimulatedAudience({ ackText: doConsole, acknowledged: true, extra: 200, sessionId: SESSION }));
+  ok(await actions.saveSimulatedAudience({ extra: 200, sessionId: SESSION }));
+  assert.equal(linha(db).simulation_ack_text, doConsole, "a frase da mudanca, montada pelo servidor (D85)");
   const decididaNoConsole = linha(db).simulation_decided_at;
   assert.deepEqual(linha(db).simulated_count_rule, { base: 200, jitter: 0, mode: "fixed", peak: 200 });
 
   // O card aberto antes salva o que ele tinha (o numero de antes): recusado, e nada muda.
   const antigo = { countRule: { base: 40, jitter: 0, mode: "fixed", peak: 40 }, joins: entradas, saleNotices: avisos, showLiveBadge: false };
-  const recusado = await actions.saveSessionSimulation({ ...antigo, ackText: fraseDeHoje(antigo), acknowledged: true, expectedDecidedAt: carregado.decidedAt, sessionId: SESSION });
+  const recusado = await actions.saveSessionSimulation({ ...antigo, expectedDecidedAt: carregado.decidedAt, sessionId: SESSION });
   assert.deepEqual([recusado.ok, recusado.status, recusado.error], [false, 409, "A simulação desta sessão mudou em outro lugar. Recarregue para ver o número de agora."]);
   assert.equal(WEBINAR_COPY.simulacao.servidor.mudouEmOutroLugar, recusado.error);
   assert.deepEqual(linha(db).simulated_count_rule, { base: 200, jitter: 0, mode: "fixed", peak: 200 }, "o +200 do console fica");
@@ -365,7 +358,7 @@ test("revisao v8, achado 6: o card que carregou antes da mudanca feita no consol
   const recarregado = ok(await actions.loadSessionSimulations({ webinarId: WEBINAR })).simulations.find((item) => item.sessionId === SESSION);
   assert.ok(recarregado.decidedAt && Date.parse(recarregado.decidedAt) === Date.parse(decididaNoConsole));
   assert.deepEqual(recarregado.countRule, { base: 200, jitter: 0, mode: "fixed", peak: 200 }, "o numero de agora");
-  const salvo = ok(await actions.saveSessionSimulation({ ...antigo, ackText: fraseDeHoje(antigo), acknowledged: true, expectedDecidedAt: recarregado.decidedAt, sessionId: SESSION }));
+  const salvo = ok(await actions.saveSessionSimulation({ ...antigo, expectedDecidedAt: recarregado.decidedAt, sessionId: SESSION }));
   assert.deepEqual(linha(db).simulated_count_rule, { base: 40, jitter: 0, mode: "fixed", peak: 40 });
   assert.ok(salvo.simulation.decidedAt && Date.parse(salvo.simulation.decidedAt) === Date.parse(linha(db).simulation_decided_at), "a volta do salvar leva a decisao nova");
 
@@ -391,7 +384,7 @@ test("revisao v8, achado 6: a mudanca gravada entre a leitura e a escrita do sal
     }
     return chain;
   };
-  const recusado = await actions.saveSessionSimulation({ ...regrasLigadas, ackText: fraseDeHoje(), acknowledged: true, expectedDecidedAt: null, sessionId: SESSION });
+  const recusado = await actions.saveSessionSimulation({ ...regrasLigadas, expectedDecidedAt: null, sessionId: SESSION });
   assert.deepEqual([recusado.status, recusado.error], [409, WEBINAR_COPY.simulacao.servidor.mudouEmOutroLugar]);
   assert.deepEqual(linha(db).simulated_count_rule, { base: 300, jitter: 0, mode: "fixed", peak: 300 }, "o que o console gravou fica");
   assert.equal(auditorias(db).length, 0);

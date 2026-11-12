@@ -104,6 +104,7 @@ import { RoomWideHidden } from "./screen/room-wide-hidden";
 import { useRoomScreen, useRoomScreenEvents } from "./screen/use-room-screen";
 import { useRoomSimulation } from "./use-room-simulation";
 import { useDeferredPolls, useRoomHydrated, useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
+import { usePanelMotion } from "./use-panel-motion";
 import { useStageGeometry } from "./use-stage-geometry";
 import { leaveStageFullscreen, refocusRoom, returnFocusFromPanel, returnFocusFromPoll, roomFocusTarget, trapRoomFocus, useRoomConfirmFocus, useRoomDialogLock, useRoomReducedMotion } from "./webinar-room";
 import { roomSkeleton } from "./vertical/vertical-model";
@@ -1087,7 +1088,9 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   // O palco cresce com o painel do chat fechado, no Modo cinema (o chat fica embaixo, menor) e na frase de removido /
   // banido; no celular com o painel Configurações aberto (o chat escondido), a caixa do palco divide a coluna com o
   // painel e fica com no minimo 96 px: o painel rola por dentro e a barra continua na tela (liveSkeletonState).
-  const skeletonState = liveSkeletonState({ blocked, cinema: cinemaOn, panelShown, settingsTakeover });
+  // Fechando, o painel continua no lugar ate a saida terminar (rodada v9, P12): o palco muda de tamanho uma vez so.
+  const panelMotion = usePanelMotion(panelShown);
+  const skeletonState = liveSkeletonState({ blocked, cinema: cinemaOn, panelShown: panelMotion.laid, settingsTakeover });
   const skeleton = roomSkeleton("normal", skeletonState);
 
   // A sala inteira dentro do aviso da sala (o chat e as Perguntas mostram o sucesso nele).
@@ -1274,6 +1277,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               firstFocus={firstFocus === "tab"}
               id={ROOM_PANEL_ID}
               kind="live"
+              motion={panelMotion}
               onClose={() => setPanelOpen(false)}
               onTab={setTab}
               open={panelShown}

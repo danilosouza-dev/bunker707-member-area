@@ -83,7 +83,7 @@ test("consoleSkeleton (docs/31 V2-13 e §10): com palco, a coluna do palco com o
   // O painel e a referencia dos rotulos sr-only dele (o corpo de dentro rola, console-panel.tsx).
   assert.ok(has(live.panel, "relative"), "o painel com palco e a referencia dos rotulos dele");
   // O cartao do YouTube a partir de lg: o fundo do painel, o contorno de 1 px e o raio 12, com a largura da sala.
-  for (const classe of ["lg:rounded-[12px]", "lg:border", "lg:border-room-panel-border", "lg:bg-room-panel", "lg:w-[clamp(320px,27.5vw,514px)]", "lg:flex-none"]) {
+  for (const classe of ["lg:rounded-[12px]", "lg:border", "lg:border-room-panel-border", "lg:bg-room-panel", "lg:w-[clamp(320px,27.5vw,400px)]", "lg:flex-none"]) {
     assert.ok(has(live.panel, classe), `o painel com ${classe}`);
   }
   // Dentro do cartao, os cartoes do admin (SectionCard) ficam no fundo do proprio cartao: nunca um cartao escuro dentro dele.

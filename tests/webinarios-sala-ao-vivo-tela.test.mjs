@@ -583,7 +583,7 @@ test("no ar: o palco 16:9 com 'Ao vivo · 00:42:10', o selo de quem assiste agor
   // O painel no estilo do YouTube: a partir de lg o cartao com a largura da grade do YouTube e o trilho a direita, irmao
   // dele e depois dele no DOM; abaixo de lg, as abas em pilula no topo do painel (sem a aba de baixo que abria a gaveta).
   const aside = html.match(/<aside aria-labelledby="room-panel-title" class="([^"]*)" data-testid="room-panel" id="room-panel">/)?.[1].split(" ") ?? [];
-  assert.ok(aside.includes("lg:w-[clamp(320px,27.5vw,514px)]") && !aside.includes("lg:w-80"), aside.join(" "));
+  assert.ok(aside.includes("lg:w-[clamp(320px,27.5vw,400px)]") && !aside.includes("lg:w-80"), aside.join(" "));
   const painel = html.slice(html.indexOf("<aside"), html.indexOf("</aside>"));
   // Abaixo de lg as abas leem antes da aba escolhida, no topo do painel (a linha some a partir de lg).
   assert.ok(painel.indexOf('role="tablist"') < painel.indexOf('role="tabpanel"'), "as abas antes da aba escolhida, no topo do painel");
@@ -837,6 +837,38 @@ test("a aba Participantes mostra quem esta no palco e o numero de alunos, nunca 
   assert.equal(render(pillsModule.RoomChatPills, { kind: "live", messages: [] }), "", "sem mensagem, nada no palco");
 });
 
+test("as pilulas do palco (rodada v9, P2): a foto pela mesma regra do chat (a que o servidor manda na mensagem; sem ela, as iniciais) e cada pilula some sozinha depois de 8 s", () => {
+  const FOTO = "https://projeto.supabase.co/storage/v1/object/public/avatars/00000000-0000-4000-8000-000000000001/foto.webp";
+  const base = { kind: "message", mine: false, offsetMs: 0, pending: false, pinned: false, replyToId: null, role: "student" };
+  const mensagens = [
+    { ...base, avatarUrl: FOTO, body: "com foto", displayName: "Amadeus Silva", id: "a" },
+    { ...base, avatarUrl: null, body: "sem foto", displayName: "João de Souza", id: "b" }
+  ];
+  const pilulas = render(pillsModule.RoomChatPills, { kind: "live", messages: mensagens });
+  const [comFoto, semFoto] = pilulas.split("</li>");
+  assert.match(comFoto, /<img alt=""[^>]*src="[^"]*avatars[^"]*foto\.webp[^"]*"/, "a foto de quem escreveu na pilula (D62 e D82), como na lista do chat");
+  assert.doesNotMatch(comFoto, />AS<\/span>/, "com a foto, sem as iniciais");
+  assert.match(semFoto, /<span class="[^"]*">JD<\/span>/, "sem foto, as iniciais");
+  assert.doesNotMatch(semFoto, /<img/);
+
+  // O tempo na tela: cada mensagem ganha a hora em que entrou na lista e sai 8 s depois, sozinha.
+  assert.equal(pillsModule.CHAT_PILL_TTL_MS, 8_000);
+  const T0 = 1_000_000;
+  const entrou = pillsModule.pillsStep(["a", "b"], new Map(), T0);
+  assert.deepEqual([...entrou.seen], [["a", T0], ["b", T0]], "as que ja estavam ganham a hora da montagem");
+  assert.deepEqual([entrou.expired, entrou.wakeInMs], [[], 8_000], "nenhuma some antes dos 8 s");
+  // 5 s depois chega a "c" (as 2 ultimas passam a ser b e c): a "b" guarda a hora dela, a "c" comeca agora.
+  const chegou = pillsModule.pillsStep(["b", "c"], entrou.seen, T0 + 5_000);
+  assert.deepEqual([...chegou.seen], [["b", T0], ["c", T0 + 5_000]], "a que saiu da lista nao fica guardada");
+  assert.deepEqual([chegou.expired, chegou.wakeInMs], [[], 3_000], "o despertador para a mais velha");
+  // Aos 8 s a "b" some; a "c" fica ate os 13 s.
+  const aosOito = pillsModule.pillsStep(["b", "c"], chegou.seen, T0 + 8_000);
+  assert.deepEqual([aosOito.expired, aosOito.wakeInMs], [["b"], 5_000]);
+  const aosTreze = pillsModule.pillsStep(["b", "c"], aosOito.seen, T0 + 13_000);
+  assert.deepEqual([aosTreze.expired, aosTreze.wakeInMs], [["b", "c"], null], "todas sairam: nenhum despertador, o palco fica limpo ate a proxima mensagem");
+  assert.deepEqual(pillsModule.pillsStep([], aosTreze.seen, T0 + 20_000), { expired: [], seen: new Map(), wakeInMs: null });
+});
+
 test("o painel e o trilho no estilo do YouTube: o trilho 'Painel da sala' com um botao por aba (aria-expanded so no aberto, o contador no Chat, o ponto em Enquetes, sem title); o painel com o cabecalho h2, o numero e o X sem contorno; fechado, o aside fica hidden e o conteudo continua montado", () => {
   const trilho = (props = {}) =>
     render(railModule.RoomRail, { kind: "live", onItem: noop, panelShown: true, pollOpen: true, tab: "chat", tabs: layout.panelTabsFor({ kind: "live", openPolls: 1, tab: "chat" }), unread: 0, ...props });
@@ -904,7 +936,7 @@ test("o painel e o trilho no estilo do YouTube: o trilho 'Painel da sala' com um
   // A largura da grade do YouTube, o raio 12 fixo, o contorno e o fundo do painel, sem cortar (o anel do X fica inteiro);
   // abaixo de lg deitado, ao lado do palco com 288 px, como antes.
   const asideClasses = (chat.match(/^<aside aria-labelledby="room-panel-title" class="([^"]*)"/)?.[1] ?? "").split(" ");
-  for (const classe of ["lg:w-[clamp(320px,27.5vw,514px)]", "lg:flex-none", "lg:rounded-[12px]", "lg:border", "lg:border-room-panel-border", "lg:bg-room-panel", "max-lg:landscape:w-72", "max-lg:landscape:flex-none"]) {
+  for (const classe of ["lg:w-[clamp(320px,27.5vw,400px)]", "lg:flex-none", "lg:rounded-[12px]", "lg:border", "lg:border-room-panel-border", "lg:bg-room-panel", "max-lg:landscape:w-72", "max-lg:landscape:flex-none"]) {
     assert.ok(asideClasses.includes(classe), `${classe} em ${asideClasses.join(" ")}`);
   }
   assert.ok(!asideClasses.includes("lg:w-80") && !asideClasses.some((classe) => classe.includes("overflow-hidden")), "sem os 320 px fixos e sem cortar");

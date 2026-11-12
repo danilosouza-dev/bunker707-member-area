@@ -656,11 +656,6 @@ export function simulationAudienceFlagsOf(rules: Pick<SimulationRules, "joins" |
   };
 }
 
-/** Somar a plateia pede a caixa marcada (a frase com o numero); o Tirar (+0) nao, e grava a frase do +0. */
-export function simulationAudienceNeedsAck(extra: number): boolean {
-  return Number.isFinite(extra) && Math.trunc(extra) > 0;
-}
-
 /**
  * A frase de uma mudanca dos participantes simulados (D79): a mesma frase da decisao (a da live na live), com os numeros
  * de plateia pelo +N novo e pelas entradas, e o trecho do numero ("A partir de agora, os participantes simulados somam
@@ -680,14 +675,6 @@ export function simulationAudienceAckFor(input: { extra: number; flags: Simulati
   return input.live ? simulationAckSentenceLive(common) : simulationAckSentenceV4({ ...common, badgeOn: input.flags.badgeOn });
 }
 
-/** A frase marcada da mudanca e a que o servidor montaria agora (hoje ou ontem, como simulationAckMatches)? */
-export function simulationAudienceAckMatches(input: { ackText: string | null | undefined; extra: number; flags: SimulationAudienceFlags; live?: boolean; nowMs: number; responsible: string }): boolean {
-  const given = normalizeSimulationAck(input.ackText ?? "");
-  if (!given) {
-    return false;
-  }
-  return [input.nowMs, input.nowMs - 86_400_000].some((nowMs) => normalizeSimulationAck(simulationAudienceAckFor({ ...input, nowMs })) === given);
-}
 
 /** A frase cabe na coluna (simulation_ack_text, CHAT_LIMITS.simulationAck). */
 export function clampSimulationAck(text: string): string {
