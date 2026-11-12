@@ -76,11 +76,12 @@ export type RoomChatPanelProps = {
    * nao le de novo; sem ele (a gaveta antiga, os testes), o painel le sozinho como antes.
    */
   assistant?: RoomAssistant;
-  /** A minha foto do perfil (o avatar do campo, depois do aceite); sem ela, as minhas iniciais. */
+  /** A minha foto do perfil (o avatar do campo, tambem antes do aceite: so eu vejo, D82); sem ela, as minhas iniciais. */
   avatarUrl?: string | null;
   busy?: boolean;
   chatMode: ChatMode;
   consented: boolean;
+  /** O meu nome (D64), para as iniciais do avatar do campo sem a foto, tambem antes do aceite (D82); sem ele, a pessoa. */
   displayName: string | null;
   error: string | null;
   messages: readonly RoomMessage[];
@@ -723,7 +724,7 @@ export function RoomChatPanel(props: RoomChatPanelProps) {
         ) : (
           <RoomCommentField
             ariaLabel={copy.escreva}
-            avatar={{ imageSrc: consented ? avatarUrl : null, name: consented ? displayName : null }}
+            avatar={{ imageSrc: avatarUrl, name: displayName }}
             busy={sending}
             disabled={state.disabled || readOnly || busy}
             expanded={expanded}

@@ -39,8 +39,16 @@ export type WebinarsDb = SupabaseClient;
  * aviso a aponta (aplicar ate ela inclui todas as de antes; docs/21 §9.13). Nenhuma coluna dela entra nas listas que o
  * app sempre le (SESSION_COLUMNS, CHAT_MESSAGE_COLUMNS, SCRIPT_ITEM_COLUMNS): sem ela, o app segue como antes, menos as
  * escritas novas (a Na tela, a foto de quem comenta e o roteiro da Live ao vivo, que voltam 409 com o aviso dela).
+ * As pessoas que comentam e a pergunta simulada (docs/30 D75 a D78, 11/11/2026) vem depois: a 202611140001 cria
+ * webinar_personas, liga o item do roteiro a pessoa (persona_id) e deixa a pergunta ser de uma pessoa da lista
+ * (webinar_questions.source 'scripted', sem aluno), com o relatorio e o painel contando so a turma. Nenhuma coluna dela
+ * entra nas listas que o app sempre le (QUESTION_COLUMNS, SCRIPT_ITEM_COLUMNS): sem ela, o app segue como antes (o Novo
+ * comentário com o Nome digitado), e so as escritas novas (a lista e a pergunta simulada) voltam 409 com o aviso. Os
+ * participantes simulados mudados a qualquer momento (docs/30 D79, 11/11/2026) vem por ultimo: a 202611140002 cria
+ * webinar_simulation_changes e e a mais nova, entao o aviso a aponta (aplicar ate ela inclui todas as de antes; docs/21
+ * §9.14 e §9.15). Nada que o app sempre le vem dela: sem ela, so mudar o numero volta 409 com o aviso.
  */
-export const WEBINARS_MIGRATION = "202611100002";
+export const WEBINARS_MIGRATION = "202611140002";
 
 /** 4a: webinar_panel (os paineis Lives ao vivo e Lives gravadas e os numeros da lista). */
 export const WEBINARS_PANELS_MIGRATION = "202610300002";
@@ -64,6 +72,21 @@ export const WEBINARS_TRANSLATION_MIGRATION = "202610300006";
  * so as escritas novas (salvar, mostrar, tirar, fixar a enquete) caem no aviso de migracao pendente, apontando esta.
  */
 export const WEBINARS_SCREEN_MIGRATION = "202611100002";
+
+/**
+ * As pessoas que comentam e a pergunta simulada (docs/30 D75 a D78): webinar_personas, o persona_id do item do roteiro e
+ * a pergunta `scripted`. Sem ela a lista le vazia (persona-store.listPersonas, `available` falso) e o editor e o console
+ * seguem com o Nome digitado; gravar uma pessoa ou uma pergunta simulada volta 409 com o aviso apontando esta.
+ */
+export const WEBINARS_PERSONAS_MIGRATION = "202611140001";
+
+/**
+ * Os participantes simulados mudados a qualquer momento (docs/30 D79 e D80; 11/11/2026): webinar_simulation_changes, as
+ * mudancas no ar com a frase de cada uma. Nenhuma leitura de sempre depende dela: sem a tabela, a Simulacao segue como
+ * antes (as leituras das mudancas devolvem vazio, simulation-store.ts) e so mudar o numero (o console e o card) volta
+ * 409 com o aviso desta. E tambem a mais nova dos webinarios (WEBINARS_MIGRATION).
+ */
+export const WEBINARS_AUDIENCE_MIGRATION = "202611140002";
 
 export function webinarsDb(): WebinarsDb {
   return getSupabaseAdminClient();

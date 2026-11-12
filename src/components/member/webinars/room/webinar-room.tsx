@@ -562,7 +562,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   // Fase 4 (docs/30 §1.6): a Simulacao so na sessao gravada (o Replay livre nunca simula; a sala ao vivo e outra tela),
   // a traducao das mensagens mostradas (as duas formas da sala mostram SO as traduzidas) e a Oferta (no canto do palco
   // ou a pilula do vertical). Os tres sao pontos de encaixe preenchidos pelas frentes.
-  const simulation = useRoomSimulation({ enabled: !readOnly && !unavailable && kind === "simulated" && phase !== "ended", getOffsetMs, sessionId, webinarId });
+  const simulation = useRoomSimulation({ enabled: !readOnly && !unavailable && kind === "simulated" && phase !== "ended", getOffsetMs, sessionId, simulationKey: naTela.simulationKey, webinarId });
   const translation = useRoomTranslation({ enabled: !readOnly && !unavailable, messages: revealed, sessionId, webinarId });
   // As enquetes da sala (a releitura da sessao e, quando o resumo da Na tela muda, uma leitura): o palco, o card do chat e a aba.
   const roomPolls = useRoomPolls({ enabled: !readOnly && !unavailable, getOffsetMs, onRefused: onWriteRefused, pollsKey: naTela.pollsKey, sessionId, sessionPolls: session.polls, webinarId });
@@ -1035,7 +1035,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
     ) : shownTab === "participantes" ? (
       // A gravada: quem apresenta e o mesmo numero do cabecalho (o real mais a parte simulada; encerrada, nenhum, como
       // no cabecalho); nunca a lista de alunos.
-      <LiveParticipantsTab presenterKnown={presenterName !== null} stage={panelStageNames(presenterName)} students={momentBadge.showCount ? shownCount : null} />
+      <LiveParticipantsTab note={readOnly && kind === "simulated" ? WEBINAR_COPY.simulacao.plateia.previa : null} presenterKnown={presenterName !== null} stage={panelStageNames(presenterName)} students={momentBadge.showCount ? shownCount : null} />
     ) : pinnedPoll && pollsTab.length === 0 ? null : (
       // A enquete fixada fica na area das fixadas, acima: aqui so as outras (e nada, quando ela e a unica).
       <RoomPollsTab onAnswer={roomPolls.answer} polls={pollsTab} readOnly={readOnly || phase === "ended"} />

@@ -29,7 +29,8 @@ import {
 // - R9: a foto do personagem no item do roteiro e na mensagem scripted (so o caminho webinars/personas/<24 hex>.webp);
 //   webinar_open_session mantem o corpo inteiro da 202610290001 e so ganha a foto e a live fora do roteiro ao abrir;
 // - os checks novos das tabelas que ja existem entram `not valid` e a secao 7 so os valida;
-// - o aviso de migracao pendente aponta esta (WEBINARS_MIGRATION), e a Na tela tem a propria constante
+// - o aviso de migracao pendente aponta esta ou uma mais nova (WEBINARS_MIGRATION; desde 11/11/2026 a 202611140001 das
+//   pessoas que comentam), e a Na tela tem a propria constante
 //   (WEBINARS_SCREEN_MIGRATION).
 
 const MIGRATION = "supabase/migrations/202611100002_webinars_v7_na_tela.sql";
@@ -187,8 +188,10 @@ test("a secao 7 so valida os tres checks novos (de novo, nada muda)", () => {
   assert.equal((code.match(/\bnot valid\b/g) ?? []).length, 3, "os tres entram not valid");
 });
 
-test("o aviso de migracao pendente aponta a 202611100002, e a Na tela tem a propria constante", () => {
-  assert.match(dbSource, /export const WEBINARS_MIGRATION = "202611100002";/);
+test("o aviso de migracao pendente aponta uma migracao que inclui a 202611100002, e a Na tela tem a propria constante", () => {
+  // O aviso aponta a migracao mais nova dos webinarios (desde 11/11/2026 a das pessoas que comentam, 202611140001,
+  // tests/webinarios-v8.guard.test.mjs): aplicar ate ela inclui esta.
+  assert.ok((dbSource.match(/export const WEBINARS_MIGRATION = "(\d+)";/)?.[1] ?? "") >= "202611100002");
   assert.match(dbSource, /export const WEBINARS_SCREEN_MIGRATION = "202611100002";/);
   // Nenhuma coluna desta migracao entra nas listas que o app sempre le: o app de antes continua de pe sem ela.
   for (const [file, list] of [

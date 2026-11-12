@@ -465,10 +465,10 @@ export function RoomQuestionsTab({
 }: {
   /** Redesign V2, F3: o Assistente que a sala ja le; com ele, a aba nao le de novo. */
   assistant?: RoomAssistant;
-  /** A minha foto do perfil (o avatar do campo no `comment`, depois do aceite). */
+  /** A minha foto do perfil (o avatar do campo e do campo da resposta do fio no `comment`, tambem antes do aceite, D82). */
   avatarUrl?: string | null;
   consented: boolean;
-  /** O meu nome (as iniciais do avatar do campo no `comment`); antes do aceite, a pessoa. */
+  /** O meu nome (as iniciais do avatar dos campos no `comment` sem a foto, tambem antes do aceite, D82); sem ele, a pessoa. */
   displayName?: string | null;
   enabled: boolean;
   /** A sessao acabou: no `comment`, "Essa live acabou." no lugar do campo. */
@@ -497,6 +497,9 @@ export function RoomQuestionsTab({
   webinarId: string;
 }) {
   const copy = WEBINAR_COPY.sala;
+  // O avatar dos meus campos (a pergunta e a resposta do fio): a minha foto ou as minhas iniciais, tambem antes do aceite
+  // (D82: so eu vejo; quem a turma ve segue o D62).
+  const ownAvatar = { imageSrc: avatarUrl, name: displayName ?? null };
   const ownAssistant = useRoomAssistant({ enabled: ownAssistantEnabled({ enabled, readOnly, shared: sharedAssistant }), sessionId, webinarId });
   const assistant = sharedAssistant ?? ownAssistant;
   const [questions, setQuestions] = useState<RoomQuestion[]>([]);
@@ -774,7 +777,7 @@ export function RoomQuestionsTab({
           onVote={(item) => void vote(item)}
           questions={visible}
           reply={{
-            avatar: { imageSrc: consented ? avatarUrl : null, name: consented ? (displayName ?? null) : null },
+            avatar: ownAvatar,
             busy: replySending,
             canWrite: replyWritable,
             draft: replyDraft,
@@ -814,7 +817,7 @@ export function RoomQuestionsTab({
         ) : (
           <RoomCommentField
             ariaLabel={copy.suaPergunta}
-            avatar={{ imageSrc: consented ? avatarUrl : null, name: consented ? (displayName ?? null) : null }}
+            avatar={ownAvatar}
             busy={sending}
             disabled={readOnly}
             expanded={expanded}

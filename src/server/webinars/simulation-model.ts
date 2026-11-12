@@ -13,6 +13,14 @@
 // da forma ate o Encerrar live (a live pode passar do previsto); as entradas e os avisos so param no Encerrar
 // (simulationFeed e simulationTotals com `kind: "live"`). A frase da decisao da live e simulationAckSentenceLive.
 //
+// Os participantes simulados mudados a qualquer momento (docs/30 D79, pedido do produtor de 11/11/2026): o contador
+// passa a ter mudancas no tempo (SessionSimulation.countChanges, da tabela webinar_simulation_changes). Cada mudanca
+// vale a partir do offset dela no relogio da Simulacao e nao pula de uma vez: sobe ou desce em linha reta em 90 s
+// (SIMULATION_LIMITS.countRampSeconds), saindo do numero que a turma via no ponto de 15 s da mudanca, sempre igual para
+// todos (countTimelineOf, timelineExtraAt). A janela da sala, o numero do console e o resumo do fim usam a mesma conta,
+// entao o resumo junta os trechos de cada regra (D80). A frase de cada mudanca e a da decisao com o numero novo
+// (simulationAudienceAckFor). As entradas e os avisos de venda continuam travados no ar.
+//
 // Sem "server-only", imports relativos: tests/webinarios-simulacao-modelo.test.mjs carrega direto pelo Node. Nenhum
 // numero daqui entra numa metrica real, num CSV real ou numa regra da Comunicacao (D6, M6): os paineis, o relatorio e
 // os segmentos nunca importam este arquivo (o teste confere).
@@ -30,6 +38,7 @@ import {
   type SessionSimulation,
   type SessionStatus,
   type SimulatedCountRule,
+  type SimulationCountChange,
   type SimulatedJoins,
   type SimulatedSaleNotices,
   type SimulationFeed,
@@ -43,6 +52,7 @@ import { simulationAckSentenceLive, simulationAckSentenceV4, simulationDecisionR
 
 const STEP_MS = SIMULATION_LIMITS.counterStepSeconds * 1000;
 const WINDOW_MS = SIMULATION_LIMITS.feedWindowSeconds * 1000;
+const RAMP_MS = SIMULATION_LIMITS.countRampSeconds * 1000;
 
 /** O desenho da faixa ("Real + faixa que varia"): sobe nos primeiros 20 %, fica e desce 15 % da faixa nos ultimos 10 %. */
 export const SIMULATION_CURVE = { fallShare: 0.15, fallStart: 0.9, riseEnd: 0.2 } as const;
@@ -167,6 +177,129 @@ export function counterPointsBetween(
 }
 
 /* ------------------------------------------------------------------------------------------------
+ * Os participantes simulados mudados no ar (D79): o contador com mudancas no tempo
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Uma mudanca pronta para a conta: o numero de onde a rampa sai (`fromExtra`, o que a turma via na mudanca). */
+type TimelineChange = SimulationCountChange & { fromExtra: number };
+
+/** O contador de uma sessao com as mudancas no ar, pronto para pedir o numero de qualquer offset. */
+export type CountTimeline = {
+  base: SimulatedCountRule;
+  changes: readonly TimelineChange[];
+  durationMs: number;
+  hold: boolean;
+  seed: number;
+};
+
+/** As mudancas validas (offset finito, de 0 em diante), na ordem do relogio; a ordem gravada desempata. */
+export function sortedCountChanges(changes: readonly SimulationCountChange[] | undefined): SimulationCountChange[] {
+  return (changes ?? [])
+    .map((change, index) => ({ change, index }))
+    .filter(({ change }) => Number.isFinite(change.atMs) && change.atMs >= 0)
+    .sort((a, b) => a.change.atMs - b.change.atMs || a.index - b.index)
+    .map(({ change }) => ({ atMs: Math.floor(change.atMs), rule: change.rule }));
+}
+
+/** A ultima mudanca que ja vale no offset (o indice em `changes`, na ordem do relogio), ou -1. */
+function changeIndexAt(changes: readonly { atMs: number }[], offsetMs: number): number {
+  let found = -1;
+  for (let index = 0; index < changes.length; index += 1) {
+    if (changes[index].atMs > offsetMs) {
+      break;
+    }
+    found = index;
+  }
+  return found;
+}
+
+/** O numero no offset com as mudancas dadas (a rampa de cada uma sai do `fromExtra` dela). */
+function extraWithChanges(head: Omit<CountTimeline, "changes">, changes: readonly TimelineChange[], offsetMs: number): number {
+  const { durationMs, hold, seed } = head;
+  if (!Number.isFinite(offsetMs) || !(durationMs > 0) || (!hold && offsetMs >= durationMs)) {
+    return 0;
+  }
+  const index = changeIndexAt(changes, offsetMs);
+  if (index < 0) {
+    return counterExtraAt(head.base, seed, offsetMs, durationMs, hold);
+  }
+  const change = changes[index];
+  const target = counterExtraAt(change.rule, seed, offsetMs, durationMs, hold);
+  const progress = (offsetMs - change.atMs) / RAMP_MS;
+  if (progress >= 1) {
+    return target;
+  }
+  return Math.max(0, Math.round(change.fromExtra + (target - change.fromExtra) * progress));
+}
+
+/**
+ * O contador da sessao com as mudancas no ar (D79). Cada mudanca sai do numero que a turma via no ponto de 15 s em que
+ * ela caiu (contando as mudancas de antes dela) e chega na regra nova em 90 s, em linha reta. Sem mudancas, e a regra
+ * de sempre (timelineExtraAt igual a counterExtraAt). `hold`: o da Live ao vivo (counterExtraAt).
+ */
+export function countTimelineOf(simulation: Pick<SessionSimulation, "countChanges" | "countRule" | "seed">, durationMs: number, hold = false): CountTimeline {
+  const head = { base: simulation.countRule, durationMs, hold, seed: simulation.seed };
+  const changes: TimelineChange[] = [];
+  for (const change of sortedCountChanges(simulation.countChanges)) {
+    const point = Math.floor(change.atMs / STEP_MS) * STEP_MS;
+    changes.push({ ...change, fromExtra: extraWithChanges(head, changes, point) });
+  }
+  return { ...head, changes };
+}
+
+/** A parte simulada do contador no offset, com as mudancas no ar (a rampa de 90 s de cada uma). Nunca negativo. */
+export function timelineExtraAt(timeline: CountTimeline, offsetMs: number): number {
+  return extraWithChanges(timeline, timeline.changes, offsetMs);
+}
+
+/** Algum trecho do contador soma algo: a regra de antes do comeco ou uma das mudancas. */
+export function countTimelineOn(simulation: Pick<SessionSimulation, "countChanges" | "countRule">): boolean {
+  return simulation.countRule.mode !== "off" || (simulation.countChanges ?? []).some((change) => change.rule.mode !== "off");
+}
+
+/** Os pontos do contador numa janela, com as mudancas (o mesmo passo de counterPointsBetween; 0 do fim real em diante). */
+export function timelinePointsBetween(timeline: CountTimeline, fromMs: number, toMs: number, endMs: number = timeline.durationMs): { atMs: number; extra: number }[] {
+  if (!countTimelineOn({ countChanges: [...timeline.changes], countRule: timeline.base }) || !(toMs >= fromMs)) {
+    return [];
+  }
+  const points: { atMs: number; extra: number }[] = [];
+  const last = Math.min(toMs, fromMs + WINDOW_MS);
+  for (let at = Math.floor(fromMs / STEP_MS) * STEP_MS; at <= last; at += STEP_MS) {
+    points.push({ atMs: at, extra: at >= endMs ? 0 : timelineExtraAt(timeline, at) });
+  }
+  return points;
+}
+
+/** A regra que vale no offset (a da ultima mudanca que ja caiu, senao a de antes do comeco): o "+300" do console. */
+export function simulationAudienceRuleAt(simulation: Pick<SessionSimulation, "countChanges" | "countRule">, offsetMs: number): SimulatedCountRule {
+  const changes = sortedCountChanges(simulation.countChanges);
+  const index = Number.isFinite(offsetMs) ? changeIndexAt(changes, offsetMs) : -1;
+  return index >= 0 ? changes[index].rule : simulation.countRule;
+}
+
+/** Ate que offset a rampa da ultima mudanca anda (a sala chega no numero novo); nulo sem rampa em curso. */
+export function simulationAudienceRampEndMs(simulation: Pick<SessionSimulation, "countChanges">, offsetMs: number): number | null {
+  const changes = sortedCountChanges(simulation.countChanges);
+  const index = Number.isFinite(offsetMs) ? changeIndexAt(changes, offsetMs) : -1;
+  if (index < 0) {
+    return null;
+  }
+  const end = changes[index].atMs + RAMP_MS;
+  return offsetMs < end ? end : null;
+}
+
+/** A regra de uma mudanca do console ou do card: "Real + número fixo" com o +N; 0 e "Só o real" (o Tirar). */
+export function simulationAudienceRule(extra: number): SimulatedCountRule {
+  const base = Math.max(0, Math.min(SIMULATION_LIMITS.countMax, Math.trunc(Number.isFinite(extra) ? extra : 0)));
+  return base > 0 ? { base, jitter: 0, mode: "fixed", peak: base } : defaultSimulatedCountRule();
+}
+
+/** O +N da regra (fixed: a base; off: 0); a faixa que varia nao tem um numero so (nulo). */
+export function simulationAudienceExtraOf(rule: SimulatedCountRule): number | null {
+  return rule.mode === "off" ? 0 : rule.mode === "fixed" ? rule.base : null;
+}
+
+/* ------------------------------------------------------------------------------------------------
  * As entradas e saidas
  * ---------------------------------------------------------------------------------------------- */
 
@@ -256,9 +389,9 @@ export function saleNoticesBetween(notices: SimulatedSaleNotices, fromMs: number
  * ---------------------------------------------------------------------------------------------- */
 
 /** Algo que a sala mostra esta ligado (o selo sozinho nao muda o contador nem o chat). */
-export function simulationRulesOn(simulation: Pick<SessionSimulation, "countRule" | "joins" | "saleNotices">): boolean {
+export function simulationRulesOn(simulation: Pick<SessionSimulation, "countChanges" | "countRule" | "joins" | "saleNotices">): boolean {
   return (
-    simulation.countRule.mode !== "off" ||
+    countTimelineOn(simulation) ||
     (simulation.joins.enabled && simulation.joins.max > 0) ||
     (simulation.saleNotices.enabled && simulation.saleNotices.items.length > 0)
   );
@@ -374,7 +507,8 @@ export function simulationFeed(input: {
   const eventsTo = Math.min(toMs, endMs - 1);
   const limitMs = live ? endMs : durationMs;
   return {
-    counter: counterPointsBetween(simulation.countRule, simulation.seed, fromMs, toMs, durationMs, endMs, live),
+    // O contador com as mudancas no ar (D79); sem mudancas, o mesmo que counterPointsBetween.
+    counter: timelinePointsBetween(countTimelineOf(simulation, durationMs, live), fromMs, toMs, endMs),
     enabled: true,
     from: fromMs,
     joins: joinsBetween(simulation.joins, simulation.seed, fromMs, eventsTo, limitMs),
@@ -403,7 +537,11 @@ export function simulationCounterNow(input: Omit<Parameters<typeof simulationFee
  * recebeu durante a sessao. E exatamente o que as janelas de simulationFeed mostraram nesse trecho (o teste de
  * propriedade confere); as saidas nao contam como entradas. Um numero so vale para os dois (o video inteiro).
  */
-export function simulationTotals(simulation: Pick<SessionSimulation, "countRule" | "joins" | "saleNotices" | "seed">, span: number | { endMs: number; videoMs: number }, live = false): SimulationTotals {
+export function simulationTotals(
+  simulation: Pick<SessionSimulation, "countChanges" | "countRule" | "joins" | "saleNotices" | "seed">,
+  span: number | { endMs: number; videoMs: number },
+  live = false
+): SimulationTotals {
   const videoMs = typeof span === "number" ? span : span.videoMs;
   // Na Live ao vivo (R7) a live pode passar do previsto: o fim e o Encerrar live, e o contador segura o numero do fim da forma.
   const spanEnd = typeof span === "number" ? span : span.endMs;
@@ -413,9 +551,11 @@ export function simulationTotals(simulation: Pick<SessionSimulation, "countRule"
   }
   const limitMs = live ? endMs : videoMs;
   let counterMax = 0;
-  if (simulation.countRule.mode !== "off") {
+  // Os trechos de cada regra juntos (D80): o maior numero dos pontos de 15 s que a sala recebeu, com as rampas.
+  if (countTimelineOn(simulation)) {
+    const timeline = countTimelineOf(simulation, videoMs, live);
     for (let at = 0; at < endMs; at += STEP_MS) {
-      counterMax = Math.max(counterMax, counterExtraAt(simulation.countRule, simulation.seed, at, videoMs, live));
+      counterMax = Math.max(counterMax, timelineExtraAt(timeline, at));
     }
   }
   return {
@@ -499,6 +639,54 @@ export function simulationAckMatches(input: { ackText: string | null | undefined
   return [input.nowMs, input.nowMs - 86_400_000].some(
     (nowMs) => normalizeSimulationAck(simulationAckFor({ live: input.live, nowMs, responsible: input.responsible, rules: input.rules })) === given
   );
+}
+
+/**
+ * O que a frase de uma mudanca dos participantes simulados (D79) diz alem do numero: o selo da gravada e o que continua
+ * ligado (as entradas e os avisos de venda, travados no ar). O console e o card recebem isto do servidor, nunca as
+ * regras inteiras.
+ */
+export type SimulationAudienceFlags = { badgeOn: boolean; joinsSimulated: boolean; saleNoticesSimulated: boolean };
+
+export function simulationAudienceFlagsOf(rules: Pick<SimulationRules, "joins" | "saleNotices" | "showLiveBadge">): SimulationAudienceFlags {
+  return {
+    badgeOn: rules.showLiveBadge,
+    joinsSimulated: rules.joins.enabled,
+    saleNoticesSimulated: rules.saleNotices.enabled && rules.saleNotices.items.length > 0
+  };
+}
+
+/** Somar a plateia pede a caixa marcada (a frase com o numero); o Tirar (+0) nao, e grava a frase do +0. */
+export function simulationAudienceNeedsAck(extra: number): boolean {
+  return Number.isFinite(extra) && Math.trunc(extra) > 0;
+}
+
+/**
+ * A frase de uma mudanca dos participantes simulados (D79): a mesma frase da decisao (a da live na live), com os numeros
+ * de plateia pelo +N novo e pelas entradas, e o trecho do numero ("A partir de agora, os participantes simulados somam
+ * +300 ao número de quem assiste."). Data de Sao Paulo e o nome de quem muda, como simulationAckFor.
+ */
+export function simulationAudienceAckFor(input: { extra: number; flags: SimulationAudienceFlags; live?: boolean; nowMs: number; responsible: string }): string {
+  const extra = Math.max(0, Math.trunc(Number.isFinite(input.extra) ? input.extra : 0));
+  const date = saoPauloDate(new Date(input.nowMs).toISOString());
+  const common = {
+    audience: extra,
+    countSimulated: extra > 0,
+    date,
+    joinsSimulated: input.flags.joinsSimulated,
+    responsible: input.responsible,
+    saleNoticesSimulated: input.flags.saleNoticesSimulated
+  };
+  return input.live ? simulationAckSentenceLive(common) : simulationAckSentenceV4({ ...common, badgeOn: input.flags.badgeOn });
+}
+
+/** A frase marcada da mudanca e a que o servidor montaria agora (hoje ou ontem, como simulationAckMatches)? */
+export function simulationAudienceAckMatches(input: { ackText: string | null | undefined; extra: number; flags: SimulationAudienceFlags; live?: boolean; nowMs: number; responsible: string }): boolean {
+  const given = normalizeSimulationAck(input.ackText ?? "");
+  if (!given) {
+    return false;
+  }
+  return [input.nowMs, input.nowMs - 86_400_000].some((nowMs) => normalizeSimulationAck(simulationAudienceAckFor({ ...input, nowMs })) === given);
 }
 
 /** A frase cabe na coluna (simulation_ack_text, CHAT_LIMITS.simulationAck). */

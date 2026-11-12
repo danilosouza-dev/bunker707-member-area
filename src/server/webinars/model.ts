@@ -143,14 +143,14 @@ export type RoomSettings = {
   practiceSession: boolean;
   questions: boolean;
   reactions: boolean;
-  /** Microfone sozinho (docs/31, caminho A): o aluno abre o microfone sem o Liberar, com teto no console de quem apresenta. */
+  /**
+   * Microfone sozinho (docs/31, caminho A): o aluno abre o microfone sem o Liberar. Sem teto desde 11/11/2026 (D84; o
+   * teto de 4 do V2-A60 saiu): ligado, todo aluno pode falar, e a equipe silencia uma pessoa ou todos.
+   */
   selfUnmute: boolean;
   slowModeSeconds: SlowModeSeconds | null;
   waitingRoom: boolean;
 };
-
-/** O teto do microfone sozinho (docs/31 V2-A60): quantos alunos falam ao mesmo tempo; as frases do editor e do console saem daqui. */
-export const MIC_LIMIT = 4;
 
 export type ReminderSettings = { email: boolean; h1: boolean; h24: boolean };
 
@@ -644,6 +644,8 @@ export const CHAT_LIMITS = {
   pollOption: 120,
   pollOptionsMax: 20,
   pollOptionsMin: 2,
+  /** O teto de enquetes prontas por webinario (o editor e o console, D83). */
+  pollTemplatesMax: 20,
   transcriptBytes: 2_000_000,
   simulationAck: 600,
   chatPageMax: 200
@@ -747,6 +749,11 @@ export type ScriptItem = {
    * a 202611100002 (lida a parte, persona-store.ts).
    */
   personaAvatarPath?: string | null;
+  /**
+   * A pessoa da lista do webinario (11/11/2026, D75; webinar_personas): a fonte do nome, do papel e da foto, que o item
+   * guarda como copia. Nula sem pessoa (saiu da lista, ou o banco sem a 202611140001; lida a parte, persona-store.ts).
+   */
+  personaId?: string | null;
   personaName: string;
   personaRole: PersonaRole;
   phrase: string | null;
@@ -768,6 +775,8 @@ export type ScriptItemDraft = {
   offsetMs: number | null;
   /** A foto de quem comenta (R9); ausente, a do item fica como esta. */
   personaAvatarPath?: string | null;
+  /** A pessoa da lista (D75): com ela, o servidor grava a copia dela (nome, papel e foto); nula ou ausente, a copia enviada. */
+  personaId?: string | null;
   personaName: string;
   personaRole: PersonaRole;
   phrase: string | null;
@@ -844,9 +853,16 @@ export type WebinarQuestion = {
   messageId: string | null;
   offsetMs: number;
   sessionId: string;
+  /**
+   * A pergunta simulada (11/11/2026, D77; source 'scripted' na 202611140001): feita por uma pessoa da lista, sem aluno
+   * (`userId` nulo), com o nome e a foto da pessoa; fica fora de todo numero e so a equipe responde no fio. O selo
+   * "Simulada" aparece so no console. Lida pelo user_id nulo (so a simulada tem), sem coluna nova nas listas de sempre.
+   */
+  simulated: boolean;
   status: QuestionStatus;
   upvotes: number;
-  userId: string;
+  /** Quem perguntou; nulo so na pergunta simulada. */
+  userId: string | null;
 };
 
 export type ChatConsent = {
@@ -1173,9 +1189,41 @@ export type SimulatedSaleNotices = { enabled: boolean; items: SimulatedSaleNotic
 /** O que o fim da sessao congela em `simulation_summary` (so o bloco Simulacao le). */
 export type SimulationTotals = { counterMax: number; joinsShown: number; saleNoticesShown: number };
 
+/**
+ * Uma mudanca dos participantes simulados no ar (docs/30 D79; webinar_simulation_changes, migracao 202611140002): a
+ * regra do contador que vale a partir de `atMs` no relogio da Simulacao (simulationClockMs), com a subida ou a descida
+ * em linha reta (SIMULATION_LIMITS.countRampSeconds) a partir do numero que a turma via. Na ordem do relogio.
+ */
+export type SimulationCountChange = { atMs: number; rule: SimulatedCountRule };
+
+/** De onde veio a mudanca dos participantes simulados: o console da sessao ou o card Simulacao do editor. */
+export const SIMULATION_CHANGE_SOURCES = ["console", "editor"] as const;
+export type SimulationChangeSource = (typeof SIMULATION_CHANGE_SOURCES)[number];
+
+/**
+ * Uma linha de webinar_simulation_changes (D79 e D80): a auditoria de cada mudanca dos participantes simulados, com a
+ * frase confirmada, quem, quando e de onde. `atMs` nulo e a mudanca de antes do comeco (ela trocou a regra da sessao,
+ * simulated_count_rule, e fica so no registro); com numero, vale no ar a partir dali (SimulationCountChange).
+ */
+export type SimulationChangeRecord = {
+  ackText: string;
+  atMs: number | null;
+  changedAt: string;
+  changedBy: string | null;
+  id: string;
+  rule: SimulatedCountRule;
+  sessionId: string;
+  source: SimulationChangeSource;
+};
+
 /** As colunas de Simulacao da fase 4 numa sessao (lidas so pelo codigo da Simulacao, nunca por uma metrica real). */
 export type SessionSimulation = {
   countRule: SimulatedCountRule;
+  /**
+   * As mudancas do contador depois do comeco (D79), na ordem do relogio; ausente ou vazia, so `countRule` (a regra de
+   * antes do comeco, que nunca muda no ar). As mudancas de antes do comeco ja trocaram `countRule` e nao entram aqui.
+   */
+  countChanges?: SimulationCountChange[];
   joins: SimulatedJoins;
   saleNotices: SimulatedSaleNotices;
   /** A semente do contador e das entradas (so no servidor; nunca vai para o aluno). */
@@ -1196,7 +1244,11 @@ export const SIMULATION_LIMITS = {
   /** A janela que GET /api/webinars/[id]/simulation devolve de cada vez (como o chat, docs/30 §6.6). */
   feedWindowSeconds: 120,
   /** O passo do contador na janela: um ponto a cada 15 s (o mesmo ritmo do sinal de presenca). */
-  counterStepSeconds: 15
+  counterStepSeconds: 15,
+  /** Os participantes simulados mudados no ar (D79): sobem ou descem em linha reta em 90 s, nunca de uma vez. */
+  countRampSeconds: 90,
+  /** No maximo 200 mudancas por sessao (a conta de cada ponto percorre as mudancas). */
+  countChangesMax: 200
 } as const;
 
 export function defaultSimulatedCountRule(): SimulatedCountRule {

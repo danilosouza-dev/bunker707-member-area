@@ -32,6 +32,11 @@ const ONOFF_SALES = [
 
 export type SimulationRulesFieldsProps = {
   disabled: boolean;
+  /**
+   * Sem o bloco do contador (docs/30 D79): a sessao ja comecou e os participantes simulados mudam pelo controle proprio
+   * (simulation-audience-control.tsx); so as entradas e os avisos de venda, travados, ficam aqui.
+   */
+  hideCount?: boolean;
   /** Os erros de simulationRulesOfForm (por campo). */
   errors: Record<string, string>;
   form: SimulationForm;
@@ -75,7 +80,7 @@ function NumberField(props: { disabled: boolean; error?: string; hint?: ReactNod
   );
 }
 
-export function SimulationRulesFields({ disabled, errors, form, idBase, live = false, onChange }: SimulationRulesFieldsProps) {
+export function SimulationRulesFields({ disabled, errors, form, hideCount = false, idBase, live = false, onChange }: SimulationRulesFieldsProps) {
   const minuteLabel = live ? COPY.avisoMinutoLive : COPY.avisoMinuto;
   const minuteHint = live ? COPY.avisoMinutoLiveDica : COPY.avisoMinutoDica;
   const patch = (next: Partial<SimulationForm>) => onChange({ ...form, ...next });
@@ -83,38 +88,40 @@ export function SimulationRulesFields({ disabled, errors, form, idBase, live = f
 
   return (
     <div className="flex min-w-0 flex-col gap-3" data-simulation-rules="">
-      <Block hint={simulationCountHint(form)} id={`${idBase}-contador`} kind="contador" title={COPY.contador}>
-        <PillGroup ariaLabel={COPY.contador} disabled={disabled} name={`${idBase}-contador-modo`} onChange={(countMode) => patch({ countMode })} options={COUNT_OPTIONS} value={form.countMode} />
-        {form.countMode === "fixed" ? (
-          <NumberField
-            disabled={disabled}
-            error={errors.base}
-            id={`${idBase}-base`}
-            label={COPY.somar}
-            max={SIMULATION_LIMITS.countMax}
-            min={0}
-            onChange={(base) => patch({ base, peak: base })}
-            value={form.base}
-          />
-        ) : null}
-        {form.countMode === "curve" ? (
-          <div className="grid min-w-0 gap-3 sm:grid-cols-3">
-            <NumberField disabled={disabled} error={errors.base} id={`${idBase}-base`} label={COPY.minimo} max={SIMULATION_LIMITS.countMax} min={0} onChange={(base) => patch({ base })} value={form.base} />
-            <NumberField disabled={disabled} error={errors.peak} id={`${idBase}-peak`} label={COPY.maximo} max={SIMULATION_LIMITS.countMax} min={0} onChange={(peak) => patch({ peak })} value={form.peak} />
+      {hideCount ? null : (
+        <Block hint={simulationCountHint(form)} id={`${idBase}-contador`} kind="contador" title={COPY.contador}>
+          <PillGroup ariaLabel={COPY.contador} disabled={disabled} name={`${idBase}-contador-modo`} onChange={(countMode) => patch({ countMode })} options={COUNT_OPTIONS} value={form.countMode} />
+          {form.countMode === "fixed" ? (
             <NumberField
               disabled={disabled}
-              error={errors.jitter}
-              hint={COPY.variacaoDica}
-              id={`${idBase}-jitter`}
-              label={COPY.variacao}
-              max={SIMULATION_LIMITS.jitterMax}
+              error={errors.base}
+              id={`${idBase}-base`}
+              label={COPY.somar}
+              max={SIMULATION_LIMITS.countMax}
               min={0}
-              onChange={(jitter) => patch({ jitter })}
-              value={form.jitter}
+              onChange={(base) => patch({ base, peak: base })}
+              value={form.base}
             />
-          </div>
-        ) : null}
-      </Block>
+          ) : null}
+          {form.countMode === "curve" ? (
+            <div className="grid min-w-0 gap-3 sm:grid-cols-3">
+              <NumberField disabled={disabled} error={errors.base} id={`${idBase}-base`} label={COPY.minimo} max={SIMULATION_LIMITS.countMax} min={0} onChange={(base) => patch({ base })} value={form.base} />
+              <NumberField disabled={disabled} error={errors.peak} id={`${idBase}-peak`} label={COPY.maximo} max={SIMULATION_LIMITS.countMax} min={0} onChange={(peak) => patch({ peak })} value={form.peak} />
+              <NumberField
+                disabled={disabled}
+                error={errors.jitter}
+                hint={COPY.variacaoDica}
+                id={`${idBase}-jitter`}
+                label={COPY.variacao}
+                max={SIMULATION_LIMITS.jitterMax}
+                min={0}
+                onChange={(jitter) => patch({ jitter })}
+                value={form.jitter}
+              />
+            </div>
+          ) : null}
+        </Block>
+      )}
 
       <Block hint={COPY.entradasDica} id={`${idBase}-entradas`} kind="entradas" title={COPY.entradas}>
         <PillGroup

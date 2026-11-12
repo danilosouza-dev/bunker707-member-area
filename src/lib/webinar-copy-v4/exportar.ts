@@ -140,7 +140,13 @@ export const EXPORTAR_COPY = {
     entradas: "Entradas simuladas",
     avisosDeVenda: "Avisos de venda simulados",
     apareceram: (n: number) => (n === 1 ? "1 apareceu" : `${n} apareceram`),
-    porSoltaEm: "Comentários do roteiro por Solta em"
+    porSoltaEm: "Comentários do roteiro por Solta em",
+    /* Os participantes simulados mudados a qualquer momento (docs/30 D80, 11/11/2026). */
+    mudancas: (n: number) => (n === 1 ? "Participantes simulados: 1 mudança" : `Participantes simulados: ${n} mudanças`),
+    mudanca: (quando: string, valor: string, nome: string, origem: string) => `${quando} · ${valor} · ${nome}, ${origem}`,
+    antesDoComeco: "antes do começo",
+    valor: (n: number | null) => (n === null ? "faixa que varia" : `+${n.toLocaleString("pt-BR")}`),
+    origens: { console: "pelo console", editor: "pelo editor" }
   },
   quedas: {
     trechoDaTranscricao: "No vídeo, nesse minuto:",

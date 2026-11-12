@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import "./support/resolve-extensionless-ts.mjs";
 
@@ -7,7 +8,9 @@ import "./support/resolve-extensionless-ts.mjs";
 // webinar_room_joined; o nome da sala; quem ve qual botao (Apresentador, co-apresentador, Equipe moderadora ou nao, quem
 // publica); a sala de espera da Sessao de pratica, da tranca e da Sala de espera; o reducer da sala (quem esta, a fila
 // de maos com Pular e Abaixar, a sala de espera, o palco, o destaque, a gravacao); o "Gravar" da fila uma vez por
-// pedido; a ancora uma vez; o cartao Gravacao; os rotulos do silencio; e a previa do "Alinhar chat".
+// pedido; a ancora uma vez; o cartao Gravacao; os rotulos do silencio; a previa do "Alinhar chat"; e o microfone
+// sozinho sem teto (D84, 11/11/2026): a moderacao de audio desligada com a politica ligada e nada fechando o microfone de
+// ninguem por conta (o vigia de 4 alunos saiu).
 
 const model = await import("../src/server/webinars/live-console-model.ts");
 const { PROIBIDAS_WEBINARIO, WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
@@ -392,7 +395,7 @@ test("ao virar moderador, o apresentador liga a moderacao de audio; a de video s
   assert.deepEqual(model.presenterSetupCommands({ allowStudentCamera: true, role: "team", selfUnmute: false }), [], "a Equipe nao comanda a sala");
 });
 
-test("microfone sozinho ligado (docs/31 caminho A): o preparo nao manda a moderacao de audio (o vigia decide); o resto fica", () => {
+test("microfone sozinho ligado (docs/31 caminho A): o preparo nao manda a moderacao de audio (ela fica desligada, D84); o resto fica", () => {
   assert.deepEqual(model.presenterSetupCommands({ allowStudentCamera: true, role: "host", selfUnmute: true }), [["setFollowMe", true]]);
   assert.deepEqual(model.presenterSetupCommands({ allowStudentCamera: false, role: "co_host", selfUnmute: true }), [["toggleModeration", true, "video"]]);
   assert.deepEqual(model.presenterSetupCommands({ allowStudentCamera: true, role: "team", selfUnmute: true }), []);
@@ -414,58 +417,68 @@ test("ao virar moderador, nenhum papel manda a moderacao de tela: na tag o 'desk
   }
 });
 
-/* O vigia do microfone sozinho (micLimitStep, teto MIC_LIMIT = 4). */
-const vigia = (extra = {}) => ({
-  audio: {},
-  lastToggleMs: null,
-  moderationOn: false,
-  nowMs: NOW,
-  order: [],
-  policy: true,
-  roles: {},
-  selfId: "p-eu",
-  ...extra
-});
-/** n alunos com o microfone no ar, abertos na ordem a1, a2, ... */
-const falando = (n) => {
-  const ids = Array.from({ length: n }, (_, index) => `a${index + 1}`);
-  return { audio: Object.fromEntries(ids.map((id) => [id, true])), order: ids, roles: Object.fromEntries(ids.map((id) => [id, "participant"])) };
-};
+/*
+ * O microfone sozinho sem teto (D84, 11/11/2026: "Tem que ficar liberado para todo mundo"). O vigia de 4 alunos
+ * (micLimitStep, MIC_LIMIT, MIC_LIMIT_TOGGLE_MS e micOpenOrder, do V2-A60) saiu junto com os testes dele; no lugar, o
+ * passo que so mantem a moderacao de audio desligada com a politica ligada (selfUnmuteModerationStep).
+ */
 
-test("vigia do microfone: abaixo de 4 quer a moderacao desligada; com 4 quer ligada; com 5 silencia o mais recente", () => {
-  assert.equal(model.MIC_LIMIT, 4);
-  assert.deepEqual(model.micLimitStep(vigia({ ...falando(3), moderationOn: true })), { mute: [], toggle: false }, "3 falando: todos podem abrir");
-  assert.deepEqual(model.micLimitStep(vigia({ ...falando(3), moderationOn: false })), { mute: [], toggle: null }, "o motor ja esta como o querido: nada");
-  assert.deepEqual(model.micLimitStep(vigia({ ...falando(4), moderationOn: false })), { mute: [], toggle: true }, "4 falando: lota");
-  assert.deepEqual(model.micLimitStep(vigia({ ...falando(5), moderationOn: true })), { mute: ["a5"], toggle: null }, "o quinto que abriu e silenciado");
-  assert.deepEqual(model.micLimitStep(vigia({ ...falando(3), moderationOn: null })), { mute: [], toggle: false }, "sem leitura do motor, manda o querido");
+test("D84 sem teto: o vigia de 4 alunos saiu do modelo (nenhum MIC_LIMIT, micLimitStep, MIC_LIMIT_TOGGLE_MS nem micOpenOrder)", async () => {
+  for (const nome of ["MIC_LIMIT", "MIC_LIMIT_TOGGLE_MS", "micLimitStep", "micOpenOrder"]) {
+    assert.equal(model[nome], undefined, `live-console-model sem ${nome}`);
+  }
+  const { MIC_LIMIT } = await import("../src/server/webinars/model.ts");
+  assert.equal(MIC_LIMIT, undefined, "model.ts sem o teto");
 });
 
-test("vigia do microfone: o silenciado e o 5º que abriu pela ordem, nunca o primeiro da lista (a ordem das chaves nao conta)", () => {
-  // As chaves na ordem contraria a de quem abriu: o desenho sem ordem silenciaria o a1, que abriu primeiro.
-  const audio = { a5: true, a4: true, a3: true, a2: true, a1: true };
-  const roles = { a1: "participant", a2: "participant", a3: "participant", a4: "participant", a5: "participant" };
-  assert.deepEqual(model.micLimitStep(vigia({ audio, moderationOn: true, order: ["a1", "a2", "a3", "a4", "a5"], roles })).mute, ["a5"]);
-  assert.deepEqual(model.micLimitStep(vigia({ audio, moderationOn: true, order: ["a3", "a1", "a5", "a2", "a4"], roles })).mute, ["a4"]);
-  // micOpenOrder: quem fechou sai, quem continua fica no lugar, quem abriu agora vai para o fim.
-  assert.deepEqual(model.micOpenOrder(["a1", "a2", "a3"], { a1: true, a3: true, a9: true }), ["a1", "a3", "a9"]);
-  assert.deepEqual(model.micOpenOrder([], { a2: true, a1: false }), ["a2"]);
+test("D84 microfone sozinho ligado: a primeira leitura da moderacao de audio ligada a desliga uma vez; ja desligada, nada; sem leitura, espera", () => {
+  const passo = (extra = {}) => model.selfUnmuteModerationStep({ checked: false, moderationOn: true, policy: true, ...extra });
+  assert.deepEqual(passo(), { checked: true, toggleOff: true }, "a moderacao ligada (o preparo de antes, ou a politica ligada agora): desliga");
+  assert.deepEqual(passo({ moderationOn: false }), { checked: true, toggleOff: false }, "ja desligada: so marca que conferiu");
+  assert.deepEqual(passo({ moderationOn: null }), { checked: false, toggleOff: false }, "sem leitura do motor: espera a leitura");
+  assert.deepEqual(passo({ checked: true }), { checked: true, toggleOff: false }, "ja conferida nesta politica e neste iframe: nada (nunca disputa com o fechar de outro console)");
 });
 
-test("vigia do microfone: moderadores, quem nao tem papel lido e o proprio console nao contam", () => {
-  const audio = { a1: true, a2: true, a3: true, co: true, eu: true, novo: true, sem: true };
-  const roles = { a1: "participant", a2: "none", a3: "participant", co: "moderator", eu: "participant", novo: "participant" };
-  const order = ["co", "eu", "a1", "a2", "a3", "sem"];
-  assert.deepEqual(model.micLimitStep(vigia({ audio: { ...audio, novo: false }, moderationOn: true, order, roles, selfId: "eu" })), { mute: [], toggle: false }, "3 alunos contam, nao 6");
-  assert.deepEqual(model.micLimitStep(vigia({ audio, moderationOn: false, order: [...order, "novo"], roles, selfId: "eu" })), { mute: [], toggle: true }, "o quarto aluno lota");
+test("D84 microfone sozinho desligado: nada (o preparo e o fechar da turma cuidam da moderacao) e a conferencia recomeca para a proxima vez que ligar", () => {
+  for (const moderationOn of [true, false, null]) {
+    assert.deepEqual(model.selfUnmuteModerationStep({ checked: true, moderationOn, policy: false }), { checked: false, toggleOff: false }, `moderationOn ${moderationOn}`);
+  }
+  // Desligou (o fechar ligou a moderacao) e ligou de novo: a moderacao ligada e desligada de novo, uma vez.
+  let checked = model.selfUnmuteModerationStep({ checked: true, moderationOn: true, policy: false }).checked;
+  const religou = model.selfUnmuteModerationStep({ checked, moderationOn: true, policy: true });
+  assert.deepEqual(religou, { checked: true, toggleOff: true });
+  checked = religou.checked;
+  assert.equal(model.selfUnmuteModerationStep({ checked, moderationOn: true, policy: true }).toggleOff, false, "e so uma vez");
 });
 
-test("vigia do microfone: a histerese segura o segundo toggle antes de 2 s; a politica desligada nao faz nada", () => {
-  assert.equal(model.MIC_LIMIT_TOGGLE_MS, 2_000);
-  assert.deepEqual(model.micLimitStep(vigia({ ...falando(4), lastToggleMs: NOW - 1_999, moderationOn: false })), { mute: [], toggle: null }, "1,999 s depois: espera");
-  assert.deepEqual(model.micLimitStep(vigia({ ...falando(4), lastToggleMs: NOW - 2_000, moderationOn: false })), { mute: [], toggle: true }, "2 s depois: manda");
-  assert.deepEqual(model.micLimitStep(vigia({ ...falando(5), lastToggleMs: NOW - 100, moderationOn: false })).mute, ["a5"], "o mudo nao espera a histerese");
-  assert.deepEqual(model.micLimitStep(vigia({ ...falando(9), moderationOn: false, policy: false })), { mute: [], toggle: null }, "politica desligada: o preparo ja ligou a moderacao");
+test("D84 com a politica ligada, nada fecha o microfone de ninguem por conta: com 10 alunos (ou 50) falando ao mesmo tempo, nenhum mudo e nenhuma moderacao ligada; o preparo nao liga a de audio", () => {
+  for (const quantos of [5, 10, 50]) {
+    // A sala com `quantos` alunos de microfone aberto: o passo nem recebe a conta (o que sobra na entrada e ignorado).
+    const audio = Object.fromEntries(Array.from({ length: quantos }, (_, index) => [`a${index + 1}`, true]));
+    const roles = Object.fromEntries(Object.keys(audio).map((id) => [id, "participant"]));
+    for (const moderationOn of [false, true, null]) {
+      for (const checked of [false, true]) {
+        const step = model.selfUnmuteModerationStep({ audio, checked, moderationOn, policy: true, roles });
+        assert.deepEqual(Object.keys(step).sort(), ["checked", "toggleOff"], "o passo nunca devolve quem silenciar");
+        assert.ok(step.toggleOff === false || moderationOn === true, `${quantos} falando: so desliga a moderacao, nunca liga`);
+      }
+    }
+  }
+  for (const role of ["host", "co_host"]) {
+    const preparo = model.presenterSetupCommands({ allowStudentCamera: true, role, selfUnmute: true });
+    assert.ok(!preparo.some(([name, , mediaType]) => name === "toggleModeration" && mediaType === "audio"), `${role}: o preparo nao liga a moderacao de audio`);
+    assert.ok(!preparo.some(([name]) => name === "muteRemoteParticipant" || name === "muteEveryone"), `${role}: o preparo nao silencia ninguem`);
+  }
+
+  // O console de quem apresenta (a fonte): o efeito do microfone sozinho so manda o toggleModeration desligado; o unico
+  // mudo de audio do arquivo e o fechar da turma (micCloseCommands), que sai so quando a equipe desliga a politica.
+  const fonte = readFileSync(new URL("../src/components/admin/v2/communication/webinars/session-console/live-room-panel.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(fonte, /micLimitStep|MIC_LIMIT|micOpenOrder|micAskedRef|micToggleAtRef/);
+  assert.doesNotMatch(fonte, /command\("muteRemoteParticipant", [a-zA-Z.]+, "audio"\)/, "nenhum mudo de audio por conta no console");
+  assert.match(fonte, /selfUnmuteModerationStep\(\{ checked: micCheckedRef\.current, moderationOn: audioModeration, policy: selfUnmute \}\)/);
+  assert.match(fonte, /step\.toggleOff && !command\("toggleModeration", false, "audio"\)/);
+  assert.equal((fonte.match(/"toggleModeration", true, "audio"/g) ?? []).length, 0, "o console nunca liga a moderacao de audio por conta (o preparo e o fechar vem do modelo)");
+  assert.match(fonte, /for \(const \[name, \.\.\.args\] of micCloseCommands\(/, "o fechar da turma so no applySelfUnmute(false)");
 });
 
 test("fechar o microfone da turma: liga a moderacao de audio, silencia os alunos com o microfone no ar fora do palco e libera de novo quem esta no palco ou foi liberado; nunca muteEveryone", () => {

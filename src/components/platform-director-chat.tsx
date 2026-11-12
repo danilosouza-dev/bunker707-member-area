@@ -25,6 +25,7 @@ import Link from "next/link";
 import * as React from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useAutoGrowTextarea } from "@/components/use-auto-grow-textarea";
 import {
   DirectorAvatar,
   DirectorConversationSkeleton,
@@ -421,13 +422,9 @@ export function PlatformDirectorChat({ defaultOpen = false, onNavigate, studentN
     messagesEndRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [messages, sending]);
 
-  // O campo cresce com o texto até ~6 linhas; depois rola por dentro.
-  React.useLayoutEffect(() => {
-    const input = inputRef.current;
-    if (!input) return;
-    input.style.height = "auto";
-    input.style.height = `${Math.min(input.scrollHeight, composerMaxHeight)}px`;
-  }, [historyOpen, open, question]);
+  // O campo cresce com o texto até ~6 linhas; depois rola por dentro. Mede de novo quando aparece (o chat que abre, o
+  // histórico que fecha) ou muda de largura (docs/30 D81).
+  useAutoGrowTextarea(inputRef, question, composerMaxHeight);
 
   React.useEffect(() => {
     if (!conversationPendingRename) return;

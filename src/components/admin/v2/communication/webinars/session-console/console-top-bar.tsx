@@ -32,7 +32,8 @@ import type { WebinarSession } from "@/server/webinars/model";
 // sessao ficam desligados com o motivo (aria-disabled, focaveis, o motivo lido junto e mostrado no aviso ao clicar).
 // Abaixo de lg o topo quebra em duas linhas: a seta e o titulo; depois o seletor e os botoes, que rolam de lado sem
 // barra. A partir de lg e uma faixa so: o titulo encolhe com reticencias e os botoes ficam inteiros (sem rolagem, que
-// cortaria as dicas). As cores pelos tokens do tema do console.
+// cortaria as dicas). As cores pelos tokens do tema do console. Os presentes ("1 presente · +300 simulados") sao o
+// botao que abre os participantes simulados (docs/30 D79; `onPresent`), sublinhados em pontos, com o nome completo.
 
 const copy = WEBINAR_ADMIN_COPY.console;
 const liveCopy = WEBINAR_COPY.consoleAoVivo;
@@ -60,6 +61,11 @@ type ConsoleTopBarProps = {
   onToggleTheme: () => void;
   /** A leitura do retrato: a regiao viva e o sem resposta (consolePollStep). */
   poll: ConsolePoll;
+  /**
+   * O toque nos presentes (docs/30 D79): abre os participantes simulados na entrada Presença. Sem ele (o retrato sem o
+   * controle: o Replay, a cancelada), os presentes ficam so como texto.
+   */
+  onPresent?: () => void;
   /** "7 presentes · pico 9" (consolePresenceBadge); nulo sem sessao. */
   presentLabel: string | null;
   /** Os presentes so abaixo de sm (a live: a partir dai eles ficam no palco, em cima a direita). */
@@ -151,9 +157,22 @@ export function ConsoleTopBar(props: ConsoleTopBarProps) {
             {props.presentLabel ? (
               <span className={cn(props.presentNarrowOnly && "sm:hidden")} data-console-status="">
                 {" · "}
-                <span className="tabular-nums" data-console-present="">
-                  {props.presentLabel}
-                </span>
+                {props.onPresent ? (
+                  <button
+                    aria-label={WEBINAR_COPY.simulacao.plateia.abrirControle(props.presentLabel)}
+                    className={cn("rounded-sm tabular-nums underline decoration-dotted underline-offset-4 hover:decoration-solid", ROOM_FOCUS)}
+                    data-console-audience-open="top"
+                    data-console-present=""
+                    onClick={props.onPresent}
+                    type="button"
+                  >
+                    {props.presentLabel}
+                  </button>
+                ) : (
+                  <span className="tabular-nums" data-console-present="">
+                    {props.presentLabel}
+                  </span>
+                )}
               </span>
             ) : null}
           </p>

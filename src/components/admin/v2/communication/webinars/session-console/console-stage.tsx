@@ -5,7 +5,7 @@ import { useEffect, useState, type CSSProperties, type RefObject } from "react";
 import { columnWanted, stageColumnShown } from "@/components/member/webinars/room/live-room-model";
 import { stageVideoRightPx } from "@/components/member/webinars/room/room-layout-model";
 import { RoomStageBadges, RoomStagePill } from "@/components/member/webinars/room/room-stage-badges";
-import { RoomButton } from "@/components/member/webinars/room/room-ui";
+import { ROOM_FOCUS, RoomButton } from "@/components/member/webinars/room/room-ui";
 import { useStageGeometry } from "@/components/member/webinars/room/use-stage-geometry";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
@@ -31,7 +31,8 @@ import type { LiveRoomHandle } from "./live-room-panel";
 // gravador) e o co-apresentador e a Equipe tiram ou poem a coluna pela largura, como o aluno (columnWanted).
 // Nenhum texto cita o motor da sala. A Na tela (docs/30 §2.4; especificacao de 10/11/2026, §6.1): os cartoes do banner
 // e do QR Code nao sao desenhados neste palco (o menu das miniaturas do motor precisa continuar livre); com algum deles
-// na tela, a pilula neutra "Na tela: Banner · QR Code" em cima a direita, depois dos presentes.
+// na tela, a pilula neutra "Na tela: Banner · QR Code" em cima a direita, depois dos presentes. Os presentes ("12
+// presentes · pico 14 · +300 simulados") sao o botao que abre os participantes simulados (docs/30 D79; `onPresent`).
 
 const copy = WEBINAR_COPY.consoleAoVivo;
 /**
@@ -47,6 +48,8 @@ type ConsoleStageProps = {
   className: string;
   handle: LiveRoomHandle;
   live: LiveConsoleSnapshot;
+  /** O toque nos presentes (docs/30 D79): abre os participantes simulados. Sem ele, a pilula fica so como texto. */
+  onPresent?: () => void;
   /** "12 presentes · pico 14" (consolePresenceBadge); nulo, o canto de cima a direita fica vazio. */
   presentLabel: string | null;
   /** O nome do apresentador da pagina (o selo de outro moderador no video grande, V2-A25); nulo, esse selo nao aparece. */
@@ -91,7 +94,7 @@ function frameMessage(handle: LiveRoomHandle, status: WebinarSession["status"], 
   }
 }
 
-export function ConsoleStage({ busy, className, handle, live, presentLabel, presenterName, screenLabel = null, session, stageRef, topLeft }: ConsoleStageProps) {
+export function ConsoleStage({ busy, className, handle, live, onPresent, presentLabel, presenterName, screenLabel = null, session, stageRef, topLeft }: ConsoleStageProps) {
   const geometry = useStageGeometry(stageRef);
   const { joined, room } = handle;
   const frameWidth = geometry.frameWidth;
@@ -132,7 +135,21 @@ export function ConsoleStage({ busy, className, handle, live, presentLabel, pres
         topRight={
           presentLabel || screenLabel ? (
             <>
-              {presentLabel ? (
+              {presentLabel && onPresent ? (
+                // A pilula e o botao dos participantes simulados (D79): a camada dos selos nao recebe o toque, o botao sim.
+                <button
+                  aria-label={WEBINAR_COPY.simulacao.plateia.abrirControle(presentLabel)}
+                  className={cn("pointer-events-auto rounded-full", ROOM_FOCUS)}
+                  data-console-audience-open="stage"
+                  onClick={onPresent}
+                  type="button"
+                >
+                  <RoomStagePill className="tabular-nums underline decoration-dotted underline-offset-4" data-room-badge="present">
+                    <Users aria-hidden="true" />
+                    {presentLabel}
+                  </RoomStagePill>
+                </button>
+              ) : presentLabel ? (
                 <RoomStagePill className="tabular-nums" data-room-badge="present">
                   <Users aria-hidden="true" />
                   {presentLabel}

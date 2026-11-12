@@ -10,6 +10,12 @@
 // webinar-room.tsx usa este hook no cabecalho ("{n} assistindo" = real + parte simulada) e passa o estado para
 // room-simulation.tsx. Sem regra ligada (ou desligado: "ver como", replay, sessao encerrada), o contador e o real e
 // nada simulado aparece. Nada aqui grava em student_events.
+// Os participantes simulados mudados a qualquer momento (docs/30 D79, 11/11/2026): a consulta de 5 s do chat ja traz o
+// estado da Na tela quando o carimbo da sessao muda, e ele leva `simulationKey` (o resumo da decisao da Simulacao).
+// Quando a chave muda (nunca a primeira, a da pagina), a sala pede a janela do offset de agora de novo, depois de 0 a 3
+// s ao acaso (mil alunos nao pedem no mesmo segundo), sem esperar a janela seguinte nem os 5 min de quando nada estava
+// ligado, e a janela que chega substitui as de antes (o numero do futuro das janelas velhas ja nao vale). Nenhuma
+// consulta periodica nova: a chave vem na consulta que ja existe.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { SimulationFeed } from "@/server/webinars/model";
@@ -40,8 +46,13 @@ export type UseRoomSimulationInput = {
   enabled: boolean;
   getOffsetMs: () => number;
   sessionId: string;
+  /** O resumo da decisao da Simulacao da Na tela (useRoomScreen, D79): mudou, a janela e pedida de novo. Nulo sem estado. */
+  simulationKey?: string | null;
   webinarId: string;
 };
+
+/** Ate quanto a sala espera depois de a chave mudar (espalha os pedidos da turma, como as enquetes). */
+export const SIMULATION_REFRESH_JITTER_MS = 3_000;
 
 const NONE: RoomSimulationState = { displayCount: (real) => real, enabled: false, joins: [], saleNotices: [] };
 
@@ -75,6 +86,11 @@ export async function fetchSimulationFeed(webinarId: string, sessionId: string, 
 export type SimulationChecker = {
   /** A conferencia de 5 s: pede a janela que falta, se nao esta esperando. */
   check: () => Promise<void>;
+  /**
+   * A decisao da Simulacao mudou (D79): esquece a janela e a espera; a proxima conferencia pede do offset de agora, e a
+   * janela que chega substitui as de antes. Um pedido que ja estava a caminho e descartado (veio da regra velha).
+   */
+  refresh: () => void;
   /** A sala saiu (ou desligou): nada mais e pedido nem entregue. */
   stop: () => void;
 };
@@ -90,13 +106,16 @@ export function createSimulationChecker(deps: {
   fetchFeed: (range: SimulationWindow) => Promise<SimulationFeed>;
   getOffsetMs: () => number;
   now: () => number;
-  onFeed: (feed: SimulationFeed, offsetMs: number) => void;
+  /** `replace`: a primeira janela depois de um refresh (D79), que substitui as de antes. */
+  onFeed: (feed: SimulationFeed, offsetMs: number, replace: boolean) => void;
 }): SimulationChecker {
   let stopped = false;
   let busy = false;
   let current: SimulationWindow | null = null;
   let waitUntil = 0;
   let lastOffsetMs = Number.NaN;
+  let generation = 0;
+  let replace = false;
 
   return {
     async check() {
@@ -116,22 +135,33 @@ export function createSimulationChecker(deps: {
         return;
       }
       busy = true;
+      const asked = generation;
       try {
         const feed = await deps.fetchFeed(next);
-        if (stopped) {
+        if (stopped || asked !== generation) {
           return;
         }
         current = feed.enabled ? next : null;
         if (!feed.enabled) {
           waitUntil = deps.now() + SIMULATION_ROOM.idleRetryMs;
         }
-        deps.onFeed(feed, offsetMs);
+        const fresh = replace;
+        replace = false;
+        deps.onFeed(feed, offsetMs, fresh);
       } catch {
         // A janela anterior continua valendo; a proxima tentativa vem depois da espera.
-        waitUntil = deps.now() + SIMULATION_ROOM.failureRetryMs;
+        if (asked === generation) {
+          waitUntil = deps.now() + SIMULATION_ROOM.failureRetryMs;
+        }
       } finally {
         busy = false;
       }
+    },
+    refresh() {
+      generation += 1;
+      current = null;
+      waitUntil = 0;
+      replace = true;
     },
     stop() {
       stopped = true;
@@ -141,8 +171,10 @@ export function createSimulationChecker(deps: {
 
 export function useRoomSimulation(input: UseRoomSimulationInput): RoomSimulationState {
   const { enabled, sessionId, webinarId } = input;
+  const simulationKey = input.simulationKey ?? null;
   const [data, setData] = useState<SimulationRoomData>(EMPTY_SIMULATION_ROOM);
   const offsetRef = useRef(input.getOffsetMs);
+  const checkerRef = useRef<SimulationChecker | null>(null);
 
   useEffect(() => {
     offsetRef.current = input.getOffsetMs;
@@ -157,8 +189,9 @@ export function useRoomSimulation(input: UseRoomSimulationInput): RoomSimulation
       fetchFeed: (range) => fetchSimulationFeed(webinarId, sessionId, range, controller.signal),
       getOffsetMs: () => offsetRef.current(),
       now: () => Date.now(),
-      onFeed: (feed, offsetMs) => setData((previous) => mergeSimulationFeed(previous, feed, offsetMs))
+      onFeed: (feed, offsetMs, replace) => setData((previous) => mergeSimulationFeed(replace ? EMPTY_SIMULATION_ROOM : previous, feed, offsetMs))
     });
+    checkerRef.current = checker;
 
     // A primeira janela sai do proprio efeito (sem setState sincrono nele).
     const first = window.setTimeout(() => void checker.check(), 0);
@@ -168,8 +201,31 @@ export function useRoomSimulation(input: UseRoomSimulationInput): RoomSimulation
       controller.abort();
       window.clearTimeout(first);
       window.clearInterval(timer);
+      if (checkerRef.current === checker) {
+        checkerRef.current = null;
+      }
     };
   }, [enabled, sessionId, webinarId]);
+
+  // A chave que a sala ja tem: a primeira (a da pagina) nao pede nada; cada mudanca pede a janela de novo uma vez (D79).
+  const lastKeyRef = useRef(simulationKey);
+  useEffect(() => {
+    if (!enabled || simulationKey === lastKeyRef.current) {
+      return;
+    }
+    const known = lastKeyRef.current;
+    lastKeyRef.current = simulationKey;
+    if (known === null && simulationKey === null) {
+      return;
+    }
+    const checker = checkerRef.current;
+    if (!checker) {
+      return;
+    }
+    checker.refresh();
+    const id = window.setTimeout(() => void checker.check(), Math.floor(Math.random() * SIMULATION_REFRESH_JITTER_MS));
+    return () => window.clearTimeout(id);
+  }, [enabled, simulationKey]);
 
   return useMemo(() => (enabled ? roomSimulationStateOf(data) : NONE), [data, enabled]);
 }

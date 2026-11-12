@@ -23,6 +23,7 @@ import * as React from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import useSWR, { SWRConfig, useSWRConfig, type SWRConfiguration } from "swr";
+import { useAutoGrowTextarea } from "@/components/use-auto-grow-textarea";
 import { formatMemberRelativeTime } from "@/lib/member-format";
 
 // Tutor IA da aula (aba "Tutor IA"): conversa com historico salvo por aula, respostas em Markdown com
@@ -428,14 +429,9 @@ function LessonAiTutorContent({
     return () => mediaQuery.removeEventListener("change", handleChange);
   }, []);
 
-  React.useEffect(() => {
-    // Campo cresce com o texto ate 6 linhas; depois rola por dentro.
-    const textarea = inputRef.current;
-
-    if (!textarea) return;
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, TUTOR_TEXTAREA_MAX_HEIGHT)}px`;
-  }, [question]);
+  // Campo cresce com o texto ate 6 linhas; depois rola por dentro. Mede de novo quando aparece ou muda de largura
+  // (docs/30 D81).
+  useAutoGrowTextarea(inputRef, question, TUTOR_TEXTAREA_MAX_HEIGHT);
 
   React.useEffect(() => {
     if (!openConversationMenuId) return;

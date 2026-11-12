@@ -809,6 +809,7 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
                 disabled={locked}
                 hasRecording={Boolean(initial?.recordingId) || Boolean(saved.recordingVideoUrl)}
                 initialItems={initial?.scriptItems ?? []}
+                initialPersonas={initial?.personas}
                 initialTranscript={initial?.transcript ?? null}
                 readOnly={archived}
                 sessions={savedSessions}

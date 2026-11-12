@@ -370,7 +370,9 @@ test("D64, o aceite antigo com anonimo ou apelido (na versao de agora) conta com
 
       const sessaoAntes = await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()));
       assert.equal(sessaoAntes.body.data.me.consented, false, `${modo}: a sala mostra a caixa do aceite de novo`);
-      assert.equal(sessaoAntes.body.data.me.displayName, null);
+      // O nome do campo (D82) e o de verdade, nunca o apelido nem o nome guardado no aceite antigo.
+      assert.equal(sessaoAntes.body.data.me.displayName, "Ana S.");
+      assert.equal(sessaoAntes.body.data.me.avatarUrl, FOTO, `${modo}: a propria foto ao lado do campo, antes do aceite`);
 
       const semAceite = await enviar({ body: "oi" });
       assert.equal(semAceite.status, 409, `${modo}: ${JSON.stringify(semAceite.body)}`);
@@ -806,7 +808,8 @@ test("GET session: os campos da fase 2 (relogio, fase, entrada, modo do chat, se
   assert.equal(data.webinar.replaySessionId, REPLAY);
   assert.equal(data.presentNow, 1);
   const semBanimento = { banned: false, kicked: false, muted: false, mutedUntil: null };
-  assert.deepEqual(data.me, { avatarUrl: null, ban: semBanimento, calendarUrl: null, consented: false, displayName: null, registered: false, registeredAt: null });
+  // Antes do aceite, o proprio nome ja vem (D82, 11/11/2026: as iniciais ao lado do campo, que so o aluno ve).
+  assert.deepEqual(data.me, { avatarUrl: null, ban: semBanimento, calendarUrl: null, consented: false, displayName: "Ana S.", registered: false, registeredAt: null });
   assert.equal(data.live, null, "a gravada nao tem o bloco da sala ao vivo (fase 3)");
   assert.equal(data.pinned.body, "link da apostila");
   assert.equal(data.pinned.pinned, true);
@@ -856,6 +859,42 @@ test("GET session: os campos da fase 2 (relogio, fase, entrada, modo do chat, se
   assert.equal((await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${REPLAY}`), contexto())).status, 404);
   assert.equal((await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${REPLAY}&from=0&to=1000`), contexto())).status, 404);
   assert.equal((await heartbeatRoute.POST(pedido(`${WEBINAR}/heartbeat`, "POST", { offsetSeconds: 0, sessionId: REPLAY }), contexto())).status, 404);
+});
+
+test("D82, a foto ou as iniciais de quem escreve: antes do aceite, `me` leva so os dados do proprio aluno (a foto do Perfil e o nome dele); nada de outro aluno, nem com ele no chat; a foto de fora continua nula", async () => {
+  const origemAntes = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://projeto.supabase.co";
+  try {
+    clearAuthorPhotoCache();
+    const { db, userId } = montar({ scheduledAt: Date.now() - 2 * MIN });
+    const foto = (id, arquivo) => `https://projeto.supabase.co/storage/v1/object/public/content-assets/avatars/${id}/${arquivo}`;
+    const MINHA = foto(userId, "ana.webp");
+    db.tables.profiles.find((row) => row.id === userId).avatar_url = MINHA;
+    // Outra aluna, com foto, aceite em dia e uma mensagem no chat da sessao.
+    const OUTRA = "66666666-6666-4666-8666-000000000082";
+    const DELA = foto(OUTRA, "bia.webp");
+    db.tables.profiles.push({ avatar_url: DELA, created_at: iso(Date.now()), email: "bia@bunker707.test", full_name: "Beatriz Lima", id: OUTRA, last_sign_in_at: null, phone: null });
+    db.tables.webinar_chat_consents.push({ consent_version: CHAT_CONSENT_VERSION, consented_at: iso(Date.now() - HOUR), created_at: iso(Date.now() - HOUR), display_mode: "first_name_initial", nickname: null, revoked_at: null, updated_at: iso(Date.now() - HOUR), user_id: OUTRA });
+    db.tables.webinar_chat_messages.push({ approved: true, author_user_id: OUTRA, body: "oi, turma", created_at: iso(Date.now()), deleted_at: null, display_name: "Beatriz L.", id: "cccccccc-aaaa-4000-8000-000000000082", kind: "message", master: false, offset_ms: 30_000, pinned_at: null, reply_to_id: null, role: "student", script_item_id: null, session_id: SESSION, source: "audience", webinar_id: WEBINAR });
+
+    const { body, status } = await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()));
+    assert.equal(status, 200, JSON.stringify(body));
+    const semBanimento = { banned: false, kicked: false, muted: false, mutedUntil: null };
+    assert.deepEqual(body.data.me, { avatarUrl: MINHA, ban: semBanimento, calendarUrl: null, consented: false, displayName: "Ana S.", registered: false, registeredAt: null });
+    const me = JSON.stringify(body.data.me);
+    for (const deOutra of [OUTRA, DELA, "Beatriz", "bia"]) {
+      assert.ok(!me.includes(deOutra), `nada da outra aluna em me (${deOutra})`);
+    }
+
+    // So a foto do Google no perfil (um endereco de fora): sem foto, e o nome continua para as iniciais.
+    clearAuthorPhotoCache();
+    db.tables.profiles.find((row) => row.id === userId).avatar_url = "https://lh3.googleusercontent.com/a/teste=s96-c";
+    const google = (await json(await sessionRoute.GET(pedido(`${WEBINAR}/session?sessao=${SESSION}`), contexto()))).body.data.me;
+    assert.deepEqual([google.avatarUrl, google.displayName, google.consented], [null, "Ana S.", false]);
+  } finally {
+    if (origemAntes === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = origemAntes;
+  }
 });
 
 test("limite de vagas (A12): so quem garantiu a vaga entra; sem ela, as rotas da sala respondem 403 e a sessao diz no_seat sem o video; o replay nao pede vaga", async () => {

@@ -21,7 +21,8 @@ import {
   type ScriptItemDraft
 } from "./model";
 import { NA_TELA_COPY } from "../../lib/webinar-copy-v4/na-tela";
-import { PERSONA_AVATAR_LIMITS, PERSONA_AVATAR_PATH_PATTERN } from "./persona-model";
+import { PESSOAS_COPY as PESSOAS } from "../../lib/webinar-copy-v4/pessoas";
+import { PERSONA_AVATAR_LIMITS, PERSONA_AVATAR_PATH_PATTERN, personaCleanName, personaNameFits } from "./persona-model";
 
 export const CHAT_MESSAGES = {
   answer: "A resposta pode ter até 1.000 caracteres.",
@@ -34,7 +35,7 @@ export const CHAT_MESSAGES = {
   invalid: "Pedido inválido.",
   offset: "Minuto do vídeo inválido.",
   options: "A enquete precisa de 2 a 20 opções.",
-  option: "Cada opção tem até 120 caracteres.",
+  option: "Escreva cada opção (até 120 caracteres).",
   personaName: "Dê um nome a quem fala (até 60 caracteres).",
   phrase: "A frase tem de 2 a 300 caracteres.",
   pollAnswer: "Escolha ao menos uma opção.",
@@ -46,7 +47,7 @@ export const CHAT_MESSAGES = {
   session: "Sessão inválida.",
   simulationAck: "Marque a confirmação para ligar o selo.",
   tooManyItems: "O roteiro aceita até 5.000 mensagens.",
-  tooManyPolls: "Até 20 enquetes por webinário.",
+  tooManyPolls: `Até ${CHAT_LIMITS.pollTemplatesMax} enquetes por webinário.`,
   transcriptTooLong: "A transcrição passa de 2 MB.",
   window: "Janela inválida."
 } as const;
@@ -192,10 +193,16 @@ export const scriptItemDraftSchema: z.ZodType<ScriptItemDraft> = z
     phraseDelayMs: z.number().int().min(CHAT_LIMITS.phraseDelayMinMs).max(CHAT_LIMITS.phraseDelayMaxMs).default(0),
     // R9: a foto de quem comenta, so o caminho da nossa pasta; ausente, a do item fica como esta.
     personaAvatarPath: personaAvatarPathSchema.nullable().optional(),
+    // 11/11/2026 (D75): a pessoa da lista; com ela, o servidor grava a copia dela no item.
+    personaId: uuidSchema.nullable().optional(),
     status: z.enum(SCRIPT_STATUSES).default("draft"),
     triggerKind: z.enum(SCRIPT_TRIGGERS, { error: CHAT_MESSAGES.invalid })
   })
   .superRefine((item, context) => {
+    // A Pergunta (D77) entra na aba Perguntas: o texto cabe na pergunta do aluno.
+    if (item.kind === "question" && Array.from(item.body).length > CHAT_LIMITS.question) {
+      context.addIssue({ code: "custom", message: PESSOAS.erros.pergunta, path: ["body"] });
+    }
     if (item.triggerKind === "at_offset" && item.offsetMs == null) {
       context.addIssue({ code: "custom", message: CHAT_MESSAGES.offset, path: ["offsetMs"] });
     }
@@ -238,18 +245,49 @@ export const fireScriptItemSchema = z.object({ itemId: uuidSchema, sessionId: se
 
 /**
  * O "Novo comentário" do console (adendo de 10/11/2026, R8 e R9): quem comenta (Nome, Foto (opcional), Aparece como) e
- * o Comentário, para "Enviar agora" (sendScriptedComment) ou "Guardar na lista" (saveScriptComment). `applyToName`: o
- * "Usar esta foto em todos os comentários de {nome}", ligado por padrao (so vale com a foto).
+ * o Comentário, para "Enviar agora" (sendScriptedComment) ou "Guardar na lista" (saveScriptComment). O `applyToName` de
+ * 10/11/2026 (o "Usar esta foto em todos os comentários de {nome}") saiu em 11/11/2026: a pagina antiga que ainda manda
+ * a chave e atendida, e a chave e ignorada (a pessoa da lista e a unidade, D75). Desde 11/11/2026 (D75 a D78):
+ * `personaId`, a pessoa da lista (o servidor usa o nome, o papel e a foto dela; o Nome, a Foto e o Aparece como que
+ * vierem junto ficam de fora); sem ela, a pessoa nova (Nome, Foto, Aparece como), que entra na lista ao enviar ou
+ * guardar; e `kind`, o Tipo: "message" (o comentario no chat) ou "question" (a pergunta simulada na aba Perguntas, ate
+ * 500 caracteres, como a pergunta do aluno).
  */
-export const scriptCommentSchema = z.object({
-  applyToName: z.boolean().default(true),
-  body: z.string({ error: COMENTARIOS.erros.comentario }).trim().min(1, COMENTARIOS.erros.comentario).max(CHAT_LIMITS.body, COMENTARIOS.erros.comentario),
-  personaAvatarPath: personaAvatarPathSchema.nullable().default(null),
-  personaName: z.string({ error: COMENTARIOS.erros.nome }).trim().min(1, COMENTARIOS.erros.nome).max(CHAT_LIMITS.personaName, COMENTARIOS.erros.nome),
-  personaRole: z.enum(PERSONA_ROLES).default("student"),
-  sessionId: sessionIdSchema
-});
+export const scriptCommentSchema = z
+  .object({
+    body: z.string({ error: COMENTARIOS.erros.comentario }).trim().min(1, COMENTARIOS.erros.comentario).max(CHAT_LIMITS.body, COMENTARIOS.erros.comentario),
+    kind: z.enum(["message", "question"]).default("message"),
+    personaAvatarPath: personaAvatarPathSchema.nullable().default(null),
+    personaId: uuidSchema.nullable().default(null),
+    personaName: z.string({ error: COMENTARIOS.erros.nome }).trim().min(1, COMENTARIOS.erros.nome).max(CHAT_LIMITS.personaName, COMENTARIOS.erros.nome),
+    personaRole: z.enum(PERSONA_ROLES).default("student"),
+    sessionId: sessionIdSchema
+  })
+  .superRefine((input, context) => {
+    if (input.kind === "question" && Array.from(input.body).length > CHAT_LIMITS.question) {
+      context.addIssue({ code: "custom", message: PESSOAS.erros.pergunta, path: ["body"] });
+    }
+  });
 export type ScriptCommentInput = z.input<typeof scriptCommentSchema>;
+
+/**
+ * Uma pessoa da lista "Pessoas que comentam" (11/11/2026, D75): o Nome (1 a 60, sem espacos sobrando), a Foto (so o
+ * caminho da nossa pasta) e o Aparece como; com `id`, a edicao. O nome repetido no webinario e conferido no servidor.
+ */
+export const savePersonaSchema = z.object({
+  avatarPath: personaAvatarPathSchema.nullable().default(null),
+  id: uuidSchema.nullable().default(null),
+  name: z
+    .string({ error: PESSOAS.erros.nome })
+    .refine((value) => personaNameFits(value), PESSOAS.erros.nome)
+    .transform((value) => personaCleanName(value)),
+  role: z.enum(PERSONA_ROLES).default("student"),
+  webinarId: uuidSchema
+});
+export type SavePersonaInput = z.input<typeof savePersonaSchema>;
+
+/** Remover uma pessoa da lista (os comentarios do roteiro dela ficam com a copia). */
+export const deletePersonaSchema = z.object({ id: uuidSchema });
 
 /**
  * A foto de quem comenta como o navegador manda (data URL WebP ja reduzido a 512 px e ate 100 KB): o teto do texto e o
@@ -289,19 +327,42 @@ export const sessionChatModeSchema = z.object({
   slowModeSeconds: z.union([z.literal(SLOW_MODE_SECONDS[0]), z.literal(SLOW_MODE_SECONDS[1]), z.literal(SLOW_MODE_SECONDS[2]), z.literal(SLOW_MODE_SECONDS[3])]).nullable()
 });
 
-/** Um editor aberto com a pagina antiga ainda manda `anonymous`: o objeto descarta a chave, e a enquete e gravada com falso (D64). */
-export const pollDraftSchema: z.ZodType<PollDraft> = z.object({
-  id: uuidSchema.nullable().optional(),
+/**
+ * Os campos de uma enquete, os mesmos no card Enquetes do editor e na "Nova enquete" do console (D83): o tipo, a
+ * pergunta e de 2 a 20 opcoes de ate 120 caracteres (o id da opcao so vale no editor, que atualiza o modelo).
+ */
+const pollDraftFields = {
   kind: z.enum(POLL_KINDS).default("single"),
   options: z
     .array(z.object({ id: uuidSchema.nullable().optional(), label: z.string().trim().min(1, CHAT_MESSAGES.option).max(CHAT_LIMITS.pollOption, CHAT_MESSAGES.option) }))
     .min(CHAT_LIMITS.pollOptionsMin, CHAT_MESSAGES.options)
     .max(CHAT_LIMITS.pollOptionsMax, CHAT_MESSAGES.options),
   question: z.string({ error: CHAT_MESSAGES.pollQuestion }).trim().min(1, CHAT_MESSAGES.pollQuestion).max(CHAT_LIMITS.pollQuestion, CHAT_MESSAGES.pollQuestion)
+};
+
+/** Um editor aberto com a pagina antiga ainda manda `anonymous`: o objeto descarta a chave, e a enquete e gravada com falso (D64). */
+export const pollDraftSchema: z.ZodType<PollDraft> = z.object({ id: uuidSchema.nullable().optional(), ...pollDraftFields });
+
+/**
+ * Os modelos de enquete do webinario (sem sessao); as copias lancadas nascem em launchPoll. `loadedIds` (D83): os
+ * modelos que o card carregou; o servidor so apaga desses, entao a enquete que o console criou depois fica. A folga de
+ * 100 nunca recusa o salvar de um banco que passou do teto.
+ */
+export const savePollsSchema = z.object({
+  loadedIds: z.array(uuidSchema).max(100, CHAT_MESSAGES.invalid).default([]),
+  polls: z.array(pollDraftSchema).max(CHAT_LIMITS.pollTemplatesMax, CHAT_MESSAGES.tooManyPolls),
+  webinarId: uuidSchema
 });
 
-/** Os modelos de enquete do webinario (sem sessao); as copias lancadas nascem em launchPoll. */
-export const savePollsSchema = z.object({ polls: z.array(pollDraftSchema).max(20, CHAT_MESSAGES.tooManyPolls), webinarId: uuidSchema });
+/** O que a "Nova enquete" do console faz depois de guardar nas prontas (D83): nada, Abrir agora ou Abrir e fixar. */
+export const CONSOLE_POLL_LAUNCHES = ["save", "open", "pin"] as const;
+export type ConsolePollLaunch = (typeof CONSOLE_POLL_LAUNCHES)[number];
+
+/**
+ * A enquete criada no console (D83): os mesmos campos do editor (pollDraftFields, os erros pelo mesmo caminho do campo),
+ * a sessao do console e o que fazer depois de guardar nas prontas do webinario.
+ */
+export const createConsolePollSchema = z.object({ ...pollDraftFields, launch: z.enum(CONSOLE_POLL_LAUNCHES, { error: CHAT_MESSAGES.invalid }).default("save"), sessionId: sessionIdSchema });
 
 /** Abrir uma enquete pronta na sessao; `pin`: o "Abrir e fixar" do console (a Na tela, R2). */
 export const launchPollSchema = z.object({ pin: z.boolean().default(false), pollId: uuidSchema, sessionId: sessionIdSchema });

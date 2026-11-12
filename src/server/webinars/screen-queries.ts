@@ -12,6 +12,9 @@
 //   chave; id, situacao e resultado das enquetes), mais a foto do autor da fixada, que ja fica 60 s na memoria. Dois
 //   pedidos juntos com a memoria fria esperam a mesma leitura. O `mine` da fixada e de cada aluno, sem consulta;
 // - Replay, sessao encerrada ou cancelada: o estado vazio, sem consulta.
+// Os participantes simulados mudados a qualquer momento (docs/30 D79, 11/11/2026) pegam a mesma carona: toda mudanca
+// regrava a decisao da Simulacao na linha da sessao (o carimbo muda), e o estado leva `simulationKey` (o resumo da hora
+// da decisao, sem consulta a mais: a sessao ja esta lida); a sala pede a janela da Simulacao de novo so quando ele muda.
 // As metricas do aluno (especificacao de 10/11/2026, §5.5 e §7; a rota POST .../screen-events): cada evento (viu,
 // clicou, fechou) so vale para uma exibicao de banner ou QR Code daquela sessao. Os ids das exibicoes de cada sessao
 // ficam 30 s na memoria do processo (ate 500 sessoes); um id que a memoria nao conhece rele as exibicoes no maximo uma
@@ -44,6 +47,7 @@ import {
   emptyScreenState,
   pollsKeyOf,
   screenShowsIn,
+  simulationKeyOf,
   studentScreenItem,
   type ScreenDisplay,
   type ScreenKind,
@@ -65,6 +69,8 @@ type SharedScreen = {
   pinned: { avatarUrl: string | null; message: ChatMessage } | null;
   pinnedPollId: string | null;
   pollsKey: string;
+  /** O resumo da decisao da Simulacao (D79): a mesma linha da sessao, entao vale pelo mesmo carimbo. */
+  simulationKey: string;
   stamp: string;
 };
 
@@ -136,6 +142,7 @@ async function buildSharedScreen(db: WebinarsDb, session: WebinarSession, nowMs:
     pinned,
     pinnedPollId: displays.find((display) => display.kind === "poll" && display.hiddenAt === null)?.pollId ?? null,
     pollsKey: pollsKeyOf(pollRows.map((row) => ({ id: row.id, resultsShared: row.results_shared_at !== null, status: row.status }))),
+    simulationKey: simulationKeyOf(session.simulationDecidedAt),
     stamp: session.updatedAt
   };
 }
@@ -147,6 +154,8 @@ function screenStateFor(shared: SharedScreen, viewerUserId: string, sessionKind:
     pinned: shared.pinned ? toStudentMessage(shared.pinned.message, viewerUserId, sessionKind, shared.pinned.message.offsetMs, shared.pinned.avatarUrl) : null,
     pinnedPollId: shared.pinnedPollId,
     pollsKey: shared.pollsKey,
+    // So com a decisao registrada (sem ela, o estado fica como antes: a sala trata a falta como sem mudanca).
+    ...(shared.simulationKey ? { simulationKey: shared.simulationKey } : {}),
     stamp: shared.stamp
   };
 }

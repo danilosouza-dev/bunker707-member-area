@@ -264,6 +264,8 @@ test("a sessao escolhida: lista por aluno com nome, e-mail, hora da vaga, aparel
   assert.equal(selected.people[EQUIPE].name, "Carla Produtora", "quem respondeu e quem decidiu o selo entram nos nomes");
   assert.deepEqual(selected.simulation, {
     ackText: "Decisão do produtor em 05/11/2026: o selo fica ligado.",
+    // D80 (11/11/2026): sem mudancas dos participantes simulados, a lista vazia.
+    changes: [],
     decidedAt: "2026-11-05T12:00:00.000Z",
     decidedByName: "Carla Produtora",
     live: false,

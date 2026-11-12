@@ -61,6 +61,11 @@ export function DropdownMenuRadioItem({ children, closeOnClick, value, ...props 
 export function DropdownMenuItem({ children, disabled }) { return createElement("div", { "aria-disabled": disabled || undefined, "data-menu-item": "", role: "menuitem" }, children); }`,
   "@/server/webinars/live-actions": `${fail}
 export const openLiveRoom = fail; export const startLiveSession = fail; export const endLiveSession = fail; export const setRoomLock = fail; export const prepareRecorder = fail; export const releaseRecorder = fail; export const requestRecording = fail; export const markRecordingAnchor = fail; export const muteInChat = fail; export const kickFromSession = fail; export const undoSessionBan = fail; export const banStudent = fail; export const unbanStudent = fail; export const attachRecording = fail; export const alignChat = fail; export const setBrowserRecording = fail; export const setSelfUnmute = fail;`,
+  // As pessoas que comentam (11/11/2026, D75): a lista do Roteiro grava pela propria Server Action.
+  "@/server/webinars/persona-actions": `${fail}
+export const savePersona = fail; export const deletePersona = fail;`,
+  "@/server/webinars/simulation-actions": `${fail}
+export const loadSessionSimulations = fail; export const saveSessionSimulation = fail; export const saveSimulatedAudience = fail;`,
   "@/server/webinars/script-actions": `${fail}
 export const saveScriptItems = fail; export const importScriptCsv = fail; export const exportScriptCsv = fail; export const exportSessionChatCsv = fail; export const saveTranscript = fail; export const resolveScriptPhrases = fail; export const fireScriptItem = fail; export const sendScriptedComment = fail; export const saveScriptComment = fail; export const uploadPersonaPhoto = fail;`,
   // Fase 4: os paineis Oferta (4b) e Atendimento (4c) leem pela propria Server Action; aqui viram falhas.
@@ -74,7 +79,8 @@ export const clearMessageTranslations = fail;`,
   "@/server/webinars/screen-actions": `${fail}
 export const saveScreenItem = fail; export const archiveScreenItem = fail; export const uploadScreenImage = fail; export const showScreenItem = fail; export const hideScreenItem = fail;`,
   "@/server/webinars/room-actions": `${fail}
-export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const pinPoll = fail; export const unpinPoll = fail; export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;`
+export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const pinPoll = fail; export const unpinPoll = fail; export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;
+export const createConsolePoll = fail;`
 };
 
 function withExtension(base) {
@@ -1103,7 +1109,7 @@ test("ConsoleRail (docs/31 §10): as abas e as entradas da sessao no trilho, com
 });
 
 
-test("aba Pessoas: o microfone sozinho (docs/31 caminho A) e um botao com aria-pressed pelo que foi gravado para quem apresenta dentro da sala, com a frase do teto; a Equipe nao o ve", () => {
+test("aba Pessoas: o microfone sozinho (docs/31 caminho A) e um botao com aria-pressed pelo que foi gravado para quem apresenta dentro da sala, com a frase de que todos podem falar (sem teto, D84); a Equipe nao o ve", () => {
   const people = liveBlock().people;
   const tab = (handle) => html(createElement(ConsolePeopleTab, { busyKey: null, canPublish: true, handle, onAction: noop, onSelfUnmute: noop, people }));
   const botao = (markup) => markup.match(/<button[^>]*>(?:(?!<\/button>).)*Permitir que o aluno abra o microfone sozinho(?:(?!<\/button>).)*<\/button>/s)?.[0] ?? "";
@@ -1116,9 +1122,12 @@ test("aba Pessoas: o microfone sozinho (docs/31 caminho A) e um botao com aria-p
   const host = tab(handleFor("host", { selfUnmute: true }));
   const hint = host.match(/<button[^>]*aria-describedby="([^"]+)"[^>]*aria-pressed="true"/)?.[1];
   assert.ok(hint, "o botao aponta para a frase");
-  assert.match(textOf(host.slice(host.indexOf(">", host.indexOf(`id="${hint}"`)) + 1)), new RegExp(`^${escape(LIVE_CONSOLE_COPY.microfoneSozinhoTexto)}`), "a frase do teto embaixo do botao");
-  assert.match(LIVE_CONSOLE_COPY.microfoneSozinhoTexto, new RegExp(`^Até ${liveModel.MIC_LIMIT} alunos`), "o teto sai do MIC_LIMIT");
-  assert.equal(WEBINAR_COPY.consoleAoVivo.microfoneSozinhoTexto(6), "Até 6 alunos falam ao mesmo tempo; quando lota, os outros esperam.", "outro teto, outra frase");
+  assert.match(textOf(host.slice(host.indexOf(">", host.indexOf(`id="${hint}"`)) + 1)), new RegExp(`^${escape(LIVE_CONSOLE_COPY.microfoneSozinhoTexto)}`), "a frase embaixo do botao");
+  // D84 (11/11/2026): sem teto. A frase nao tem numero nem "quando lota, os outros esperam", e diz que a equipe silencia.
+  assert.equal(LIVE_CONSOLE_COPY.microfoneSozinhoTexto, "Todos os alunos podem abrir o microfone ao mesmo tempo. A equipe silencia uma pessoa ou todos quando precisar.");
+  assert.equal(WEBINAR_COPY.consoleAoVivo.microfoneSozinhoTexto, LIVE_CONSOLE_COPY.microfoneSozinhoTexto, "a mesma frase do editor e do console");
+  assert.doesNotMatch(LIVE_CONSOLE_COPY.microfoneSozinhoTexto, /\d|lota|esperam/);
+  assert.equal(liveModel.MIC_LIMIT, undefined, "o teto saiu");
   assert.equal(botao(tab(handleFor("team", { selfUnmute: true }))), "", "a Equipe nao muda o microfone da turma");
 });
 

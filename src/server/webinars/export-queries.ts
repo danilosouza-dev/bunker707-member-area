@@ -8,7 +8,9 @@ import "server-only";
 // e a gravacao da sessao. As partes da fase 4 sao lidas guardadas: banco sem a 202610300003 (cliques, Simulacao) ou a
 // 202610300004 (quem respondeu) devolve o CSV sem elas, nunca quebra; o resto sobe como PendingMigrationError (a rota
 // responde 503 com a migracao). Os numeros reais vem das RPCs (webinar_panel, webinar_report); as linhas simuladas so
-// pelo CSV Simulacao (as funcoes *Simulation* abaixo), nunca noutro (D6, M6). A equipe (admin_roles) fica fora.
+// pelo CSV Simulacao (as funcoes *Simulation* abaixo), nunca noutro (D6, M6). A equipe (admin_roles) fica fora. A
+// pergunta simulada (11/11/2026, D77; a 202611140001: a unica sem aluno, user_id nulo) nunca entra no Q&A: a leitura
+// pede so as perguntas com aluno, o que vale tambem no banco sem a migracao (ali toda pergunta tem aluno).
 
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { chunksOf } from "../communications/db";
@@ -260,13 +262,24 @@ async function performanceRows({ db, session, webinar }: SessionContext): Promis
   return [performanceRow(performanceFactsFromPanel(rows, base))];
 }
 
-/** As perguntas da sessao (nao apagadas), na ordem em que chegaram; sem teto de 500 como a tela. */
-async function listSessionQuestionRows(db: WebinarsDb, sessionId: string): Promise<QuestionRow[]> {
-  return fetchAll<QuestionRow>(
+/**
+ * As perguntas da turma na sessao (nao apagadas), na ordem em que chegaram; sem teto de 500 como a tela. A pergunta
+ * simulada (sem aluno, D77) fica de fora na leitura e de novo aqui (o tipo passa a ter o aluno sempre).
+ */
+async function listSessionQuestionRows(db: WebinarsDb, sessionId: string): Promise<(QuestionRow & { user_id: string })[]> {
+  const rows = await fetchAll<QuestionRow>(
     (from, to) =>
-      db.from("webinar_questions").select(QUESTION_COLUMNS).eq("session_id", sessionId).is("deleted_at", null).order("created_at", { ascending: true }).range(from, to),
+      db
+        .from("webinar_questions")
+        .select(QUESTION_COLUMNS)
+        .eq("session_id", sessionId)
+        .is("deleted_at", null)
+        .not("user_id", "is", null)
+        .order("created_at", { ascending: true })
+        .range(from, to),
     "Webinarios: perguntas do CSV"
   );
+  return rows.filter((row): row is QuestionRow & { user_id: string } => Boolean(row.user_id));
 }
 
 /** Quem respondeu cada pergunta (202610300004: answer_source); sem a migracao, nenhum (a resposta sai como da equipe). */

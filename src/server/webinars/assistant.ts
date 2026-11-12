@@ -102,11 +102,14 @@ async function withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
 
 type TargetState = { messageId: string | null; open: boolean };
 
-/** O alvo como esta agora: a pergunta aberta e nao apagada, ou a mensagem aprovada e nao apagada da mesma sessao. */
+/**
+ * O alvo como esta agora: a pergunta aberta e nao apagada, ou a mensagem aprovada e nao apagada da mesma sessao. A
+ * pergunta simulada (11/11/2026, D77: sem aluno) nunca esta aberta para o Assistente: so a equipe responde a ela.
+ */
 async function readTarget(db: WebinarsDb, trigger: AssistantTrigger): Promise<TargetState> {
   if (trigger.target === "question") {
     const row = await fetchQuestionRow(db, trigger.targetId);
-    const open = Boolean(row && row.session_id === trigger.sessionId && !row.deleted_at && row.status === "open");
+    const open = Boolean(row && row.user_id && row.session_id === trigger.sessionId && !row.deleted_at && row.status === "open");
     return { messageId: row?.message_id ?? trigger.messageId, open };
   }
   const row = await fetchChatMessageRow(db, trigger.targetId);
@@ -127,7 +130,7 @@ async function handToAttendant(db: WebinarsDb, trigger: AssistantTrigger, nowMs:
   if (!attendants.some((attendant) => attendantIsOnline(attendant, nowMs))) {
     return false;
   }
-  const open = (await listAssignedOpenQuestions(db, trigger.sessionId)).filter((item) => item.assignedTo && item.id !== trigger.targetId);
+  const open = (await listAssignedOpenQuestions(db, trigger.sessionId, iso(nowMs))).filter((item) => item.assignedTo && item.id !== trigger.targetId);
   const items = [...open.map((item) => ({ ...item, target: "question" as AssistantTarget })), { assignedTo: null, createdAt: iso(nowMs), id: trigger.targetId, target: trigger.target }];
   const assignment = distributeQueue({ attendants, items, nowMs }).find((item) => item.id === trigger.targetId && item.target === trigger.target);
   return assignment ? assignAttendance(db, { id: assignment.id, nowIso: iso(nowMs), onlyIfUnassigned: true, target: assignment.target, userId: assignment.userId }) : false;

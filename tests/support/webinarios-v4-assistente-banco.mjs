@@ -186,6 +186,11 @@ function matches(row, [op, column, value, extra]) {
     case "or":
       return column.split(",").some((part) => {
         const [col, operator, ...rest] = part.split(".");
+        // "user_id.not.is.null" (a pergunta da turma em visibleQuestionFilter): o "not" com o operador de dentro.
+        if (operator === "not") {
+          const [inner, ...tail] = rest;
+          return matches(row, ["not", col, inner, literal(tail.join("."))]);
+        }
         return matches(row, [operator, col, literal(rest.join("."))]);
       });
     default:

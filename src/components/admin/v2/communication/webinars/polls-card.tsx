@@ -14,10 +14,13 @@ import { adminToast } from "../../toast";
 // Card "Enquetes" do editor (docs/30 §2.2 e §2.4; fase 2b): os modelos de enquete do webinario (pergunta, tipo,
 // de 2 a 20 opcoes), prontos para a equipe abrir no console da sessao. O card guarda o proprio estado e grava a lista
 // inteira de uma vez (savePolls); as copias ja lancadas numa sessao nao mudam. Desde 10/11/2026 (D64) nao ha mais
-// "Respostas anônimas": toda enquete salva ou lancada guarda quem respondeu.
+// "Respostas anônimas": toda enquete salva ou lancada guarda quem respondeu. Desde 11/11/2026 (D83) a equipe tambem cria
+// enquetes prontas no console: o Salvar manda os ids que o card carregou (`loadedIds`) e o servidor so apaga desses,
+// entao a enquete criada no console com esta pagina aberta fica (e aparece aqui depois de salvar). O teto e o do
+// servidor (CHAT_LIMITS.pollTemplatesMax).
 
 const copy = WEBINAR_ADMIN_COPY.polls;
-const MAX_POLLS = 20;
+const MAX_POLLS = CHAT_LIMITS.pollTemplatesMax;
 
 type OptionRow = { id: string | null; key: string; label: string };
 type PollRow = { id: string | null; key: string; kind: PollKind; options: OptionRow[]; question: string };
@@ -45,6 +48,11 @@ function emptyPoll(): PollRow {
 
 function draftOf(row: PollRow): PollDraft {
   return { id: row.id, kind: row.kind, options: row.options.map((option) => ({ id: option.id, label: option.label.trim() })), question: row.question.trim() };
+}
+
+/** O que o Salvar manda (D83): os modelos do card e os ids que ele carregou (o servidor so apaga desses). */
+export function pollsSaveInput(rows: readonly PollRow[], loaded: readonly Pick<Poll, "id">[], webinarId: string): { loadedIds: string[]; polls: PollDraft[]; webinarId: string } {
+  return { loadedIds: loaded.map((poll) => poll.id), polls: rows.map(draftOf), webinarId };
 }
 
 function rowProblem(row: PollRow): string | null {
@@ -88,7 +96,7 @@ export function PollsCard({ disabled, initial, webinarId }: PollsCardProps) {
     }
     setBusy(true);
     setFailure(null);
-    const result = await savePolls({ polls: rows.map(draftOf), webinarId });
+    const result = await savePolls(pollsSaveInput(rows, saved, webinarId));
     setBusy(false);
     if (!result.ok) {
       setFailure({ message: Object.values(result.fieldErrors ?? {})[0]?.[0] ?? result.error, status: result.status });

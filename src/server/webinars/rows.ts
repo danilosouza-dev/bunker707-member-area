@@ -809,6 +809,36 @@ export type SessionSimulationRow = {
   simulation_summary: unknown;
 };
 
+/**
+ * A janela da sala (GET .../simulation; correcao da revisao v8, achado 1): as regras e, da mesma linha lida agora, o
+ * que decide se a janela sai e onde ela acaba (a decisao, a situacao, a hora marcada, o inicio e o fim). A sessao do
+ * cache do acesso pode ter ate 10 min (na gravada) e nao ver a primeira decisao que a consulta de 5 s do chat ja levou.
+ */
+export const SESSION_SIMULATION_FEED_COLUMNS = `${SESSION_SIMULATION_COLUMNS}, status, scheduled_at, started_at, ended_at, simulation_ack_text, simulation_decided_at`;
+
+export type SessionSimulationFeedRow = SessionSimulationRow & {
+  ended_at: string | null;
+  scheduled_at: string;
+  simulation_ack_text: string | null;
+  simulation_decided_at: string | null;
+  started_at: string | null;
+  status: string;
+};
+
+/** O que a janela usa da linha fresca da sessao (as mesmas chaves de WebinarSession). */
+export type SessionSimulationFeedState = Pick<WebinarSession, "endedAt" | "scheduledAt" | "simulationAckText" | "simulationDecidedAt" | "startedAt" | "status">;
+
+export function sessionSimulationFeedStateFromRow(row: SessionSimulationFeedRow): SessionSimulationFeedState {
+  return {
+    endedAt: row.ended_at ?? null,
+    scheduledAt: row.scheduled_at,
+    simulationAckText: row.simulation_ack_text ?? null,
+    simulationDecidedAt: row.simulation_decided_at ?? null,
+    startedAt: row.started_at ?? null,
+    status: oneOf<SessionStatus>(SESSION_STATUSES, row.status, "scheduled")
+  };
+}
+
 export function simulatedCountRuleOfRow(value: unknown): SimulatedCountRule {
   const raw = asObject(value);
   const base = defaultSimulatedCountRule();

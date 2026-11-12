@@ -586,8 +586,15 @@ export function dropExcerpts(drops: readonly ReportBucket[], cues: readonly Tran
 /* ------------------------------------------------------------------------------------------------
  * O bloco Simulacao completo (docs/30 §3.5): o selo e quem decidiu, o contador com o real ao lado, as entradas, os
  * avisos de venda e o roteiro por Solta em. So daqui (e do CSV Simulacao) saem numeros simulados (D6, M6). Na Live ao
- * vivo (R7): sem o selo (a primeira linha diz so quem decidiu) e o roteiro pelos gatilhos da live.
+ * vivo (R7): sem o selo (a primeira linha diz so quem decidiu) e o roteiro pelos gatilhos da live. Desde 11/11/2026
+ * (D80): as mudancas dos participantes simulados, uma por linha (quando, +N, quem e de onde), debaixo do contador.
  * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * Uma mudanca dos participantes simulados (docs/30 D80; webinar_simulation_changes): quando valeu (o minuto do relogio
+ * da Simulacao, nulo antes do comeco), o +N (nulo na faixa que varia), quem e de onde. So o bloco Simulacao le.
+ */
+export type SimulationReportChange = { atMs: number | null; changedAt: string; changedByName: string; extra: number | null; source: "console" | "editor" };
 
 /** As regras da fase 4 (202610300003) na sessao: o que a equipe ligou (o resumo congelado vem da RPC). */
 export type SimulationRulesSummary = {
@@ -598,6 +605,8 @@ export type SimulationRulesSummary = {
 
 export type SimulationSummary = {
   ackText: string | null;
+  /** As mudancas dos participantes simulados, na ordem em que foram feitas (D80); vazia ou ausente sem mudanca. */
+  changes?: SimulationReportChange[];
   decidedAt: string | null;
   decidedByName: string | null;
   /** Banco sem a 202610300003: as regras ficam de fora e a tela mostra o aviso da migracao no bloco. */
@@ -618,8 +627,9 @@ export type SimulationSummary = {
 
 /**
  * O bloco Simulacao aparece na sessao: sempre na gravada (o selo e a decisao dela); na Live ao vivo (R7), so quando ela
- * teve algo simulado: a decisao registrada no card, uma regra ligada, o resumo congelado no fim ou o roteiro (itens
- * prontos ou comentarios que entraram). A live sem nada disso fica sem o bloco, como antes; o Replay, nunca.
+ * teve algo simulado: a decisao registrada no card, uma regra ligada, o resumo congelado no fim, o roteiro (itens
+ * prontos ou comentarios que entraram) ou, desde 11/11/2026 (D80), uma mudanca dos participantes simulados. A live sem
+ * nada disso fica sem o bloco, como antes; o Replay, nunca.
  */
 export function simulationBlockVisible(kind: SessionKind, summary: SimulationSummary): boolean {
   if (kind === "simulated") {
@@ -633,7 +643,7 @@ export function simulationBlockVisible(kind: SessionKind, summary: SimulationSum
   const frozen = totals.counterMax !== null || totals.joinsShown !== null || totals.saleNoticesShown !== null;
   const scripted = script.ready > 0 || script.fired > 0 || Object.values(script.byTrigger).some((count) => count > 0);
 
-  return summary.decidedAt !== null || ruleOn || frozen || scripted;
+  return summary.decidedAt !== null || ruleOn || frozen || scripted || (summary.changes?.length ?? 0) > 0;
 }
 
 export function emptyScriptByTrigger(): Record<ScriptTrigger, number> {
@@ -657,6 +667,15 @@ export function simulationLines(summary: SimulationSummary): string[] {
     }
     counter.push(SIM.real(summary.realParticipants));
     lines.push(`${SIM.contador}: ${counter.join(" · ")}`);
+    // D80: as mudancas dos participantes simulados, cada uma com quando valeu, o +N, quem e de onde. O "maior numero
+    // mostrado" acima ja junta os trechos de cada regra (o resumo congelado no fim).
+    const changes = summary.changes ?? [];
+    if (changes.length > 0) {
+      lines.push(SIM.mudancas(changes.length));
+      for (const change of changes) {
+        lines.push(SIM.mudanca(change.atMs === null ? SIM.antesDoComeco : screenEnteredLabel(change.atMs), SIM.valor(change.extra), change.changedByName, SIM.origens[change.source]));
+      }
+    }
     lines.push(`${SIM.entradas}: ${rules.joins.enabled || totals.joinsShown ? SIM.apareceram(totals.joinsShown ?? 0) : COPY.desligado}`);
     lines.push(`${SIM.avisosDeVenda}: ${rules.saleNotices.enabled || totals.saleNoticesShown ? SIM.apareceram(totals.saleNoticesShown ?? 0) : COPY.desligado}`);
   }

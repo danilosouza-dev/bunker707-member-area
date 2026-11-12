@@ -28,7 +28,6 @@ import { RECORDER_LABELS, RECORDER_RULES, canRequestRecorder, type RecorderStatu
 import { webinarReportHref } from "./report-page-model";
 import { jitActive, jitSummary, withJitPublishProblems } from "./jit-model";
 import {
-  MIC_LIMIT,
   WEBINAR_LIMITS,
   WEBINAR_SITUATIONS,
   accessModeAnchorsAudience,
@@ -120,13 +119,19 @@ export const WEBINAR_ADMIN_COPY = {
     roteiro: { description: "Mensagens do roteiro nunca entram nas métricas reais.", title: "Roteiro de chat" },
     sala: { description: "Controles padrão ao começar; a sessão copia ao abrir.", title: "Sala" },
     sessoes: { description: "Cada sessão tem a própria Simulação e o próprio relatório.", title: "Sessões" },
-    simulacao: { description: "Por sessão: o selo que o aluno vê na sala, com a decisão registrada.", title: "Simulação" },
+    simulacao: {
+      description: "Participantes simulados somados ao número de quem assiste que o aluno vê, entradas e avisos de venda, por sessão, com a decisão registrada.",
+      title: "Simulação"
+    },
     vagaLembretes: { description: "O e-mail sai pela fila com os outros e-mails da área (Resend).", title: "Vaga e lembretes" }
   },
   /** A Simulacao e o Roteiro na Live ao vivo (adendo de 10/11/2026, R7 e R8). */
   cardsLive: {
     roteiro: { description: "Comentários prontos que entram aos minutos da live ou pelo botão da equipe. Nunca entram nas métricas reais.", title: "Roteiro de chat" },
-    simulacao: { description: "O contador, as entradas e os avisos de venda simulados da live, com a decisão registrada.", title: "Simulação" }
+    simulacao: {
+      description: "Participantes simulados somados ao número de quem assiste que o aluno vê, que mudam a qualquer momento no console, e as entradas e os avisos de venda da live, com a decisão registrada.",
+      title: "Simulação"
+    }
   },
   /** Roteiro de chat (docs/30 §2.2, §6.6 D6). */
   script: {
@@ -185,6 +190,8 @@ export const WEBINAR_ADMIN_COPY = {
     noSessions: "Marque as sessões no card Sessões e salve para decidir o selo de cada uma.",
     sessionLabel: (when: string) => `Sessão de ${when}`,
     undecided: "Sem decisão registrada: o selo fica desligado.",
+    /** A Live ao vivo (D79): ela nunca teve o selo da gravada, entao a frase fala do que aparece. */
+    undecidedLive: "Sem decisão registrada: nada simulado aparece na live.",
     unsaved: "Marque a confirmação para gravar a decisão."
   },
   /** Enquetes prontas (docs/30 §2.2 e §2.4). */
@@ -245,7 +252,21 @@ export const WEBINAR_ADMIN_COPY = {
       answers: (count: number) => (count === 1 ? "1 resposta" : `${count} respostas`),
       close: "Encerrar",
       closed: "Encerrada",
-      empty: "Nenhuma enquete pronta. Crie no editor do webinário.",
+      /**
+       * A "Nova enquete" do console (D83, 11/11/2026): o formulario no lugar da lista, com os campos do card Enquetes
+       * do editor (WEBINAR_ADMIN_COPY.polls) e o "Abrir e fixar" da Na tela.
+       */
+      create: {
+        abrirAgora: "Abrir agora",
+        avisos: { aberta: "Enquete aberta para a turma.", guardada: "Enquete guardada nas prontas." },
+        cancelar: "Cancelar",
+        dica: "Toda enquete criada aqui fica nas prontas deste webinário, para abrir de novo em outra sessão.",
+        guardar: "Guardar nas prontas",
+        novaEnquete: "Nova enquete",
+        soGuardar: "Esta sessão não abre enquetes agora. A nova fica nas prontas.",
+        voltar: "Voltar"
+      },
+      empty: "Nenhuma enquete pronta. Crie uma em Nova enquete ou no editor do webinário.",
       launch: "Abrir",
       launched: "Nesta sessão",
       open: "Aberta",
@@ -383,7 +404,7 @@ export const WEBINAR_ADMIN_COPY = {
     micOff: "Todos entram sem microfone",
     micOffHint: "Fixo nesta versão.",
     micSelf: "Permitir que o aluno abra o microfone sozinho",
-    micSelfHint: WEBINAR_COPY.consoleAoVivo.microfoneSozinhoTexto(MIC_LIMIT),
+    micSelfHint: WEBINAR_COPY.consoleAoVivo.microfoneSozinhoTexto,
     /** Na Live gravada nao ha microfone (docs/30): o switch fica desligado com a dica de antes. */
     micSelfRecordedHint: "Desligado nesta versão.",
     newCommentsVisible: "Comentários novos aparecem para a turma",

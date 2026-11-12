@@ -323,9 +323,10 @@ export function consoleRailFit(input: { available: number | null; count: number 
 /**
  * As entradas do ⋯ (V2-15), na ordem: Na tela na Live ao vivo e na gravada (nunca no Replay: la nada aparece na frente
  * da turma); Enquetes sempre; Roteiro no webinario gravado e na sessao da Live ao vivo (R8); Oferta fora da live; Atendimento sempre; Presença com a
- * leitura da presenca no retrato (nunca no Replay nem antes de comecar); Gravação so na live.
+ * leitura da presenca no retrato (nunca no Replay nem antes de comecar) ou, desde 11/11/2026 (docs/30 D79), com o
+ * controle dos participantes simulados no retrato (`audience`: a gravada e a live, tambem na espera); Gravação so na live.
  */
-export function consoleMoreEntriesFor(input: { hasPresence: boolean; kind: SessionKind; webinarKind: WebinarKind }): ConsoleMoreEntry[] {
+export function consoleMoreEntriesFor(input: { audience?: boolean; hasPresence: boolean; kind: SessionKind; webinarKind: WebinarKind }): ConsoleMoreEntry[] {
   const entries: ConsoleMoreEntry[] = input.kind === "replay" ? ["enquetes"] : ["tela", "enquetes"];
   // O Roteiro: no webinario gravado (o Replay dele tambem) e, desde o adendo de 10/11/2026 (R8), na sessao da Live ao
   // vivo (nunca no Replay da live: la ninguem solta comentario).
@@ -336,7 +337,7 @@ export function consoleMoreEntriesFor(input: { hasPresence: boolean; kind: Sessi
     entries.push("oferta");
   }
   entries.push("atendimento");
-  if (input.hasPresence) {
+  if (input.hasPresence || (input.audience === true && input.kind !== "replay")) {
     entries.push("presenca");
   }
   if (input.kind === "live") {

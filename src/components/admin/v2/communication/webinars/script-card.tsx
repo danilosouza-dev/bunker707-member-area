@@ -9,7 +9,17 @@ import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
 import { CHAT_LIMITS, type PersonaRole, type ScriptItem, type ScriptItemDraft, type ScriptStatus, type ScriptTrigger, type WebinarSession, type WebinarTranscriptFormat } from "@/server/webinars/model";
 import type { TranscriptSummary } from "@/server/webinars/queries";
-import { LIVE_SCRIPT_TRIGGER_LABELS, withPersonaAvatarForName } from "@/server/webinars/persona-model";
+import { deletePersona, savePersona } from "@/server/webinars/persona-actions";
+import {
+  LIVE_SCRIPT_TRIGGER_LABELS,
+  NO_PERSONA_LIST,
+  personaCopyOf,
+  personaUsage,
+  withPersonaCopy,
+  type PersonaDraft,
+  type PersonaList as PersonaListData,
+  type WebinarPersona
+} from "@/server/webinars/persona-model";
 import { exportScriptCsv, exportSessionChatCsv, importScriptCsv, resolveScriptPhrases, saveScriptItems, saveTranscript, uploadPersonaPhoto } from "@/server/webinars/script-actions";
 import { SCRIPT_TRIGGER_LABELS, formatOffsetText, parseOffsetText, parseScriptCsv, scriptSummary, sortScriptItems, type ScriptCsvResult } from "@/server/webinars/script-model";
 import { ErrorBanner } from "../../error-banner";
@@ -17,6 +27,7 @@ import { PillGroup, adminInputClass, adminTextareaClass } from "../../form";
 import { ConfirmDialog } from "../../settings/kit";
 import { StatusChip } from "../../status-chip";
 import { adminToast } from "../../toast";
+import { NEW_PERSONA_VALUE, PersonaForm, PersonaList, PersonaPicker } from "./persona-list";
 import { PersonaPhotoField } from "./persona-photo-field";
 import { minuteMarkOf, minuteMarkToMs } from "./simulation/simulation-card-model";
 
@@ -34,13 +45,23 @@ import { minuteMarkOf, minuteMarkToMs } from "./simulation/simulation-card-model
 // desligado enquanto uma foto sobe; manda os ids que o card carregou (`loadedIds`: o servidor so apaga desses, nunca um
 // item que o console guardou depois) e so a foto que mudou (a que ficou igual nao vai, e a do banco fica: o "Usar esta
 // foto em todos" do console nao e desfeito por um Salvar com a pagina velha).
+//
+// As pessoas que comentam (pedido do produtor de 11/11/2026; docs/30 D75 a D78): no topo do card, a lista "Pessoas que
+// comentam" do webinario (persona-list.tsx: Nova pessoa, Editar e Remover; a mesma do console), e em cada linha o "Quem
+// comenta" vira a escolha de uma pessoa da lista (PersonaPicker, com a foto ou as iniciais), com "Criar nova pessoa"
+// ali mesmo (o formulario da pessoa abre embaixo da linha e a nova entra na lista e na linha), e o "Tipo" (Comentário
+// ou Pergunta: a Pergunta abre a pergunta simulada na aba Perguntas quando entra). A linha ligada a pessoa guarda a
+// copia dela; editar a pessoa troca a copia em todas as linhas dela agora e no servidor (o Salvar manda o `personaId`,
+// e o servidor grava a copia da pessoa). A linha ligada a ninguem (a pessoa saiu da lista) mostra o nome que guarda,
+// "(fora da lista)". A caixa "Usar esta foto em todos" saiu: a pessoa e a unidade. No banco sem a lista (`initialPersonas`
+// com `available` falso), o card segue como antes: o Nome, o Aparece como e a Foto em cada linha, e a frase da migracao
+// no lugar da lista.
 
 const copy = WEBINAR_ADMIN_COPY.script;
 const COMENTARIOS = WEBINAR_COPY.naTela.comentarios;
+const PESSOAS = WEBINAR_COPY.pessoas;
 
 type Row = {
-  /** A caixa "Usar esta foto em todos os comentários de {nome}" desta linha (ligada por padrao). */
-  applyToAll: boolean;
   body: string;
   id: string | null;
   key: string;
@@ -48,6 +69,8 @@ type Row = {
   offsetMs: number | null;
   offsetText: string;
   personaAvatarPath: string | null;
+  /** A pessoa da lista (D75); nula sem pessoa (a linha nova ainda sem escolha, ou fora da lista). */
+  personaId: string | null;
   personaName: string;
   personaRole: PersonaRole;
   phrase: string;
@@ -73,6 +96,10 @@ type ScriptCardProps = {
   webinarKind?: "live" | "simulated";
   /** As linhas (pelo id do item) com a foto subindo ao desenhar (o teste de tela). */
   initialUploading?: readonly string[];
+  /** As pessoas que comentam do webinario (D75); ausente ou `available` falso, o banco sem a lista. */
+  initialPersonas?: PersonaListData;
+  /** A linha (pela chave) com o formulario da pessoa nova aberto ao desenhar (o teste de tela). */
+  initialCreatingFor?: string | null;
 };
 
 const TRIGGER_OPTIONS: readonly { label: string; value: ScriptTrigger }[] = [
@@ -112,7 +139,6 @@ export function scriptOffsetInput(text: string, live: boolean): number | null {
 
 function rowOf(item: ScriptItem, live: boolean): Row {
   return {
-    applyToAll: true,
     body: item.body,
     id: item.id,
     key: item.id,
@@ -120,6 +146,7 @@ function rowOf(item: ScriptItem, live: boolean): Row {
     offsetMs: item.offsetMs,
     offsetText: item.offsetMs == null ? "" : offsetTextOf(item.offsetMs, live),
     personaAvatarPath: item.personaAvatarPath ?? null,
+    personaId: item.personaId ?? null,
     personaName: item.personaName,
     personaRole: item.personaRole,
     phrase: item.phrase ?? "",
@@ -132,7 +159,6 @@ function rowOf(item: ScriptItem, live: boolean): Row {
 
 function emptyRow(live: boolean): Row {
   return {
-    applyToAll: true,
     body: "",
     id: null,
     key: rowKey(),
@@ -140,6 +166,7 @@ function emptyRow(live: boolean): Row {
     offsetMs: 0,
     offsetText: offsetTextOf(0, live),
     personaAvatarPath: null,
+    personaId: null,
     personaName: "",
     personaRole: "student",
     phrase: "",
@@ -150,14 +177,18 @@ function emptyRow(live: boolean): Row {
   };
 }
 
-/** O que a Server Action recebe (a situacao final e do servidor; "disabled" e a unica escolha da tela). */
-function draftOf(row: Row): ScriptItemDraft {
+/**
+ * O que a Server Action recebe (a situacao final e do servidor; "disabled" e a unica escolha da tela). Com a lista
+ * (`linked`), a pessoa da linha vai junto (nula: fora da lista), e o servidor grava a copia dela.
+ */
+function draftOf(row: Row, linked = false): ScriptItemDraft {
   return {
     body: row.body.trim(),
     id: row.id,
     kind: row.kind,
     offsetMs: row.triggerKind === "at_offset" ? row.offsetMs : null,
     personaAvatarPath: row.personaAvatarPath,
+    ...(linked ? { personaId: row.personaId } : {}),
     personaName: row.personaName.trim(),
     personaRole: row.personaRole,
     phrase: row.triggerKind === "on_phrase" ? row.phrase.trim() || null : null,
@@ -192,12 +223,15 @@ export function scriptCanSave(input: { dirty: boolean; locked: boolean; uploadin
 }
 
 /** Problemas que a tela aponta antes de enviar (o schema do servidor confere de novo). */
-function rowProblem(row: Row): string | null {
+function rowProblem(row: Row, linked = false): string | null {
   if (!row.personaName.trim()) {
-    return "Sem nome.";
+    return linked ? PESSOAS.erros.escolha : "Sem nome.";
   }
   if (!row.body.trim()) {
     return "Sem mensagem.";
+  }
+  if (row.kind === "question" && Array.from(row.body.trim()).length > CHAT_LIMITS.question) {
+    return PESSOAS.erros.pergunta;
   }
   if (row.triggerKind === "at_offset" && row.offsetMs == null) {
     return "Tempo inválido.";
@@ -231,7 +265,19 @@ function downloadCsv(csv: string, fileName: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
-export function ScriptCard({ disabled, hasRecording, initialItems, initialTranscript, initialUploading = [], readOnly = false, sessions, webinarId, webinarKind = "simulated" }: ScriptCardProps) {
+export function ScriptCard({
+  disabled,
+  hasRecording,
+  initialCreatingFor = null,
+  initialItems,
+  initialPersonas = NO_PERSONA_LIST,
+  initialTranscript,
+  initialUploading = [],
+  readOnly = false,
+  sessions,
+  webinarId,
+  webinarKind = "simulated"
+}: ScriptCardProps) {
   const idBase = useId();
   const live = webinarKind === "live";
   const triggerOptions = live ? LIVE_TRIGGER_OPTIONS : TRIGGER_OPTIONS;
@@ -249,9 +295,17 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
   const [chatSession, setChatSession] = useState<string>("");
   const csvInput = useRef<HTMLInputElement>(null);
   const transcriptInput = useRef<HTMLInputElement>(null);
+  // As pessoas que comentam (D75): a lista do webinario e a linha com o formulario da pessoa nova aberto.
+  const [personas, setPersonas] = useState<readonly WebinarPersona[]>(initialPersonas.personas);
+  const [creatingFor, setCreatingFor] = useState<string | null>(initialCreatingFor);
+  const linked = initialPersonas.available;
 
   const summary = useMemo(() => scriptSummary(saved), [saved]);
-  const dirty = useMemo(() => JSON.stringify(rows.map(draftOf)) !== JSON.stringify(sortScriptItems(saved).map((item) => draftOf(rowOf(item, live)))), [live, rows, saved]);
+  const dirty = useMemo(
+    () => JSON.stringify(rows.map((row) => draftOf(row, linked))) !== JSON.stringify(sortScriptItems(saved).map((item) => draftOf(rowOf(item, live), linked))),
+    [linked, live, rows, saved]
+  );
+  const usage = useMemo(() => Object.fromEntries(personas.map((persona) => [persona.id, personaUsage(rows, persona.id)])), [personas, rows]);
   const ended = sessions.filter((session) => session.kind !== "replay" && session.status === "ended");
   // As exportacoes so leem: seguem no arquivado (`readOnly`), que tranca o resto do card.
   const reading = disabled || busy !== null;
@@ -289,29 +343,69 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)));
   }
 
-  /** A foto da linha (R9): com a caixa ligada e o nome, vai tambem para as linhas com o mesmo nome; Remover, so esta. */
+  /** A foto da linha (R9; so no banco sem a lista: com ela, a foto e da pessoa). */
   function setPhoto(key: string, path: string | null) {
-    setRows((current) => {
-      const row = current.find((item) => item.key === key);
-      if (!row) {
-        return current;
-      }
-      const own = current.map((item) => (item.key === key ? { ...item, personaAvatarPath: path } : item));
-      return path && row.applyToAll && row.personaName.trim() ? withPersonaAvatarForName(own, row.personaName, path) : own;
-    });
+    updateRow(key, { personaAvatarPath: path });
   }
 
-  /** A caixa "Usar esta foto em todos os comentários de {nome}": ligada com a foto, a foto vai para as outras linhas agora. */
-  function setApplyToAll(key: string, checked: boolean) {
+  /** O "Quem comenta" da linha (D75): a pessoa da lista (a copia dela vai para a linha) ou "Criar nova pessoa". */
+  function pickPersona(key: string, value: string | null) {
+    if (value === NEW_PERSONA_VALUE) {
+      setCreatingFor(key);
+      return;
+    }
+    const persona = value ? (personas.find((item) => item.id === value) ?? null) : null;
+    if (persona) {
+      updateRow(key, personaCopyOf(persona));
+    }
+  }
+
+  /** Criar ou editar uma pessoa da lista: a lista e as linhas dela mudam agora (as copias), e o servidor tambem. */
+  async function submitPersona(draft: PersonaDraft, rowKeyToLink: string | null = null) {
+    setBusy("persona");
+    setFailure(null);
+    const result = await savePersona({ avatarPath: draft.avatarPath, id: draft.id ?? null, name: draft.name, role: draft.role, webinarId });
+    setBusy(null);
+    if (!result.ok) {
+      return result;
+    }
+    const persona = result.data.persona;
+    setPersonas((current) => [...current.filter((item) => item.id !== persona.id), persona]);
     setRows((current) => {
-      const row = current.find((item) => item.key === key);
-      const own = current.map((item) => (item.key === key ? { ...item, applyToAll: checked } : item));
-      return checked && row?.personaAvatarPath && row.personaName.trim() ? withPersonaAvatarForName(own, row.personaName, row.personaAvatarPath) : own;
+      const copied = withPersonaCopy(current, persona);
+      return rowKeyToLink ? copied.map((row) => (row.key === rowKeyToLink ? { ...row, ...personaCopyOf(persona) } : row)) : copied;
     });
+    // O que ja estava gravado com a pessoa tambem tem a copia nova no servidor (o card nao fica "nao salvo" por isso).
+    setSaved((current) => withPersonaCopy(current, persona));
+    if (rowKeyToLink) {
+      setCreatingFor(null);
+    }
+    adminToast.success(result.data.created ? PESSOAS.avisos.criada(persona.name) : PESSOAS.avisos.salva);
+    if (result.data.items > 0) {
+      adminToast.info(PESSOAS.avisos.copias(result.data.items));
+    }
+    return result;
+  }
+
+  /** Remover a pessoa da lista: as linhas dela ficam com a copia, fora da lista. */
+  async function removePersona(persona: WebinarPersona) {
+    setBusy("persona");
+    setFailure(null);
+    const result = await deletePersona({ id: persona.id });
+    setBusy(null);
+    if (!result.ok) {
+      return result;
+    }
+    const unlink = <T extends { personaId?: string | null }>(items: readonly T[]) => items.map((item) => (item.personaId === persona.id ? { ...item, personaId: null } : item));
+    setPersonas((current) => current.filter((item) => item.id !== persona.id));
+    setRows((current) => unlink(current));
+    setSaved((current) => unlink(current));
+    adminToast.success(PESSOAS.avisos.removida(persona.name));
+    return result;
   }
 
   async function save() {
-    const problem = rows.map((row, index) => ({ index, problem: rowProblem(row) })).find((entry) => entry.problem);
+    const problem = rows.map((row, index) => ({ index, problem: rowProblem(row, linked) })).find((entry) => entry.problem);
     if (problem) {
       setFailure({ message: `Mensagem ${problem.index + 1}: ${problem.problem}`, status: 400 });
       return;
@@ -322,7 +416,7 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
     setBusy("save");
     setFailure(null);
     setFieldErrors({});
-    const result = await saveScriptItems(scriptSaveInput(rows.map(draftOf), saved, webinarId));
+    const result = await saveScriptItems(scriptSaveInput(rows.map((row) => draftOf(row, linked)), saved, webinarId));
     setBusy(null);
     if (!result.ok) {
       fail(result);
@@ -467,6 +561,20 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
         {dirty ? ` · ${copy.unsaved}` : ""}
       </p>
 
+      {/* As pessoas que comentam (D75): a lista do webinario, a mesma do console; no banco sem ela, a frase da migracao. */}
+      <div className="flex min-w-0 flex-col gap-3 border-b border-[var(--border-subtle)] pb-4" data-script-personas="">
+        <PersonaList
+          available={linked}
+          busy={busy !== null || disabled}
+          onDelete={removePersona}
+          onSave={(draft) => submitPersona(draft)}
+          onUpload={(image) => uploadPersonaPhoto({ image })}
+          personas={personas}
+          readOnly={readOnly}
+          usage={usage}
+        />
+      </div>
+
       {rows.length === 0 ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{copy.empty}</p> : null}
       {live ? (
         <p className="text-[13px] leading-5 text-[var(--text-secondary)]" data-script-live-hint="">
@@ -500,43 +608,92 @@ export function ScriptCard({ disabled, hasRecording, initialItems, initialTransc
                 </div>
               </div>
 
-              <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
-                  {copy.columns.name}
-                  <input className={adminInputClass} disabled={locked} maxLength={CHAT_LIMITS.personaName} onChange={(event) => updateRow(row.key, { personaName: event.target.value })} type="text" value={row.personaName} />
-                </label>
-                <div className="flex min-w-0 flex-col gap-1.5">
-                  <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{copy.columns.role}</span>
-                  <PillGroup
-                    ariaLabel={`${copy.columns.role} da mensagem ${index + 1}`}
+              {linked ? (
+                <>
+                  {/* "Quem comenta" (D75): a pessoa da lista, com a foto ou as iniciais, ou "Criar nova pessoa" ali mesmo. */}
+                  <PersonaPicker
                     disabled={locked}
-                    name={`${base}-role`}
-                    onChange={(personaRole: PersonaRole) => updateRow(row.key, { personaRole })}
+                    fallbackName={row.personaId ? null : row.personaName.trim() || null}
+                    id={`${base}-pessoa`}
+                    onChange={(value) => pickPersona(row.key, value)}
+                    personas={personas}
+                    value={creatingFor === row.key ? NEW_PERSONA_VALUE : row.personaId}
+                  />
+                  {creatingFor === row.key ? (
+                    <PersonaForm
+                      busy={busy !== null}
+                      editing={null}
+                      onCancel={() => setCreatingFor(null)}
+                      onSave={(draft) => submitPersona(draft, row.key)}
+                      onUpload={(image) => uploadPersonaPhoto({ image })}
+                      personas={personas}
+                    />
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                    <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
+                      {copy.columns.name}
+                      <input className={adminInputClass} disabled={locked} maxLength={CHAT_LIMITS.personaName} onChange={(event) => updateRow(row.key, { personaName: event.target.value })} type="text" value={row.personaName} />
+                    </label>
+                    <div className="flex min-w-0 flex-col gap-1.5">
+                      <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{copy.columns.role}</span>
+                      <PillGroup
+                        ariaLabel={`${copy.columns.role} da mensagem ${index + 1}`}
+                        disabled={locked}
+                        name={`${base}-role`}
+                        onChange={(personaRole: PersonaRole) => updateRow(row.key, { personaRole })}
+                        options={[
+                          { label: copy.roles.student, value: "student" },
+                          { label: copy.roles.team, value: "team" }
+                        ]}
+                        value={row.personaRole}
+                      />
+                    </div>
+                  </div>
+
+                  <PersonaPhotoField
+                    disabled={locked}
+                    idBase={`${base}-persona`}
+                    name={row.personaName}
+                    onChange={(path) => setPhoto(row.key, path)}
+                    onUpload={(image) => uploadPersonaPhoto({ image })}
+                    onUploadingChange={(on) => setRowUploading(row.key, on)}
+                    path={row.personaAvatarPath}
+                    uploading={uploading.has(row.key)}
+                  />
+                </>
+              )}
+
+              {/* O Tipo (D77): o comentario no chat ou a pergunta simulada na aba Perguntas (pede a lista no banco). */}
+              {linked ? (
+                <div className="flex min-w-0 flex-col gap-1.5" data-script-kind="">
+                  <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{PESSOAS.tipo}</span>
+                  <PillGroup
+                    ariaLabel={`${PESSOAS.tipo} da mensagem ${index + 1}`}
+                    disabled={locked}
+                    name={`${base}-tipo`}
+                    onChange={(kind: Row["kind"]) => updateRow(row.key, { kind })}
                     options={[
-                      { label: copy.roles.student, value: "student" },
-                      { label: copy.roles.team, value: "team" }
+                      { label: PESSOAS.tipos.message, value: "message" },
+                      { label: PESSOAS.tipos.question, value: "question" }
                     ]}
-                    value={row.personaRole}
+                    value={row.kind}
                   />
                 </div>
-              </div>
-
-              <PersonaPhotoField
-                applyToAll={row.applyToAll}
-                disabled={locked}
-                idBase={`${base}-persona`}
-                name={row.personaName}
-                onApplyToAllChange={(checked) => setApplyToAll(row.key, checked)}
-                onChange={(path) => setPhoto(row.key, path)}
-                onUpload={(image) => uploadPersonaPhoto({ image })}
-                onUploadingChange={(on) => setRowUploading(row.key, on)}
-                path={row.personaAvatarPath}
-                uploading={uploading.has(row.key)}
-              />
+              ) : null}
 
               <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
-                {copy.columns.body}
-                <textarea className={cn(adminTextareaClass, "min-h-16")} disabled={locked} maxLength={CHAT_LIMITS.body} onChange={(event) => updateRow(row.key, { body: event.target.value })} rows={2} value={row.body} />
+                {row.kind === "question" ? PESSOAS.pergunta : copy.columns.body}
+                <textarea
+                  className={cn(adminTextareaClass, "min-h-16")}
+                  disabled={locked}
+                  maxLength={row.kind === "question" ? CHAT_LIMITS.question : CHAT_LIMITS.body}
+                  onChange={(event) => updateRow(row.key, { body: event.target.value })}
+                  rows={2}
+                  value={row.body}
+                />
               </label>
 
               <div className="flex min-w-0 flex-col gap-1.5">

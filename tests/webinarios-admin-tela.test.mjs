@@ -65,6 +65,9 @@ export const archiveWebinar = fail;
 export const unarchiveWebinar = fail;
 export const rescheduleSession = fail;
 export const uploadWebinarCover = fail;`,
+  // As pessoas que comentam (11/11/2026, D75): a lista do Roteiro grava pela propria Server Action.
+  "@/server/webinars/persona-actions": `const fail = async () => ({ error: "Falhou.", ok: false, status: 500 });
+export const savePersona = fail; export const deletePersona = fail;`,
   "@/server/webinars/script-actions": `const fail = async () => ({ error: "Falhou.", ok: false, status: 500 });
 export const saveScriptItems = fail;
 export const importScriptCsv = fail;

@@ -1,8 +1,9 @@
 "use client";
 
 import { CornerDownRight, LoaderCircle, LockKeyhole, Send, X } from "lucide-react";
-import { useEffect, type FormEvent, type KeyboardEvent, type RefObject } from "react";
+import { type FormEvent, type KeyboardEvent, type RefObject } from "react";
 import { MemberAvatar } from "@/components/member/ui/member-avatar";
+import { useAutoGrowTextarea } from "@/components/use-auto-grow-textarea";
 
 // Caixa de escrever comentario da aula (docs/12 "Comentarios da aula"): cartao proprio, diferente dos
 // comentarios publicados, com a foto do aluno (ou as iniciais), campo que cresce, faixa "Respondendo a @usuario",
@@ -49,13 +50,8 @@ export function LessonCommentComposer({
   const showCounter = length >= COUNTER_THRESHOLD;
   const submitLabel = replyTarget ? "Responder" : "Publicar";
 
-  useEffect(() => {
-    const textarea = inputRef.current;
-
-    if (!textarea) return;
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
-  }, [inputRef, value]);
+  // O campo cresce com o texto ate o teto; mede de novo quando aparece ou muda de largura (docs/30 D81).
+  useAutoGrowTextarea(inputRef, value, MAX_TEXTAREA_HEIGHT);
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
