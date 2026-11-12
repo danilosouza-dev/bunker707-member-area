@@ -1138,7 +1138,8 @@ select count(*) as total from information_schema.columns where table_schema = 'p
 
 Estado em 12/11/2026: escrita e aplicada só no Supabase local (duas vezes seguidas, sem erro), onde a integração
 `tests/integration/webinarios-v10.test.mjs` roda contra ela (rodou em 12/11/2026; a conferência deu `2`). **Na nuvem de
-teste, falta aplicar**: o produtor aplica pelo SQL Editor, com o `insert` da versão, antes do merge da PR na `dev`.
+teste, aplicada em 12/11/2026** pelo produtor, no SQL Editor, com o `insert` da versão, antes do merge da PR #177 na
+`dev`: a conferência deu `2`.
 
 **Produção (Hetzner)**: nada manual, como na §9.13: o `deploy-membros` roda o `migrate.sh` antes de recriar o app.
 
