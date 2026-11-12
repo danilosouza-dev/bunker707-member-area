@@ -538,7 +538,7 @@ No formulário do banner da entrada **Na tela**, com link e texto do botão pree
 
 ### 14.5 Responder como (P8) e a resposta fora do chat (P1)
 
-No console, o formulário **Responder por escrito** e o campo de responder do fio ganham **Responder como**, em pílulas: **Meu nome** (com o nome entre parênteses), **Equipe**, **Outro nome**. Com **Outro nome**, o campo **Nome que aparece na resposta**, de 2 a 40 caracteres ("Equipe Bunker 707"); vazio ou curto, o botão de responder fica desligado e a frase diz por quê. A escolha fica guardada no navegador de quem responde. Na sala, a resposta da aba Perguntas mostra quem assina: com **Meu nome**, a foto, o nome e o papel (Apresentador, Co-apresentador, Equipe); com **Outro nome**, só o nome; com **Equipe**, o selo **Equipe**, como antes. No fio, o mesmo. A resposta escrita não vira mais mensagem do chat (`docs/30` D85): o chat fica só com a conversa.
+No console, o formulário **Responder por escrito** e o campo de responder do fio ganham **Responder como**, em pílulas: **Meu nome** (com o nome entre parênteses), **Equipe**, **Outro nome**. Com **Outro nome**, o campo **Nome que aparece na resposta**, de 2 a 40 caracteres ("Equipe Bunker 707"); vazio ou curto, o botão de responder fica desligado e a frase diz por quê. A escolha fica guardada no navegador de quem responde. Na sala, a resposta da aba Perguntas mostra quem assina: com **Meu nome**, a foto, o nome e o papel (Apresentador, Co-apresentador, Equipe); com **Outro nome**, só o nome; com **Equipe**, o selo **Equipe**, como antes. No fio, o mesmo. A resposta escrita da equipe não vira mais mensagem do chat (`docs/30` D85): o chat fica só com a conversa. A do Assistente de IA a uma pergunta ainda entra no chat (V2-A72).
 
 ### 14.6 Variar sozinho, no controle dos participantes simulados (P9), sem a frase e sem a caixa (P5)
 
@@ -569,4 +569,4 @@ O controle **Participantes simulados** (o do console e o do card depois do come�
 | V2-A69 | **Embaixo** deve recarregar o vídeo sozinho ao ser escolhido? | não: a pessoa recarrega a página quando quiser, para ninguém cair da sala sem querer |
 | V2-A70 | O comentário na tela deve aparecer também no Replay, no mesmo segundo, e no relatório? | não nesta rodada; a hora de entrada e de saída já ficam gravadas para isso |
 | V2-A71 | Para quem apresenta, **Esconder** deve tirar as miniaturas também da gravação? | sim, é o que o motor faz hoje; o menu avisa |
-
+| V2-A72 | A resposta do Assistente de IA a uma pergunta também deve sair do chat (`docs/30` D85)? | não nesta rodada: no chat moderado a equipe libera essa mensagem na fila; mudar isso pede outro desenho da moderação do Assistente |

@@ -73,7 +73,9 @@ test.describe("aluna e produtor", () => {
     // Sem frase nem caixa (decisao do produtor em 12/11/2026, docs/30 D86): com o numero no campo, o Aplicar ja liga.
     const aplicar = controle.getByRole("button", { exact: true, name: PLATEIA.aplicar });
     await expect(controle.locator("[data-simulation-audience-sentence]")).toHaveCount(0);
-    await expect(controle.getByRole("checkbox")).toHaveCount(0);
+    // A unica caixa do controle e a do "Variar sozinho" (rodada v9, docs/30 D90), desligada: nenhuma de confirmacao.
+    await expect(controle.getByRole("checkbox")).toHaveCount(1);
+    await expect(controle.getByRole("checkbox", { name: new RegExp(`^${PLATEIA.variar.titulo}`) })).not.toBeChecked();
     await expect(aplicar).toBeEnabled();
     await aplicar.click();
     await expect(consolePage.getByText(PLATEIA.aplicado(300))).toBeVisible();

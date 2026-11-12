@@ -260,7 +260,7 @@ test("4. a mensagem da equipe, o retrato do console e a moderacao: liberar, fixa
   assert.deepEqual([(await sessao()).chat_mode, (await sessao()).chat_slow_mode_seconds], ["moderated", 20]);
 });
 
-test("5. enquetes e perguntas: o modelo, abrir na sessao (sem duplicar), a resposta da aluna contada no retrato, encerrar e compartilhar; responder por escrito vira linha da equipe", async () => {
+test("5. enquetes e perguntas: o modelo, abrir na sessao (sem duplicar), a resposta da aluna contada no retrato, encerrar e compartilhar; responder por escrito fica so na pergunta, sem linha no chat (D85)", async () => {
   actAs(produtor);
   const salvas = ok(await roomActions.savePolls({ polls: [{ anonymous: false, kind: "single", options: [{ label: "Sim" }, { label: "Não" }], question: "Vem na próxima?" }], webinarId }));
   const modelo = salvas.polls[0];
@@ -285,8 +285,11 @@ test("5. enquetes e perguntas: o modelo, abrir na sessao (sem duplicar), a respo
   assert.ok(encerrada.poll.resultsSharedAt);
 
   const [pergunta] = retrato.questions;
+  // Desde 12/11/2026 (docs/30 D85) a resposta escrita nao vira mensagem do chat: fica so na pergunta.
+  const chatAntes = (await mensagens()).length;
   const respondida = ok(await roomActions.answerQuestion({ answerText: "Vai, fica 7 dias no replay.", questionId: pergunta.id }));
-  assert.deepEqual([respondida.question.status, respondida.question.answeredBy, respondida.message.kind, respondida.message.source], ["answered", produtor.id, "answer", "team"]);
+  assert.deepEqual([respondida.question.status, respondida.question.answeredBy, respondida.question.answerText, respondida.message], ["answered", produtor.id, "Vai, fica 7 dias no replay.", null]);
+  assert.equal((await mensagens()).length, chatAntes, "nenhuma linha nova no chat");
   // Fase 4c (202610300004): a resposta da equipe fica marcada como da equipe (a do Assistente e 'ai').
   const origem = unwrap(await db.from("webinar_questions").select("answer_source").eq("id", pergunta.id).single(), "Lendo a origem da resposta");
   assert.equal(origem.answer_source, "team");
@@ -374,7 +377,8 @@ test("8. Remover minhas mensagens a pedido: o chat (inclusive a linha mestre), a
   const historico = unwrap(await db.from("student_events").select("event_type, metadata").eq("user_id", aluna.id).eq("entity_type", "webinar"), "Lendo o historico");
   assert.deepEqual(historico.map((row) => [row.event_type, row.metadata.revoked, row.metadata.by_team]), [["webinar_chat_consented", true, true]]);
   const auditoria = unwrap(await db.from("admin_audit_log").select("metadata, entity_id").eq("action", "webinar.student_messages_removed").eq("entity_id", aluna.id), "Lendo a auditoria");
-  assert.equal(auditoria[0].metadata.reason, "pedido pelo e-mail de 29/10");
+  // A auditoria nao e apagada entre as rodadas no banco local (nem entre os arquivos): vale a linha com o motivo desta.
+  assert.ok(auditoria.some((row) => row.metadata.reason === "pedido pelo e-mail de 29/10"), JSON.stringify(auditoria.map((row) => row.metadata.reason)));
 
   const retrato = await consoleQueries.getConsoleSnapshot(webinarId, SESSAO);
   assert.equal(retrato.messages.some((message) => message.authorUserId === aluna.id), false);
