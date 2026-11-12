@@ -552,7 +552,14 @@ deploy() {
     remote "sudo bash infra/licencas/scripts/backup.sh --install-timer >/dev/null && sudo systemctl start bunker707-licencas-backup.service && echo \"  ultimo backup: \$(cat /var/backups/bunker707-licencas/ultimo-sucesso 2>/dev/null)\""
     if [ "${LICENCAS_SEM_PAINEL:-}" != sim ]; then
         log "A conta do produtor no Painel (uma vez; as outras pelo exec-licencas, docs/20 §8C.3)"
-        conta_do_produtor || warn "A conta do produtor no Painel nao foi criada agora (acima). O Emissor esta no ar; rode o deploy-licencas de novo, ou o exec-licencas do docs/20 §8C.3."
+        # O script sai com 3 quando a conta ficou pronta e so o e-mail do link nao saiu (a fila tenta de novo sozinha).
+        local rc=0
+        conta_do_produtor || rc=$?
+        case "$rc" in
+            0) ;;
+            3) warn "A conta do produtor existe no Painel, mas o e-mail com o link de senha nao saiu (acima). A fila do Emissor tenta de novo sozinha: conserte a conta de envio (secrets-licencas) e o e-mail sai na proxima tentativa; se o link vencer, deploy-licencas com LICENCAS_NOVO_LINK=sim." ;;
+            *) warn "A conta do produtor no Painel nao foi criada agora (acima). O Emissor esta no ar; rode o deploy-licencas de novo, ou o exec-licencas do docs/20 §8C.3." ;;
+        esac
     fi
     fw_close_all
 
