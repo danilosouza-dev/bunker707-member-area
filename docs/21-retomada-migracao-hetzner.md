@@ -963,10 +963,9 @@ o 16, o tick que solta o item vencido da live com a foto e o **Enviar agora**; o
 resumo e o relatório da live com o bloco Simulação à parte), todos os `tests/integration/webinarios*.test.mjs` passaram
 um arquivo por vez contra o banco local, e o ponta a ponta novo `produtor-solta-comentario-na-live` rodou no Chromium com
 os de webinário de antes. Os testes 5 a 7 já conferem, no banco local, o check novo, os checks da foto e a troca da
-`webinar_open_session`. **Na nuvem de teste, pendente**: **antes
-do merge na `dev`, o produtor aplica a `202611100002` na nuvem de teste** (o arquivo inteiro, como acima), roda as oito
-consultas de conferência e confere a linha `202611100002` em `supabase_migrations.schema_migrations`. Quem escreveu
-esta parte não tocou na nuvem de teste: a aplicação fica com o produtor, como na §9.12. Quando aplicar, atualizar este parágrafo com a data e quem aplicou. Se o arquivo mudar depois disso, ele não roda de
+`webinar_open_session`. **Na nuvem de teste, aplicada em 11/11/2026** pelo produtor, no SQL Editor (o arquivo
+inteiro e a linha `202611100002` em `supabase_migrations.schema_migrations`), antes do merge da PR #169 na `dev`; a
+conferência de uma linha deu 2 tabelas, versão 1 e a regra da live 1. Se o arquivo mudar depois disso, ele não roda de
 novo na nuvem de teste: a mudança vira uma migração nova, e a guarda (o hash) avisa.
 
 **Produção (Hetzner)**: nada manual. O `deploy-membros` roda o `migrate.sh` antes de recriar o app, na ordem dos nomes;
@@ -1016,9 +1015,13 @@ o "Adriano Souza" do teste do produtor).
 Estado em 11/11/2026: escrita e aplicada no Supabase **local** pelo `psql` (duas vezes, para conferir que é idempotente),
 com a consulta acima dando 12 e o preenchimento e a `webinar_open_session` conferidos numa transação desfeita. A
 integração `tests/integration/webinarios-pessoas.test.mjs` e o ponta a ponta `tests/e2e/produtor-pessoas-que-comentam.spec.ts`
-foram escritos e ainda não rodaram (quem junta a rodada v8 roda). **Na nuvem de teste, pendente**: antes do merge na
-`dev`, o produtor aplica a `202611140001`, roda a conferência e confere a linha em `schema_migrations`; quem escreveu
-esta parte não tocou na nuvem. Quando aplicar, atualizar este parágrafo com a data e quem aplicou.
+foram escritos e ainda não rodaram (quem junta a rodada v8 roda). Depois, em 11/11/2026, a integração e o ponta a
+ponta rodaram contra o banco local com as quatro frentes juntas. **Na nuvem de teste, aplicada em 12/11/2026** pelo
+produtor, no SQL Editor, antes do merge da PR #172 na `dev`: a conferência deu `12` e o preenchimento criou o "Adriano
+Souza". O arquivo foi aplicado ainda com o nome de antes (`202611110001`), que colidiu com a `202611110001` do produto
+licenciado (PR #168, `license_state_request_host`): o `insert` da versão não gravou nada (`on conflict do nothing`) e,
+depois da renumeração para `202611140001`, a linha `('202611140001', 'webinars_v8_pessoas')` foi gravada à parte e
+conferida. O conteúdo é o mesmo; nada roda de novo.
 
 **Produção (Hetzner)**: nada manual; o `deploy-membros` roda o `migrate.sh` antes de recriar o app. Vale a regra R1 do
 `docs/29` (a migração no banco antes do app novo no ar).
@@ -1052,9 +1055,11 @@ select has_table_privilege('authenticated', 'public.webinar_simulation_changes',
 
 Estado em 11/11/2026: escrita, sem aplicar em lugar nenhum (a rodada que a escreveu não tocou no banco local, que outras
 frentes usavam). A integração `tests/integration/webinarios-plateia.test.mjs` e o ponta a ponta
-`tests/e2e/produtor-muda-plateia-no-ar.spec.ts` rodam contra ela no Supabase local. **Na nuvem de teste, pendente**:
-antes do merge na `dev`, o produtor aplica a `202611140002` (o arquivo inteiro), roda a conferência acima e confere a
-linha em `supabase_migrations.schema_migrations`. Quando aplicar, atualizar este parágrafo com a data e quem aplicou.
+`tests/e2e/produtor-muda-plateia-no-ar.spec.ts` rodam contra ela no Supabase local (rodaram em 11/11/2026, com as
+quatro frentes juntas). **Na nuvem de teste, aplicada em 12/11/2026** pelo produtor, no SQL Editor, antes do merge da
+PR #172 na `dev`: a conferência deu `false | true | 2`. Como a §9.14, foi aplicada ainda com o nome de antes
+(`202611110002`, que é a `held_sales` do produto licenciado): a linha `('202611140002', 'webinars_v8_plateia')` foi
+gravada à parte depois da renumeração e conferida.
 
 **Produção (Hetzner)**: nada manual, como na §9.13: o `deploy-membros` roda o `migrate.sh` antes de recriar o app.
 
