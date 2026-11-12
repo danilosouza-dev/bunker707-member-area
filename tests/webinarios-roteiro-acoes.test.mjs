@@ -98,6 +98,9 @@ const DEFAULTS = {
 const UNIQUE = {
   webinar_chat_messages: (row, rows) => row.script_item_id != null && rows.some((other) => other.session_id === row.session_id && other.script_item_id === row.script_item_id),
   webinar_poll_answers: (row, rows) => rows.some((other) => other.poll_id === row.poll_id && other.user_id === row.user_id),
+  // Uma curtida por pessoa em cada alvo (os dois indices unicos parciais da 202611170001) e um voto por pessoa na pergunta.
+  webinar_question_likes: (row, rows) => rows.some((other) => other.question_id === row.question_id && other.user_id === row.user_id && (other.reply_id ?? null) === (row.reply_id ?? null)),
+  webinar_question_votes: (row, rows) => rows.some((other) => other.question_id === row.question_id && other.user_id === row.user_id),
   webinar_sessions: (row, rows) => row.kind === "replay" && rows.some((other) => other.webinar_id === row.webinar_id && other.kind === "replay")
 };
 
@@ -392,6 +395,7 @@ test("sem permissão: 403 em toda ação do roteiro e do console, sem tocar no b
     () => roomActions.answerQuestion({ answerText: "x", questionId: randomUUID() }),
     () => roomActions.setQuestionStatus({ questionId: randomUUID(), status: "dismissed" }),
     () => roomActions.markQuestionSeen({ questionId: randomUUID() }),
+    () => roomActions.likeQuestionItem({ questionId: randomUUID(), target: "question" }),
     () => roomActions.saveSimulation({ sessionId: SESSAO_MARCADA, showLiveBadge: false }),
     () => roomActions.createReplaySession({ webinarId: WEBINAR }),
     () => roomActions.cancelReplaySession({ webinarId: WEBINAR }),
@@ -1171,11 +1175,11 @@ test("banco sem a 202611100001: responder e apagar no fio pela equipe voltam 409
 
   const resposta = await roomActions.replyToQuestion({ body: "E fica no Replay tambem.", questionId: pergunta.id });
   assert.deepEqual([resposta.ok, resposta.status], [false, 409]);
-  // A frase aponta a mais nova dos webinarios (WEBINARS_MIGRATION, hoje a 202611160001 da rodada v10): aplicar ate ela
+  // A frase aponta a mais nova dos webinarios (WEBINARS_MIGRATION, hoje a 202611170001 da rodada v11): aplicar ate ela
   // inclui a do fio.
-  assert.equal(resposta.error, "Esta parte precisa da atualização do banco (migração 202611160001).");
+  assert.equal(resposta.error, "Esta parte precisa da atualização do banco (migração 202611170001).");
   const apagar = await roomActions.deleteQuestionReply({ replyId: randomUUID() });
-  assert.deepEqual([apagar.ok, apagar.status, apagar.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611160001)."]);
+  assert.deepEqual([apagar.ok, apagar.status, apagar.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611170001)."]);
   assert.equal(db.tables.admin_audit_log.length, 0);
   assert.equal(db.tables.notifications.length, 0);
 });
@@ -1234,6 +1238,76 @@ test("Marcar como vista (rodada v10, D94): grava quando e quem viu o fio, nada m
   const semMigracao = await roomActions.markQuestionSeen({ questionId: pergunta.id });
   assert.deepEqual([semMigracao.ok, semMigracao.status, semMigracao.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611160001)."]);
   assert.equal(semColunas.tables.webinar_questions[0].thread_seen_at, undefined);
+});
+
+test("Curtir pela equipe (rodada v11, D101): a pergunta alterna o voto de quem esta no console; a resposta escrita e a resposta do fio alternam a curtida; a pergunta sem resposta escrita, a resposta apagada ou de outra pergunta, 404; banco sem a 202611170001, 409 com a frase dela", async () => {
+  const antes = new Date(Date.now() - 3 * MIN).toISOString();
+  const pergunta = { ...DEFAULTS.webinar_questions, answer_text: "Fica 7 dias.", answered_at: antes, answered_by: HOST, body: "Vai ter replay?", created_at: antes, display_name: "Ana M.", id: randomUUID(), offset_ms: 2_000, session_id: SESSAO_NO_AR, status: "answered", updated_at: antes, upvotes: 0, user_id: ALUNA };
+  const aberta = { ...pergunta, answer_text: null, answered_at: null, answered_by: null, body: "E o material?", id: randomUUID(), status: "open" };
+  const resposta = { anonymous: false, body: "Obrigada!", created_at: antes, deleted_at: null, display_name: "Ana M.", id: randomUUID(), question_id: pergunta.id, role: "student", session_id: SESSAO_NO_AR, user_id: ALUNA };
+  const apagada = { ...resposta, deleted_at: antes, id: randomUUID() };
+  const deOutra = { ...resposta, id: randomUUID(), question_id: aberta.id };
+  const db = usar(bancoEmMemoria(cenario({ webinar_question_likes: [], webinar_question_replies: [resposta, apagada, deOutra], webinar_question_votes: [], webinar_questions: [pergunta, aberta] })));
+  const curtidas = () => db.tables.webinar_question_likes;
+
+  // A pergunta: o mesmo voto do aluno, com o total gravado na pergunta.
+  const votou = ok(await roomActions.likeQuestionItem({ questionId: pergunta.id, target: "question" }));
+  assert.deepEqual([votou.liked, votou.likes, votou.target, votou.replyId], [true, 1, "question", null]);
+  assert.deepEqual(db.tables.webinar_question_votes.map((row) => [row.question_id, row.user_id]), [[pergunta.id, HOST]]);
+  assert.equal(db.tables.webinar_questions.find((row) => row.id === pergunta.id).upvotes, 1);
+  const desvotou = ok(await roomActions.likeQuestionItem({ questionId: pergunta.id, target: "question" }));
+  assert.deepEqual([desvotou.liked, desvotou.likes], [false, 0]);
+  assert.equal(db.tables.webinar_question_votes.length, 0);
+  assert.equal(curtidas().length, 0, "o voto da pergunta nunca vira curtida de resposta");
+
+  // A resposta escrita: reply_id nulo, com a sessao na linha.
+  const curtiu = ok(await roomActions.likeQuestionItem({ questionId: pergunta.id, target: "answer" }));
+  assert.deepEqual([curtiu.liked, curtiu.likes, curtiu.replyId], [true, 1, null]);
+  assert.deepEqual(curtidas().map((row) => [row.question_id, row.reply_id ?? null, row.session_id, row.user_id]), [[pergunta.id, null, SESSAO_NO_AR, HOST]]);
+  // A resposta do fio: outra linha, sem mexer na da resposta escrita.
+  const noFio = ok(await roomActions.likeQuestionItem({ questionId: pergunta.id, replyId: resposta.id, target: "reply" }));
+  assert.deepEqual([noFio.liked, noFio.likes, noFio.replyId], [true, 1, resposta.id]);
+  assert.equal(curtidas().length, 2);
+  // De novo: tira so a do alvo tocado.
+  const tirou = ok(await roomActions.likeQuestionItem({ questionId: pergunta.id, target: "answer" }));
+  assert.deepEqual([tirou.liked, tirou.likes], [false, 0]);
+  assert.deepEqual(curtidas().map((row) => row.reply_id ?? null), [resposta.id]);
+  assert.ok(estado.revalidados.length > 0, "o console recarrega");
+  assert.equal(db.tables.webinar_chat_messages.length, 0, "nada vai ao chat");
+  assert.equal(db.tables.notifications.length, 0, "nem ao sino");
+
+  // O que nao existe para curtir: 404, sem gravar.
+  const total = curtidas().length;
+  for (const input of [
+    { questionId: aberta.id, target: "answer" },
+    { questionId: pergunta.id, replyId: apagada.id, target: "reply" },
+    { questionId: pergunta.id, replyId: deOutra.id, target: "reply" },
+    { questionId: pergunta.id, replyId: randomUUID(), target: "reply" },
+    { questionId: randomUUID(), target: "question" }
+  ]) {
+    const result = await roomActions.likeQuestionItem(input);
+    assert.deepEqual([result.ok, result.status], [false, 404], JSON.stringify(input));
+  }
+  assert.equal(curtidas().length, total);
+  // O pedido torto nem chega ao banco.
+  assert.equal((await roomActions.likeQuestionItem({ questionId: pergunta.id, target: "reply" })).ok, false);
+
+  // O banco sem a tabela (o PostgREST responde PGRST205): 409 com a frase da migracao; o voto da pergunta continua valendo.
+  const semTabela = usar(bancoEmMemoria(cenario({ webinar_question_replies: [resposta], webinar_question_votes: [], webinar_questions: [pergunta] })));
+  const from = semTabela.from;
+  semTabela.from = (table) => {
+    if (table !== "webinar_question_likes") {
+      return from(table);
+    }
+    const falha = { data: null, error: { code: "PGRST205", message: "Could not find the table 'public.webinar_question_likes' in the schema cache" } };
+    const self = new Proxy({}, { get: (_target, prop) => (prop === "then" ? (resolve, reject) => Promise.resolve(falha).then(resolve, reject) : () => self) });
+    return self;
+  };
+  for (const input of [{ questionId: pergunta.id, target: "answer" }, { questionId: pergunta.id, replyId: resposta.id, target: "reply" }]) {
+    const semMigracao = await roomActions.likeQuestionItem(input);
+    assert.deepEqual([semMigracao.ok, semMigracao.status, semMigracao.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611170001)."], input.target);
+  }
+  assert.equal(ok(await roomActions.likeQuestionItem({ questionId: pergunta.id, target: "question" })).liked, true);
 });
 
 test("a leitura das perguntas tolera o banco sem as colunas novas (D94): tenta a lista da v10, depois a da v9, depois a de sempre; a lista que falhou fica de fora por 1 min", async () => {

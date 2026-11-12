@@ -155,6 +155,20 @@ export type QuestionPostInput = z.infer<typeof questionBodySchema>;
 
 export const questionVoteBodySchema = z.object({ sessionId: sessionIdSchema });
 
+/**
+ * POST /questions/[qid]/like (docs/30 D101): curtir ou tirar a curtida da resposta escrita da pergunta (`replyId` nulo
+ * ou ausente) ou de uma resposta do fio.
+ */
+export const questionLikeBodySchema = z.object({ replyId: uuidSchema.nullable().optional(), sessionId: sessionIdSchema });
+
+/**
+ * A curtida da equipe no console (docs/30 D101): a propria pergunta, a resposta escrita ou uma resposta do fio (so
+ * esta leva o `replyId`).
+ */
+export const likeQuestionItemSchema = z
+  .object({ questionId: uuidSchema, replyId: uuidSchema.nullable().optional(), target: z.enum(["answer", "question", "reply"]) })
+  .refine((value) => (value.target === "reply") === Boolean(value.replyId), { message: "Resposta inválida.", path: ["replyId"] });
+
 /** POST /questions/[qid]/replies: a resposta do aluno no fio da propria pergunta (com o aceite, se ele mudou de versao). */
 export const questionReplyBodySchema = z.object({
   ...consentFields,

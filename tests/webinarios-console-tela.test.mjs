@@ -81,7 +81,7 @@ export const clearMessageTranslations = fail;`,
 export const saveScreenItem = fail; export const archiveScreenItem = fail; export const uploadScreenImage = fail; export const showScreenItem = fail; export const hideScreenItem = fail; export const showScreenComment = fail; export const hideScreenComment = fail;`,
   "@/server/webinars/room-actions": `${fail}
 export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const pinPoll = fail; export const unpinPoll = fail; export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;
-export const createConsolePoll = fail; export const markQuestionSeen = fail;`
+export const createConsolePoll = fail; export const markQuestionSeen = fail; export const likeQuestionItem = fail;`
 };
 
 function withExtension(base) {
@@ -616,7 +616,10 @@ test("roteiro: a fila com o que entrou, Soltar agora so no que falta e no manual
   assert.deepEqual(order, ["q-top", "q-1", "q-respondida", "q-dispensada"], "abertas por voto, depois respondidas, dispensadas no fim");
   // Legado: a pergunta gravada como anonima antes de 10/11/2026 continua "Anônima" no console.
   assert.match(textOf(questions), /Anônima/);
-  assert.match(textOf(questions), /5 votos/);
+  // Os votos da pergunta agora sao o polegar com o numero, que a equipe tambem curte (rodada v11, docs/30 D101); a
+  // total vai no nome do botao.
+  assert.match(questions, /<button aria-label="Curtir, 5 curtidas" aria-pressed="false"[^>]*data-console-like="question"[^>]*>/);
+  assert.doesNotMatch(textOf(questions), /5 votos/);
   assert.match(textOf(questions), /Sim, 7 dias\./);
   assert.equal(count(questions, />Responder por escrito</g), 2);
   assert.equal(count(questions, />Respondida ao vivo</g), 2);

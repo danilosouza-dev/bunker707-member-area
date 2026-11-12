@@ -22,6 +22,7 @@ import {
   listPollAnswerRows,
   listPollRows,
   listStudentPollAnswerRows,
+  listQuestionLikeRows,
   listQuestionReplyRows,
   listQuestionRows,
   listReactionRowsSince,
@@ -31,6 +32,7 @@ import {
 } from "./chat-store";
 import { chatMessageFromRow, chatMessageFromWindowRow, pollAnswerFromRow, pollFromRow, questionFromRow, questionReplyFromRow, type ConsentRow } from "./chat-rows";
 import { WebinarError, webinarsDb, type WebinarsDb } from "./db";
+import { tallyQuestionLikes } from "./question-likes-model";
 import {
   CHAT_LIMITS,
   REACTIONS,
@@ -71,6 +73,7 @@ import {
   questionVisibleAt,
   studentPollOf,
   toStudentQuestion,
+  withQuestionLikes,
   toStudentReply,
   type ChatCursor,
   type StudentPoll,
@@ -366,11 +369,13 @@ export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userI
   const simulated = session.kind === "simulated";
   const live = session.kind === "live";
   const presence = presenceOffsetMs(session, now);
+  const showPresentCount = webinar.roomSettings.showPresentCount;
   const [identity, pinnedRow, polls, presentIds, bans, screen] = await Promise.all([
     loadStudentIdentity(db, userId),
     fetchPinnedMessageRow(db, session.pinnedMessageId),
     listStudentPolls(db, session, userId, now),
-    simulated || live ? listPresentUserIds(db, { currentBucket: presenceBucket(Math.floor((Number.isFinite(presence) ? presence : 0) / 1000)), sessionId: session.id }) : Promise.resolve([]),
+    // Com o numero de pessoas escondido dos alunos (docs/30 D102), a contagem nem e lida.
+    (simulated || live) && showPresentCount ? listPresentUserIds(db, { currentBucket: presenceBucket(Math.floor((Number.isFinite(presence) ? presence : 0) / 1000)), sessionId: session.id }) : Promise.resolve([]),
     // Remover e silenciar valem na live (fase 3) e na gravada (a Na tela, R5); o banido de todos os webinarios vale em
     // qualquer forma (D33), o Replay inclusive.
     live || simulated ? fetchStudentBans(db, { sessionId: session.id, userId }) : fetchUserBan(db, userId).then((userBan) => ({ sessionBans: [], userBan })),
@@ -393,7 +398,9 @@ export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userI
     },
     pinned,
     polls,
-    presentNow: presentIds.length,
+    // A equipe escolheu nao mostrar aos alunos quantas pessoas estao na sala (docs/30 D102): o numero nao sai do servidor.
+    presentHidden: !showPresentCount,
+    presentNow: showPresentCount ? presentIds.length : 0,
     screen,
     replaySessionId: openReplaySessionId(context.sessions),
     session: {
@@ -576,11 +583,14 @@ export function studentRepliesByQuestion(replies: readonly QuestionReply[], user
 }
 
 export async function listStudentQuestions(db: WebinarsDb, session: Pick<WebinarSession, "id" | "webinarId">, userId: string, order: "recent" | "votes", now = Date.now()): Promise<StudentQuestion[]> {
-  const [rows, replyRows] = await Promise.all([
+  const [rows, replyRows, likeRows] = await Promise.all([
     // O filtro no banco tambem: a simulada do futuro nunca ocupa um dos 200 lugares das perguntas de agora.
     listQuestionRows(db, { order, sessionId: session.id, statuses: ["open", "answered", "dismissed"], visibleAt: new Date(now).toISOString() }),
-    listQuestionReplyRows(db, { sessionId: session.id })
+    listQuestionReplyRows(db, { sessionId: session.id }),
+    // As curtidas da resposta e do fio (docs/30 D101); sem a 202611170001, nenhuma.
+    listQuestionLikeRows(db, { sessionId: session.id })
   ]);
+  const likes = tallyQuestionLikes(likeRows, userId);
   // A pergunta simulada so aparece quando a hora dela chega (D77: a da Live gravada nasce com o minuto do item).
   const questions = rows.map(questionFromRow).filter((question) => questionVisibleAt(question, now));
   const replies = replyRows.map(questionReplyFromRow);
@@ -610,7 +620,8 @@ export async function listStudentQuestions(db: WebinarsDb, session: Pick<Webinar
         answerAuthorPhotoUrl(question, session.webinarId, photos)
       )
     )
-    .filter((question): question is StudentQuestion => question !== null);
+    .filter((question): question is StudentQuestion => question !== null)
+    .map((question) => withQuestionLikes(question, likes));
 }
 
 /** Quanto as contagens de uma enquete com o resultado compartilhado valem na memoria do processo. */

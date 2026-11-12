@@ -149,6 +149,12 @@ export type RoomSettings = {
    * teto de 4 do V2-A60 saiu): ligado, todo aluno pode falar, e a equipe silencia uma pessoa ou todos.
    */
   selfUnmute: boolean;
+  /**
+   * Mostrar aos alunos quantas pessoas estao na sala (rodada v11, docs/30 D102; pedido do produtor de 12/11/2026).
+   * Ligado por padrao, tambem no webinario de antes (a chave ausente). Desligado, a sala do aluno nao mostra o numero
+   * em lugar nenhum e o servidor nem o manda; a equipe continua vendo no console.
+   */
+  showPresentCount: boolean;
   slowModeSeconds: SlowModeSeconds | null;
   waitingRoom: boolean;
 };
@@ -317,6 +323,7 @@ export function defaultRoomSettings(): RoomSettings {
     questions: true,
     reactions: true,
     selfUnmute: false,
+    showPresentCount: true,
     slowModeSeconds: null,
     waitingRoom: false
   };
@@ -836,6 +843,9 @@ export type QuestionReply = {
   createdAt: string;
   displayName: string;
   id: string;
+  /** As curtidas desta resposta e se quem le curtiu (so nas leituras do console, docs/30 D101). */
+  liked?: boolean;
+  likes?: number;
   questionId: string;
   role: QuestionReplyRole;
   sessionId: string;
@@ -879,6 +889,13 @@ export type WebinarQuestion = {
    * aluno escrever de novo. So o console le; nunca vai para o aluno. Ausente ou nulo: nunca marcado.
    */
   threadSeenAt?: string | null;
+  /**
+   * So nas leituras do console (docs/30 D101): as curtidas da resposta escrita e se quem esta no console curtiu
+   * (`answerLikes`, `answerLiked`), e se ele curtiu a propria pergunta (`voted`; o total e `upvotes`).
+   */
+  answerLiked?: boolean;
+  answerLikes?: number;
+  voted?: boolean;
   upvotes: number;
   /** Quem perguntou; nulo so na pergunta simulada. */
   userId: string | null;

@@ -1,6 +1,6 @@
 "use client";
 
-import { DoorOpen, LogIn, PictureInPicture2, RefreshCw, Users } from "lucide-react";
+import { DoorOpen, Hand, LogIn, PictureInPicture2, RefreshCw, Users } from "lucide-react";
 import { useEffect, useState, type CSSProperties, type RefObject } from "react";
 import { columnWanted, stageColumnShown, stageRowShown } from "@/components/member/webinars/room/live-room-model";
 import { stageVideoBottomPx, stageVideoRightPx } from "@/components/member/webinars/room/room-layout-model";
@@ -53,6 +53,10 @@ type ConsoleStageProps = {
   className: string;
   handle: LiveRoomHandle;
   live: LiveConsoleSnapshot;
+  /** Quantas maos estao levantadas (a fila da aba Mãos); com `onHands`, o selo do palco (docs/30 D99). */
+  handsCount?: number;
+  /** O toque no selo das maos: abre a aba Mãos. */
+  onHands?: () => void;
   /** O toque nos presentes (docs/30 D79): abre os participantes simulados. Sem ele, a pilula fica so como texto. */
   onPresent?: () => void;
   /** "12 presentes · pico 14" (consolePresenceBadge); nulo, o canto de cima a direita fica vazio. */
@@ -101,7 +105,7 @@ function frameMessage(handle: LiveRoomHandle, status: WebinarSession["status"], 
   }
 }
 
-export function ConsoleStage({ busy, className, handle, live, onPresent, presentLabel, presenterName, screenLabel = null, session, stageRef, thumbs = "side", topLeft }: ConsoleStageProps) {
+export function ConsoleStage({ busy, className, handle, handsCount = 0, live, onHands, onPresent, presentLabel, presenterName, screenLabel = null, session, stageRef, thumbs = "side", topLeft }: ConsoleStageProps) {
   const geometry = useStageGeometry(stageRef);
   const { joined, room } = handle;
   const frameWidth = geometry.frameWidth;
@@ -122,7 +126,7 @@ export function ConsoleStage({ busy, className, handle, live, onPresent, present
   // A troca entre Lateral e Embaixo (docs/30 D96): com nada de quem esta no console no ar, o video recarrega sozinho,
   // uma vez (o iframe novo ja monta do jeito escolhido); com o microfone, a camera ou a tela ligados, fica com o menu.
   const thumbsReload = consoleThumbsReload(handle, thumbs);
-  const reloadVideo = handle.retry;
+  const reloadVideo = handle.reloadVideo;
   useEffect(() => {
     if (thumbsReload !== "auto") {
       return;
@@ -143,6 +147,7 @@ export function ConsoleStage({ busy, className, handle, live, onPresent, present
   const badge = consoleStageBadgeFor({ joined, presenterName, role: handle.role, room });
   const videoRightPx = stageVideoRightPx({ columnShown: stageColumnShown(room, joined, row), touch: geometry.touch });
   const videoBottomPx = stageVideoBottomPx({ rowShown: stageRowShown(room, joined, row) });
+  const handsShown = joined && handsCount > 0 && Boolean(onHands);
 
   return (
     <div className={className} data-console-slot="stage" data-live-frame-status={handle.frameStatus} style={{ "--room-video-bottom": `${videoBottomPx}px`, "--room-video-right": `${videoRightPx}px` } as CSSProperties}>
@@ -154,8 +159,24 @@ export function ConsoleStage({ busy, className, handle, live, onPresent, present
         recording={recording}
         topLeft={topLeft}
         topRight={
-          presentLabel || screenLabel ? (
+          presentLabel || screenLabel || handsShown ? (
             <>
+              {handsShown ? (
+                // A mao levantada no palco, com o desenho da area (docs/30 D99): quantas maos, e o toque abre a fila.
+                <button
+                  aria-label={WEBINAR_COPY.consoleV2.filaDeMaos.selo(handsCount)}
+                  className={cn("pointer-events-auto rounded-full", ROOM_FOCUS)}
+                  data-console-hands-open="stage"
+                  onClick={onHands}
+                  title={WEBINAR_COPY.consoleV2.filaDeMaos.selo(handsCount)}
+                  type="button"
+                >
+                  <RoomStagePill className="tabular-nums" data-room-badge="hands">
+                    <Hand aria-hidden="true" />
+                    {handsCount}
+                  </RoomStagePill>
+                </button>
+              ) : null}
               {presentLabel && onPresent ? (
                 // A pilula e o botao dos participantes simulados (D79): a camada dos selos nao recebe o toque, o botao sim.
                 <button
@@ -186,7 +207,15 @@ export function ConsoleStage({ busy, className, handle, live, onPresent, present
           ) : null
         }
       />
-      {message ? (
+      {handle.reloading ? (
+        // A troca das miniaturas (docs/30 D98): o video recarrega em segundos; nem "Abrindo a sala" nem o Entrar na sala.
+        <div className={cn("absolute inset-0 flex items-center justify-center p-4 text-center", COVER)} data-live-stage-reloading="">
+          <p aria-live="polite" className="flex items-center gap-2 text-sm leading-5 text-white/85" role="status">
+            <RefreshCw aria-hidden="true" className="size-4 animate-spin motion-reduce:animate-none" />
+            {WEBINAR_COPY.salaV2.visao.miniaturas.mudando}
+          </p>
+        </div>
+      ) : message ? (
         <div className={cn("absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center", COVER)} data-live-stage-message="">
           <p className="max-w-md text-sm leading-5 text-white/85">{message}</p>
           <div className="flex flex-wrap items-center justify-center gap-2">
@@ -205,7 +234,7 @@ export function ConsoleStage({ busy, className, handle, live, onPresent, present
           </div>
         </div>
       ) : null}
-      {handle.frameStatus === "left" ? (
+      {handle.frameStatus === "left" && !handle.reloading ? (
         <div className={cn("absolute inset-0 flex items-center justify-center p-4", COVER)} data-live-stage-left="">
           <RoomButton onClick={handle.retry} size="sm">
             <LogIn aria-hidden="true" />

@@ -52,6 +52,7 @@ import {
 import { LiveSettings } from "./live-settings";
 import { LiveStage } from "./live-stage";
 import { ROOM_PANEL_ID } from "./room-bar";
+import { RoomEndedDialog, endedDialogOpens } from "./room-ended-dialog";
 import { RoomLeaveDialog } from "./room-leave-dialog";
 import { RoomChatMoreButton, RoomChatPanel } from "./room-chat";
 import { RoomChatPills } from "./room-chat-pills";
@@ -88,6 +89,8 @@ import { RoomPollsTab } from "./room-polls";
 import { RoomQuestionsOrderButton, RoomQuestionsTab } from "./room-questions";
 import type { QuestionsFilter, QuestionsOrder } from "./room-questions-model";
 import { RoomRail } from "./room-rail";
+import { QUESTION_NEWS_SNACK_ACTION } from "./room-question-news-model";
+import { useRoomQuestionNews } from "./use-room-question-news";
 import { RoomReactionBubbles } from "./room-reactions";
 import { RoomSimulationJoins, RoomSimulationSales } from "./room-simulation";
 import { RoomSnackbarHost, RoomSnackbarProvider, useRoomSnackbarController } from "./room-snackbar";
@@ -309,6 +312,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const [removeOpen, setRemoveOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useRoomPanelOpen();
   const [confirmLeave, setConfirmLeave] = useState(false);
+  // A live acabou com o aluno na sala (docs/30 D104): a janela da area avisa (o dialogo do motor continua desligado).
+  const [endedNotice, setEndedNotice] = useState(false);
   const [reactionsOpen, setReactionsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // O menu da Visão do vídeo (docs/31 V2-16): aberto pela sala, para nunca ficar junto com Reagir ou Configurações.
@@ -345,6 +350,14 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   // O iframe pode montar quando a sala esta aberta para a pessoa (a tranca so barra quem ainda nao entrou).
   const allowed = !readOnly && liveRoomScreen({ ...screenInput, inRoom: true }) === "open";
   const phase = livePhaseOf(status);
+  // A fase mudou de "no ar" para "encerrada" com a pagina aberta: a janela abre (a decisao na renderizacao, sem efeito).
+  const [phaseSeen, setPhaseSeen] = useState(phase);
+  if (phaseSeen !== phase) {
+    setPhaseSeen(phase);
+    if (endedDialogOpens(phaseSeen, phase)) {
+      setEndedNotice(true);
+    }
+  }
   const writable = liveAcceptsWrites(status);
 
   /** O join-token (ou um lote de sinais) recusou: a tela muda na hora e a sessao e relida. 404: fora do acesso, de vez. */
@@ -642,6 +655,14 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   // O contador do balao e do Chat do trilho: as mensagens novas desde que o Chat saiu da tela. Na live so os ids contam
   // (o zero do offset anda quando a live comeca atrasada e com a ancora da gravacao: panelUnreadMark).
   const unread = useRoomPanelUnread({ chatLoaded: chat.loaded, kind: "live", messages: translation.messages, offsetMs: nowMs + skewMs - zeroMs, chatShown });
+  // As respostas novas nas perguntas do aluno (docs/30 D100): contam com a aba Perguntas fora da tela.
+  const questionNews = useRoomQuestionNews({
+    enabled: !readOnly && !blocked && phase !== "ended" && tabs.includes("perguntas"),
+    sessionId,
+    shown: panelShown && tab === "perguntas",
+    tabMounted: tab === "perguntas",
+    webinarId
+  });
   const firstFocus = firstFocusTarget({ panelShown });
   const replayHref = session.webinar.replaySessionId ? roomHref(session.webinar.slug, session.webinar.replaySessionId) : null;
   const scheduledMs = Date.parse(session.session.scheduledAt);
@@ -664,7 +685,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const simulationOffsetMs = simulationClockMs({ kind: "live", scheduledAt, startedAt }, nowMs + skewMs);
   // O numero de quem assiste some com a live encerrada; no palco ele e o selo ao lado do selo do momento (docs/31 §11.5).
   // Com a Simulacao (R7), o real mais a parte simulada daquele instante, como na gravada (o selo e a aba Participantes).
-  const presentShown = phase === "ended" ? null : simulation.displayCount(presentNow, simulationOffsetMs);
+  // A equipe pode esconder dos alunos quantas pessoas estao na sala (docs/30 D102): sem numero no palco, no titulo e na aba.
+  const presentShown = phase === "ended" || session.presentHidden === true ? null : simulation.displayCount(presentNow, simulationOffsetMs);
   const presentBadge = roomPresentBadge(presentShown);
   const metaLine = roomDateLine({ durationMinutes: session.webinar.durationMinutes, kind: "live", presenterName, scheduledAt: session.session.scheduledAt }).join(" · ");
   const mobileLine = roomMobileLine(presenterName);
@@ -724,10 +746,26 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
 
   // A confirmacao de Sair: o foco entra no Voltar dela e volta para quem a abriu.
   const rememberLeaveOpener = useRoomConfirmFocus(rootRef, confirmLeave);
+  // A janela "A live foi encerrada": o foco entra no OK dela e, ao fechar, volta para a sala.
+  useRoomConfirmFocus(rootRef, endedNotice && !confirmLeave);
 
   // O aviso da barra (ou o da troca de aparelho) entra no aviso da sala; quando ele sai daqui (o microfone abriu depois
   // do aviso do prazo, a troca acabou), sai de la tambem.
   const snackbarApi = snackbar.api;
+
+  // A equipe falou numa pergunta do aluno com a aba Perguntas fora da tela (docs/30 D100): o numero no item Perguntas
+  // (o trilho) ou o ponto na aba, e o aviso da sala com Ver, que abre a aba. So quando o numero sobe.
+  const questionNewsCount = questionNews.count;
+  const questionNewsShownRef = useRef(0);
+  useEffect(() => {
+    const before = questionNewsShownRef.current;
+    questionNewsShownRef.current = questionNewsCount;
+    if (questionNewsCount > before) {
+      snackbarApi.show({ action: { key: QUESTION_NEWS_SNACK_ACTION, label: WEBINAR_COPY.salaV2.perguntas.verResposta }, key: "question_news", text: WEBINAR_COPY.salaV2.perguntas.respostaNova });
+    } else if (questionNewsCount === 0 && before > 0) {
+      snackbarApi.clear("question_news");
+    }
+  }, [questionNewsCount, snackbarApi]);
   const shownNoticeRef = useRef<string | null>(null);
   useEffect(() => {
     if (notice) {
@@ -778,6 +816,16 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   function onSnackAction(key: string) {
     if (key === PINNED_SNACK_ACTION) {
       showPinned("message");
+      return;
+    }
+    if (key === QUESTION_NEWS_SNACK_ACTION) {
+      // Ver: a aba Perguntas abre (a Tela cheia do palco sai antes, senao o painel abriria escondido).
+      leaveStageFullscreen(document, stageRef.current);
+      setTab("perguntas");
+      setPanelOpen(true);
+      if (settingsTakeover) {
+        closeSettings();
+      }
       return;
     }
     if (key !== SNACK_SETTINGS_ACTION) {
@@ -987,6 +1035,11 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
       event.stopPropagation();
+      // A janela "A live foi encerrada" e a camada de cima: o Esc so a fecha.
+      if (endedNotice && !confirmLeave) {
+        setEndedNotice(false);
+        return;
+      }
       // A camada de cima primeiro (roomEscapeStep): a confirmacao, os paineis da barra, a enquete no palco; so entao o Sair.
       const step = roomEscapeStep({ confirmLeave, popoverOpen: reactionsShown || settingsShown || viewMenuShown, stagePoll: stagePoll?.mode ?? null });
       if (step === "close_confirm") {
@@ -1009,7 +1062,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
       return;
     }
     if (event.key === "Tab") {
-      trapRoomFocus(event, confirmLeave ? (rootRef.current?.querySelector<HTMLElement>("[data-room-confirm]") ?? rootRef.current) : rootRef.current);
+      trapRoomFocus(event, confirmLeave || endedNotice ? (rootRef.current?.querySelector<HTMLElement>("[data-room-confirm]") ?? rootRef.current) : rootRef.current);
       return;
     }
     const target = event.target as HTMLElement | null;
@@ -1134,6 +1187,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
       />
 
       {confirmLeave ? <RoomLeaveDialog onCancel={() => setConfirmLeave(false)} onLeave={leave} /> : null}
+      {endedNotice && !confirmLeave ? <RoomEndedDialog onClose={() => setEndedNotice(false)} /> : null}
 
       <div className={skeleton.body} data-room-slot="body">
         <div className={skeleton.stageColumn} data-room-slot="stage-column">
@@ -1156,6 +1210,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               onEnter={room.enter}
               onRetry={room.retryNow}
               readOnly={readOnly}
+              reloading={room.reloading}
               replayHref={replayHref}
               screen={screen}
               sessionId={sessionId}
@@ -1311,6 +1366,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                 ) : null
               }
               pollOpen={openPolls.length > 0}
+              questionsNew={questionNews.count}
               tab={tab}
               tabs={tabs}
               titleAction={
@@ -1379,6 +1435,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                   onCount={setQuestionsCount}
                   onFilter={setQuestionsFilter}
                   onOrder={setQuestionsOrder}
+                  onQuestions={questionNews.ingest}
                   onRefused={onWriteRefused}
                   order={questionsOrder}
                   readOnly={readOnly || phase === "ended"}
@@ -1394,7 +1451,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               ) : null}
             </RoomPanel>
             {/* O trilho a direita, a partir de lg: abre e fecha o painel em cada aba. */}
-            <RoomRail kind="live" onItem={onRail} panelShown={panelShown} pollOpen={openPolls.length > 0} tab={tab} tabs={tabs} unread={unread} />
+            <RoomRail kind="live" onItem={onRail} panelShown={panelShown} pollOpen={openPolls.length > 0} questionsNew={questionNews.count} tab={tab} tabs={tabs} unread={unread} />
           </>
         )}
       </div>

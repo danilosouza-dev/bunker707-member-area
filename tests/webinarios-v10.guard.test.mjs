@@ -12,8 +12,8 @@ import { assertOnlyAdds, assertSections, cumulativeHash, fileHash, migrationFile
 // - a lista que o app sempre le (QUESTION_COLUMNS) e a da v9 (QUESTION_COLUMNS_V9) nao ganham coluna: o app de antes e
 //   o app novo num banco sem a migracao continuam de pe; a coluna nova e lida a parte (QUESTION_COLUMNS_V10), e
 //   `thread_seen_by` so e gravada, nunca lida para a tela;
-// - o aviso de migracao pendente aponta esta (WEBINARS_V10_MIGRATION), e WEBINARS_MIGRATION e esta, a mais nova dos
-//   webinarios.
+// - o aviso de migracao pendente aponta esta (WEBINARS_V10_MIGRATION), e WEBINARS_MIGRATION e esta ou uma mais nova (a
+//   mais nova tem a guarda dela: tests/webinarios-v11.guard.test.mjs).
 
 const MIGRATION = "supabase/migrations/202611160001_webinars_v10.sql";
 // db.ts, chat-rows.ts, chat-store.ts e room-actions.ts: lidos do texto (alguns tem "server-only").
@@ -73,10 +73,8 @@ test("as listas que o app sempre le nao ganham coluna nova; a coluna nova e lida
   assert.match(chatStore, /\[QUESTION_COLUMNS_V10, QUESTION_COLUMNS_V9\]/);
 });
 
-test("o aviso de migracao pendente aponta esta, e WEBINARS_MIGRATION e esta (a mais nova dos webinarios)", () => {
+test("o aviso de migracao pendente aponta esta, e WEBINARS_MIGRATION e esta ou uma mais nova", () => {
   assert.match(dbSource, /export const WEBINARS_V10_MIGRATION = "202611160001";/);
-  assert.match(dbSource, /export const WEBINARS_MIGRATION = "202611160001";/);
+  assert.ok((dbSource.match(/export const WEBINARS_MIGRATION = "(\d+)";/)?.[1] ?? "") >= "202611160001", "o aviso geral aponta esta ou uma mais nova");
   assert.match(roomActions, /migracaoPendente\(WEBINARS_V10_MIGRATION\)/, "marcar como vista sem a migracao: 409 com o aviso desta");
-  const webinarFiles = migrationFiles().filter((name) => /webinar/.test(name));
-  assert.equal(webinarFiles.at(-1), "202611160001_webinars_v10.sql", "nenhuma migracao de webinario mais nova sem o aviso atualizado");
 });

@@ -40,6 +40,7 @@ import {
   type TranscriptRow
 } from "./chat-rows";
 import { CHAT_LIMITS, ROOM_RULES, type DeleteReason, type DisplayNameMode } from "./model";
+import { QUESTION_LIKE_COLUMNS, type LikeTally, type QuestionLikeRow } from "./question-likes-model";
 
 const PAGE = 1000;
 
@@ -774,6 +775,49 @@ export async function markQuestionThreadSeen(db: WebinarsDb, input: { id: string
   const { data, error } = await db.from("webinar_questions").update({ thread_seen_at: input.seenAt, thread_seen_by: input.seenBy }).eq("id", input.id).is("deleted_at", null).select("id");
   assertNoDbError(error, "Webinarios: marcar o fio como visto");
   return ((data ?? []) as unknown[]).length > 0;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * As curtidas da resposta e do fio (202611170001, docs/30 D101)
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * As curtidas da resposta escrita e das respostas do fio de uma sessao, em paginas de 1000 (o PostgREST corta em 1000
+ * sem erro). Sem a 202611170001 nao ha curtida: lista vazia, e as perguntas seguem como antes.
+ */
+export async function listQuestionLikeRows(db: WebinarsDb, input: { sessionId: string }): Promise<QuestionLikeRow[]> {
+  try {
+    return await fetchAll<QuestionLikeRow>(
+      (from, to) => db.from("webinar_question_likes").select(QUESTION_LIKE_COLUMNS).eq("session_id", input.sessionId).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to),
+      "Webinarios: curtidas das respostas"
+    );
+  } catch (failure) {
+    if (isPendingMigrationError(failure)) {
+      return [];
+    }
+    throw failure;
+  }
+}
+
+/**
+ * Alterna a curtida de uma pessoa na resposta escrita (`replyId` nulo) ou numa resposta do fio; devolve se ficou
+ * curtida e o total recontado. No banco sem a tabela, sobe o PendingMigrationError (quem chama responde com o aviso).
+ */
+export async function toggleQuestionLike(db: WebinarsDb, input: { questionId: string; replyId: string | null; sessionId: string; userId: string }): Promise<LikeTally> {
+  const inserted = await db.from("webinar_question_likes").insert({ question_id: input.questionId, reply_id: input.replyId, session_id: input.sessionId, user_id: input.userId });
+  let liked = true;
+  if (isUniqueViolation(inserted.error)) {
+    const removal = db.from("webinar_question_likes").delete().eq("question_id", input.questionId).eq("user_id", input.userId);
+    const removed = await (input.replyId ? removal.eq("reply_id", input.replyId) : removal.is("reply_id", null));
+    assertNoDbError(removed.error, "Webinarios: tirar a curtida da resposta");
+    liked = false;
+  } else {
+    assertNoDbError(inserted.error, "Webinarios: curtir a resposta");
+  }
+  const counting = db.from("webinar_question_likes").select("id", { count: "exact", head: true }).eq("question_id", input.questionId);
+  const { count, error } = await (input.replyId ? counting.eq("reply_id", input.replyId) : counting.is("reply_id", null));
+  assertNoDbError(error, "Webinarios: contar as curtidas da resposta");
+  return { liked, likes: count ?? 0 };
 }
 
 /** Alterna o voto do aluno; devolve se ficou votado e o total recontado (gravado em upvotes). */

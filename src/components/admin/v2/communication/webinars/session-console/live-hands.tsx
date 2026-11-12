@@ -97,6 +97,7 @@ export function LiveHands({ handle, people }: LiveHandsProps) {
         </div>
       ) : null}
       {hands.length === 0 ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{copy.nenhumaMao}</p> : null}
+      {hands.length > 0 ? <p className="text-xs leading-5 text-[var(--text-secondary)]">{WEBINAR_COPY.consoleV2.filaDeMaos.ordem}</p> : null}
       {hands.length > 0 ? (
         <ol className="flex min-w-0 flex-col gap-2">
           {hands.map((hand, index) => (
@@ -105,6 +106,12 @@ export function LiveHands({ handle, people }: LiveHandsProps) {
                 <span className="tabular-nums text-[var(--text-tertiary)]">{index + 1}.</span>
                 <Hand aria-hidden="true" className="size-4 shrink-0 text-[var(--warning)]" />
                 <span className="truncate">{hand.name}</span>
+                {/* O primeiro da fila (quem levantou a mao ha mais tempo) leva o selo. */}
+                {index === 0 && hands.length > 1 ? (
+                  <span className="shrink-0 rounded-full bg-[var(--surface-3)] px-2 text-xs leading-5 font-medium text-[var(--text-primary)]" data-live-hand-next="">
+                    {WEBINAR_COPY.consoleV2.filaDeMaos.proximo}
+                  </span>
+                ) : null}
               </span>
               <span className="flex min-w-0 flex-wrap items-center gap-1">
                 {controls.release && !handle.selfUnmute ? (

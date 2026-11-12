@@ -5,6 +5,7 @@
 // direto pelo Node (nada de enum nem namespace, docs/18 §2.5).
 
 import { studentAnswerAuthor, type StudentAnswerAuthor } from "./answer-author-model";
+import { NO_LIKES, type QuestionLikesTally } from "./question-likes-model";
 import { ROOM_OPENS_MINUTES_BEFORE, sessionOffsetMs, simulatedPhase, type SessionClock } from "./room-model";
 import { QUESTION_REPLY_LIMITS, type ChatMode, type Poll, type PollAnswer, type QuestionReply, type QuestionReplyRole, type Reaction, type WebinarQuestion, type WebinarSession } from "./model";
 
@@ -162,6 +163,9 @@ export type StudentQuestionReply = {
   createdAt: string;
   displayName: string;
   id: string;
+  /** As curtidas desta resposta e se a minha esta entre elas (docs/30 D101); ausentes no banco sem a 202611170001. */
+  liked?: boolean;
+  likes?: number;
   mine: boolean;
   role: QuestionReplyRole;
 };
@@ -214,6 +218,9 @@ export type StudentQuestion = {
    * com "Outro nome", so o nome. Nulo: "Equipe" (a escolha Equipe, a resposta de antes) ou o Assistente.
    */
   answerAuthor: StudentAnswerAuthor | null;
+  /** As curtidas da resposta escrita e se a minha esta entre elas (docs/30 D101). */
+  answerLiked?: boolean;
+  answerLikes?: number;
   answerText: string | null;
   /** Quando a resposta saiu (a hora do fio "1 resposta" na sala, docs/31 V2-A66); null enquanto nao respondida. */
   answeredAt: string | null;
@@ -341,4 +348,18 @@ export function nextChatCursor(rows: readonly ChatMessageRowLike[], previous: Ch
     return { after: last.id, since: last.created_at };
   }
   return previous ?? { after: null, since: nowIso };
+}
+
+/** A pergunta do aluno com as curtidas da resposta escrita e de cada resposta do fio (docs/30 D101). */
+export function withQuestionLikes(question: StudentQuestion, likes: QuestionLikesTally): StudentQuestion {
+  const answer = question.answerText ? (likes.answers.get(question.id) ?? NO_LIKES) : NO_LIKES;
+  return {
+    ...question,
+    answerLiked: answer.liked,
+    answerLikes: answer.likes,
+    replies: question.replies.map((reply) => {
+      const tally = likes.replies.get(reply.id) ?? NO_LIKES;
+      return { ...reply, liked: tally.liked, likes: tally.likes };
+    })
+  };
 }

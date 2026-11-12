@@ -259,7 +259,7 @@ export function ConsoleBar({ busyKey, canPublish, handle, handsCount, live: snap
               }
               setViewMenuOpen(next);
             }}
-            onReloadVideo={handle.retry}
+            onReloadVideo={handle.reloadVideo}
             onThumbs={onThumbs}
             open={viewMenuOpen}
             shown={room.viewShown}

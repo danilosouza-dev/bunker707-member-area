@@ -277,6 +277,7 @@ export function roomSettingsOfRow(value: unknown): RoomSettings {
     questions: asBoolean(raw.questions, base.questions),
     reactions: asBoolean(raw.reactions, base.reactions),
     selfUnmute: asBoolean(raw.selfUnmute, base.selfUnmute),
+    showPresentCount: asBoolean(raw.showPresentCount, base.showPresentCount),
     slowModeSeconds: (SLOW_MODE_SECONDS as readonly number[]).includes(raw.slowModeSeconds as number) ? (raw.slowModeSeconds as SlowModeSeconds) : null,
     waitingRoom: asBoolean(raw.waitingRoom, base.waitingRoom)
   };

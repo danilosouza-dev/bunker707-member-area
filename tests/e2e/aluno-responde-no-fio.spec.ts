@@ -9,7 +9,9 @@ import { WEBINAR_ADMIN_COPY } from "../../src/server/webinars/editor-model";
 // por escrito; na aba Perguntas da sala ela clica em Responder, escreve e a resposta entra no fio ("2 respostas" ao
 // fechar); no console, o produtor ve "Nova resposta do aluno" na pergunta, marca como vista (o selo some sem responder
 // e continua fora depois de recarregar, docs/30 D94), responde no fio; a aluna ve a resposta do Apresentador na
-// releitura das perguntas. O Responder da aluna fica no fim do fio aberto, logo abaixo da ultima resposta (D93). A pergunta e a primeira resposta entram direto no banco (o que o
+// releitura das perguntas. O Responder da aluna fica no fim do fio aberto, logo abaixo da ultima resposta (D93).
+// Rodada v11: a aluna curte a resposta da equipe e o produtor ve o total e curte a resposta dela (D101); com a aba
+// Perguntas fora da tela, a resposta nova da equipe vira o numero no item Perguntas e o aviso com Ver (D100). A pergunta e a primeira resposta entram direto no banco (o que o
 // teste confere e o fio).
 
 const { id: webinarId, sessaoId, slug, titulo } = LIVE_GRAVADA_NO_AR_DE_TESTE;
@@ -22,9 +24,12 @@ const RESPOSTA_DA_EQUIPE = "Fica sim, no mesmo lugar.";
 
 test.describe.configure({ mode: "serial" });
 
+let produtorId = "";
+
 test.beforeAll(async () => {
   const db = createLocalAdminClient();
   const contas = await seedEscolaDeTeste(db);
+  produtorId = contas.produtor.id;
   await limparWebinarios(db);
   await seedLiveGravadaDeTeste(db, { comecouHa: 90_000 });
   // A aluna ja aceitou as regras do chat (o texto de agora) e ja perguntou; a equipe respondeu por escrito.
@@ -70,6 +75,16 @@ test("a aluna responde no fio da propria pergunta", async ({ page }) => {
   const altura = async (alvo: typeof responder) => (await alvo.boundingBox())?.y ?? 0;
   expect(await altura(responder), "o Responder fica abaixo da resposta da Equipe").toBeGreaterThan(await altura(daEquipe));
   await expect(responder).toHaveAttribute("aria-expanded", "false");
+
+  // Curtir a resposta da equipe (docs/30 D101): o polegar marca na hora e o numero sobe; o servidor confirma.
+  const curtir = pergunta.locator('[data-room-like="answer"]');
+  await expect(curtir).toHaveAttribute("aria-pressed", "false");
+  const curtida = page.waitForResponse((response) => response.url().endsWith("/like") && response.request().method() === "POST");
+  await curtir.click();
+  await expect(curtir).toHaveAttribute("aria-pressed", "true");
+  expect((await curtida).status()).toBe(200);
+  await expect(pergunta.getByText(WEBINAR_COPY.sala.curtidas(1)).first()).toBeAttached();
+
   await responder.click();
 
   const campo = pergunta.getByRole("textbox", { name: novas.suaResposta });
@@ -113,6 +128,16 @@ test.describe("o console", () => {
     await expect(pergunta.getByText(doConsole.newReply)).toBeVisible();
     await expect(pergunta.locator('[data-console-reply][data-reply-role="student"]').filter({ hasText: RESPOSTA_DA_ALUNA })).toBeVisible();
 
+    // As curtidas (docs/30 D101): a resposta da equipe ja tem a da aluna, sem a do produtor; ele curte a resposta dela.
+    const daResposta = pergunta.locator('[data-console-like="answer"]');
+    await expect(daResposta).toHaveText("1");
+    await expect(daResposta).toHaveAttribute("aria-pressed", "false");
+    const daAluna = pergunta.locator('[data-console-reply][data-reply-role="student"]').locator("[data-console-like]");
+    await expect(daAluna).toHaveText("0");
+    await daAluna.click();
+    await expect(daAluna).toHaveAttribute("aria-pressed", "true");
+    await expect(daAluna).toHaveText("1");
+
     // Marcar como vista: o selo e o botao saem sem a equipe responder, e continuam fora depois de recarregar.
     const marcar = pergunta.getByRole("button", { exact: true, name: doConsole.markSeen });
     await expect(marcar).toBeVisible();
@@ -150,4 +175,43 @@ test("a aluna ve a resposta do Apresentador no fio", async ({ page }) => {
   const daEquipe = pergunta.locator("[data-room-reply]").filter({ hasText: RESPOSTA_DA_EQUIPE });
   await expect(daEquipe).toBeVisible();
   await expect(daEquipe.getByText(chatRoleLabel("host") ?? "Apresentador").first()).toBeVisible();
+  // As curtidas ficaram guardadas: a dela na resposta da equipe, e a do produtor na resposta dela (sem ser dela).
+  await expect(pergunta.locator('[data-room-like="answer"]')).toHaveAttribute("aria-pressed", "true");
+  const naMinha = pergunta.locator("[data-room-reply]").filter({ hasText: RESPOSTA_DA_ALUNA }).locator("[data-room-like]");
+  await expect(naMinha).toHaveAttribute("aria-pressed", "false");
+  await expect(pergunta.locator("[data-room-reply]").filter({ hasText: RESPOSTA_DA_ALUNA }).getByText(WEBINAR_COPY.sala.curtidas(1))).toBeAttached();
+});
+
+test("com a aba Perguntas fora da tela, a resposta nova da equipe vira o numero no item Perguntas e o aviso com Ver", async ({ page }) => {
+  test.setTimeout(90_000);
+  await paginaFalsaPlayerJs(page, ORIGEM_DA_BUNNY);
+  await page.setViewportSize({ height: 800, width: 1280 });
+  await page.goto(`/webinarios/${slug}/sala?sessao=${sessaoId}`);
+  const sala = page.getByRole("dialog", { name: titulo });
+  await expect(sala).toBeVisible();
+  const itemPerguntas = sala.locator("#room-railbtn-perguntas");
+  // A sala abre no Chat: o que ja estava respondido nao avisa (a primeira leitura das perguntas, uma por aluno).
+  const primeiraLeitura = page.waitForResponse((response) => response.url().includes("/questions?") && response.request().method() === "GET");
+  expect((await primeiraLeitura).status()).toBe(200);
+  await expect(itemPerguntas.locator("[data-room-unread]")).toHaveCount(0);
+
+  // A equipe responde de novo no fio (direto no banco, como o console grava): em ate 20 s a sala rele e avisa.
+  const db = createLocalAdminClient();
+  const lida = unwrap(await db.from("webinar_questions").select("id").eq("session_id", sessaoId).eq("body", PERGUNTA).single(), "Lendo a pergunta de teste") as { id: string } | null;
+  const questionId = lida?.id ?? "";
+  expect(questionId, "a pergunta de teste existe").not.toBe("");
+  unwrap(
+    await db.from("webinar_question_replies").insert({ anonymous: false, body: "Mais alguma dúvida?", display_name: "Produtor T.", question_id: questionId, role: "host", session_id: sessaoId, user_id: produtorId }),
+    "Gravando a resposta nova da equipe"
+  );
+  await expect(itemPerguntas.locator("[data-room-unread]")).toHaveText("1", { timeout: 40_000 });
+  await expect(itemPerguntas).toHaveAccessibleName(`${WEBINAR_COPY.sala.abas.perguntas}, ${novas.respostasNovas(1)}`);
+  const aviso = sala.getByText(novas.respostaNova);
+  await expect(aviso).toBeVisible();
+
+  // Ver: a aba Perguntas abre com a resposta nova, e o numero some.
+  await sala.getByRole("button", { exact: true, name: novas.verResposta }).click();
+  await expect(itemPerguntas).toHaveAttribute("aria-expanded", "true");
+  await expect(sala.locator("[data-room-question]").filter({ hasText: PERGUNTA }).getByText("Mais alguma dúvida?")).toBeVisible();
+  await expect(itemPerguntas.locator("[data-room-unread]")).toHaveCount(0);
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
+import { ThumbsUp, Trash2 } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { RoomCommentAvatar } from "@/components/member/webinars/room/room-comment";
 import { roomPillClassName } from "@/components/member/webinars/room/room-pill";
@@ -71,17 +71,59 @@ type ConsoleQuestionsProps = {
    * equipe responder. Sem a prop, o botao nao aparece.
    */
   onSeen?: ((questionId: string) => void) | null;
+  /**
+   * Rodada v11 (docs/30 D101): a equipe curte a pergunta, a resposta escrita ou uma resposta do fio. Sem a prop, os
+   * numeros aparecem so como texto (a pergunta) ou nao aparecem.
+   */
+  onLike?: ((input: ConsoleLikeInput) => void) | null;
   /** A pergunta que esta na tela agora (a exibicao de origem pergunta); nula sem nenhuma. */
   screenCommentQuestionId?: string | null;
   onStatus: (questionId: string, status: QuestionStatus) => void;
   questions: readonly WebinarQuestion[];
 };
 
+/** O que a equipe curte no console (docs/30 D101): a pergunta, a resposta escrita ou uma resposta do fio. */
+export type ConsoleLikeInput = { questionId: string; replyId?: string | null; target: "answer" | "question" | "reply" };
+
+/**
+ * O polegar com o numero (docs/30 D101): a curtida de quem esta no console em `aria-pressed`, o total ao lado. O nome
+ * diz o total ("Curtir, 3 curtidas"), que comeca pelo rotulo.
+ */
+function ConsoleLike({ busy, liked, likes, onToggle, target }: { busy: boolean; liked: boolean; likes: number; onToggle: () => void; target: string }) {
+  const sala = WEBINAR_COPY.sala;
+  return (
+    <button
+      aria-label={`${liked ? sala.descurtir : sala.curtir}, ${sala.curtidas(likes)}`}
+      aria-pressed={liked}
+      className={cn(roomPillClassName({ size: "s", tone: liked ? "tonal" : "text" }), "h-6 gap-1 px-1.5 tabular-nums")}
+      data-console-like={target}
+      disabled={busy}
+      onClick={onToggle}
+      type="button"
+    >
+      <ThumbsUp aria-hidden="true" className="size-3.5" fill={liked ? "currentColor" : "none"} />
+      {likes}
+    </button>
+  );
+}
+
 /**
  * Uma resposta do fio no console: quem escreveu (a foto ou as iniciais), o selo do papel da equipe, o texto e a lixeira.
  * Legado: linhas de antes de 10/11/2026 (D64). Na pergunta anonima antiga, "Anônima" e a mascara, como a pergunta.
  */
-function ThreadReply({ busy, canAct, onDelete, reply }: { busy: boolean; canAct: boolean; onDelete: ((replyId: string) => void) | null; reply: QuestionReply }) {
+function ThreadReply({
+  busy,
+  canAct,
+  onDelete,
+  onLike = null,
+  reply
+}: {
+  busy: boolean;
+  canAct: boolean;
+  onDelete: ((replyId: string) => void) | null;
+  onLike?: (() => void) | null;
+  reply: QuestionReply;
+}) {
   // "Responder como" (docs/30 D88): a resposta da equipe aparece aqui como a turma ve. Com "Equipe", so o selo e o icone
   // da equipe; com "Outro nome", o nome personalizado com o icone da equipe e sem o selo do papel.
   const staff = reply.role !== "student";
@@ -103,6 +145,11 @@ function ThreadReply({ busy, canAct, onDelete, reply }: { busy: boolean; canAct:
           {role ? <Chip>{role}</Chip> : null}
         </p>
         <p className="mt-0.5 text-sm leading-5 break-words whitespace-pre-wrap text-room-fg-muted">{reply.body}</p>
+        {canAct && onLike ? (
+          <div className="mt-1 flex min-w-0">
+            <ConsoleLike busy={busy} liked={reply.liked === true} likes={reply.likes ?? 0} onToggle={onLike} target={reply.id} />
+          </div>
+        ) : null}
       </div>
       {canAct && onDelete ? (
         <RoomIconButton className="shrink-0 [&_svg]:size-4" disabled={busy} label={copy.deleteReply(name)} onClick={() => onDelete(reply.id)} size={32} tone="ghost">
@@ -197,6 +244,7 @@ export function ConsoleQuestions({
   onAnswer,
   onAuthor = null,
   onDeleteReply = null,
+  onLike = null,
   onReply = null,
   onScreenComment = null,
   onSeen = null,
@@ -308,7 +356,11 @@ export function ConsoleQuestions({
                       <span className="sr-only"> {PESSOAS.simuladaDica}</span>
                     </span>
                   ) : null}
-                  <span className="tabular-nums text-room-fg-subtle">{copy.votes(question.upvotes)}</span>
+                  {canAct && onLike ? (
+                    <ConsoleLike busy={busy} liked={question.voted === true} likes={question.upvotes} onToggle={() => onLike({ questionId: question.id, target: "question" })} target="question" />
+                  ) : (
+                    <span className="tabular-nums text-room-fg-subtle">{copy.votes(question.upvotes)}</span>
+                  )}
                   <Chip tone={STATUS_TONE[question.status]}>{question.answeredLive && question.status === "answered" ? copy.answerLive : copy.statuses[question.status]}</Chip>
                   {mark?.answerSource === "ai" ? <Chip>{WEBINAR_COPY.assistente.console.respondidaPeloAssistente}</Chip> : null}
                   {mark?.handoffRequested ? <Chip tone="warning">{WEBINAR_COPY.assistente.console.pediuEquipe}</Chip> : null}
@@ -338,6 +390,17 @@ export function ConsoleQuestions({
                         </p>
                       ) : null}
                       <p className="text-sm leading-5 break-words whitespace-pre-wrap text-room-fg-muted">{question.answerText}</p>
+                      {canAct && onLike ? (
+                        <div className="mt-1 flex min-w-0">
+                          <ConsoleLike
+                            busy={busy}
+                            liked={question.answerLiked === true}
+                            likes={question.answerLikes ?? 0}
+                            onToggle={() => onLike({ questionId: question.id, target: "answer" })}
+                            target="answer"
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ) : null}
@@ -349,6 +412,7 @@ export function ConsoleQuestions({
                         canAct={canAct}
                         key={reply.id}
                         onDelete={onDeleteReply ? (replyId) => void whileSettling({ key: `delete:${replyId}`, set: setSettling, settling, work: () => onDeleteReply(replyId) }) : null}
+                        onLike={onLike ? () => onLike({ questionId: question.id, replyId: reply.id, target: "reply" }) : null}
                         reply={reply}
                       />
                     ))}

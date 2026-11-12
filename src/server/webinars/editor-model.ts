@@ -473,6 +473,8 @@ export const WEBINAR_ADMIN_COPY = {
     type: "Tipo",
     typeLocked: "O tipo não muda depois de publicar.",
     waitingRoom: "Sala de espera",
+    showPresentCount: "Mostrar quantas pessoas estão na sala",
+    showPresentCountHint: "Desligado, os alunos não veem o número de pessoas na sala. Você continua vendo no console.",
     whatsapp: "WhatsApp"
   },
   people: {
