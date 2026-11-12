@@ -440,8 +440,12 @@ test("importar CSV: acrescenta no fim com as posicoes, devolve os erros por linh
   );
   assert.equal(db.tables.webinar_chat_script_items.length, 2);
 
-  const [auditoria] = audits(db, "webinar.script_imported");
-  assert.deepEqual(auditoria.metadata, { errors: 2, imported: 2, items: 3, replace: false, truncated: false });
+  const [auditoria, segunda] = audits(db, "webinar.script_imported");
+  // Revisao v8, achado 3: as duas pessoas novas (Duda e Equipe) entram na lista na primeira importacao e sao
+  // reaproveitadas na segunda; a auditoria conta quantas entraram, nunca o nome.
+  assert.deepEqual(auditoria.metadata, { errors: 2, imported: 2, items: 3, personas_created: 2, replace: false, truncated: false });
+  assert.equal(segunda.metadata.personas_created, 0);
+  assert.deepEqual(db.tables.webinar_personas.map((row) => [row.name, row.role]).sort(), [["Duda", "student"], ["Equipe", "team"]]);
   assert.doesNotMatch(JSON.stringify(db.tables.admin_audit_log), /Boa noite|Bem-vindos/, "nunca o texto das mensagens");
   assert.ok(estado.revalidados.includes(`/admin/comunicacao/webinarios/${WEBINAR}`));
   assert.ok(estado.revalidados.includes(`/admin/comunicacao/webinarios/${WEBINAR}/sala`));
@@ -576,7 +580,9 @@ test("Soltar agora: o item vira mensagem scripted da persona no minuto do relogi
   assert.equal(deOutro.status, 404);
 
   const [auditoria] = audits(db, "webinar.script_fired");
-  assert.deepEqual(Object.keys(auditoria.metadata).sort(), ["item_id", "offset_ms", "session_id", "trigger_kind"]);
+  // Desde 11/11/2026 (D77) a auditoria diz tambem o Tipo do item e a pergunta simulada que ele abriu (nula no comentario).
+  assert.deepEqual(Object.keys(auditoria.metadata).sort(), ["item_id", "kind", "offset_ms", "question_id", "session_id", "trigger_kind"]);
+  assert.deepEqual([auditoria.metadata.kind, auditoria.metadata.question_id], ["message", null]);
 });
 
 /* ------------------------------------------------------------------------------------------------
@@ -992,8 +998,10 @@ test("enquetes: os modelos (cria, atualiza com as opcoes, apaga o que saiu); abr
 
   const [primeira, segunda] = salvas.polls;
   const idDeOutra = segunda.options[0].id;
+  // D83 (11/11/2026): o card manda os ids que carregou (`loadedIds`) e o servidor so apaga desses.
   const atualizadas = ok(
     await roomActions.savePolls({
+      loadedIds: [primeira.id, segunda.id],
       polls: [{ anonymous: true, id: primeira.id, kind: "single", options: [{ id: primeira.options[1].id, label: "Não" }, { id: idDeOutra, label: "Talvez" }, { label: "Sim!" }], question: "Vem?" }],
       webinarId: WEBINAR
     })
@@ -1137,11 +1145,11 @@ test("banco sem a 202611100001: responder e apagar no fio pela equipe voltam 409
 
   const resposta = await roomActions.replyToQuestion({ body: "E fica no Replay tambem.", questionId: pergunta.id });
   assert.deepEqual([resposta.ok, resposta.status], [false, 409]);
-  // A frase aponta a mais nova dos webinarios (WEBINARS_MIGRATION, hoje a 202611100002 da Na tela): aplicar ate ela
+  // A frase aponta a mais nova dos webinarios (WEBINARS_MIGRATION, hoje a 202611140002 dos participantes simulados): aplicar ate ela
   // inclui a do fio.
-  assert.equal(resposta.error, "Esta parte precisa da atualização do banco (migração 202611100002).");
+  assert.equal(resposta.error, "Esta parte precisa da atualização do banco (migração 202611140002).");
   const apagar = await roomActions.deleteQuestionReply({ replyId: randomUUID() });
-  assert.deepEqual([apagar.ok, apagar.status, apagar.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611100002)."]);
+  assert.deepEqual([apagar.ok, apagar.status, apagar.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611140002)."]);
   assert.equal(db.tables.admin_audit_log.length, 0);
   assert.equal(db.tables.notifications.length, 0);
 });

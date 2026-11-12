@@ -453,7 +453,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   // do DOM e o foco cai no body; a sala o manda de volta para dentro dela, como quando a barra inteira some. Com o
   // microfone ainda ligado ele fica (o recolhimento sem o mudo: o aluno sempre tem como se calar), como em liveBarItems.
   const micShown = barShown && ourBar && (room.signals.micAllowed || room.signals.audioOn || live.selfUnmute === true);
-  // Lotado (o vigia do console ligou a moderacao de audio, ou ela ainda nao foi lida): o Microfone fica, desligado com o motivo.
+  // Ainda fechado (a moderacao de audio ligada, ou ainda nao lida; sem teto desde 11/11/2026, D84): o Microfone fica,
+  // desligado com o motivo.
   const micInput = {
     audioModeration: room.signals.audioModeration,
     audioOn: room.signals.audioOn,
@@ -649,7 +650,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const scheduledAt = session.session.scheduledAt;
   // A sala guarda a funcao num ref a cada desenho (use-room-simulation.ts): sem useCallback.
   const getSimulationOffsetMs = () => simulationClockMs({ kind: "live", scheduledAt, startedAt }, Date.now() + (skewRef.current ?? 0));
-  const simulation = useRoomSimulation({ enabled: !readOnly && !blocked && phase !== "ended", getOffsetMs: getSimulationOffsetMs, sessionId, webinarId });
+  const simulation = useRoomSimulation({ enabled: !readOnly && !blocked && phase !== "ended", getOffsetMs: getSimulationOffsetMs, sessionId, simulationKey: naTela.simulationKey, webinarId });
   const simulationOffsetMs = simulationClockMs({ kind: "live", scheduledAt, startedAt }, nowMs + skewMs);
   // O numero de quem assiste some com a live encerrada; no palco ele e o selo ao lado do selo do momento (docs/31 §11.5).
   // Com a Simulacao (R7), o real mais a parte simulada daquele instante, como na gravada (o selo e a aba Participantes).
@@ -1045,7 +1046,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   function confirmMic() {
     setMicAsk(false);
     setMicConsented(true);
-    // A sala pode ter lotado com o aviso aberto: o aviso de lotado, sem abrir.
+    // A moderacao de audio pode ter ligado (ou ainda nao foi lida) com o aviso aberto: o aviso do microfone fechado, sem abrir.
     if (micFull) {
       room.showNotice("mic_full");
       return;
@@ -1358,7 +1359,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                   webinarId={webinarId}
                 />
               ) : null}
-              {tab === "participantes" ? <LiveParticipantsTab presenterKnown={presenterName !== null} stage={stage} students={presentShown} /> : null}
+              {tab === "participantes" ? <LiveParticipantsTab note={readOnly ? WEBINAR_COPY.simulacao.plateia.previa : null} presenterKnown={presenterName !== null} stage={stage} students={presentShown} /> : null}
               {/* A enquete fixada fica na area das fixadas, acima: aqui so as outras (e nada, quando ela e a unica). */}
               {tab === "enquetes" && !(pinnedPoll && pollsTab.length === 0) ? (
                 <RoomPollsTab onAnswer={roomPolls.answer} polls={pollsTab} readOnly={readOnly || !writable} />

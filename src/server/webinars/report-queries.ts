@@ -13,12 +13,16 @@ import "server-only";
 // webinar_screen_report, no mesmo cache de 60 s por minuto; sem a 202611100002, nenhuma linha e o bloco nao aparece).
 // Adendo de 10/11/2026 (R7): a Simulacao da Live ao vivo tambem (as regras, a decisao, o resumo congelado no Encerrar
 // live e o roteiro da sessao da live por Solta em), no mesmo bloco a parte; o CSV Simulacao continua so da gravada.
+// Os participantes simulados mudados a qualquer momento (docs/30 D80, 11/11/2026): o bloco lista as mudancas da sessao
+// (webinar_simulation_changes; sem a tabela, nenhuma) com o nome de quem mudou; o maior numero mostrado continua o do
+// resumo congelado, que ja junta os trechos de cada regra.
 // Os CSVs (os sete nomes do Zoom) sao de export-queries.ts, sem cache
 // (M9); webinarReportCsv continua servindo o Attendee de sempre. Tudo pela service role; PendingMigrationError sobe
 // para a pagina mostrar o aviso da migracao (WEBINARS_MIGRATION); as partes da fase 4 lidas guardadas mostram o aviso
 // so no bloco delas. Nomes e e-mails so chegam a quem tem messaging.write (a pagina e a rota conferem); nunca nos graficos.
 
 import { unstable_cache } from "next/cache";
+import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { describeError } from "../communications/db";
 import { isPendingMigrationError } from "../db/pending-migration";
 import { fetchAssistantSettings } from "./assistant-store";
@@ -62,7 +66,7 @@ import { sessionVideoZero } from "./room-model";
 import { loadScreenReport, type ScreenReportData } from "./screen-queries";
 import { sessionFromRow, webinarFromRow } from "./rows";
 import { listSessionOfferClicks } from "./offer-store";
-import { fetchSessionSimulation } from "./simulation-store";
+import { fetchSessionSimulation, readSimulationChanges } from "./simulation-store";
 import { fetchWebinarReport, fetchWebinarRow, listRecordingRows, listSessionRows } from "./store";
 
 export { loadReportPeople } from "./export-queries";
@@ -275,7 +279,7 @@ export async function loadWebinarReportPage(db: WebinarsDb, webinarId: string, o
   const report = await (options.view ?? reportViewOf)(session.id, now);
   const simulated = session.kind === "simulated";
   const withOffer = session.kind !== "live";
-  const [facts, pollRows, questionRows, scriptItems, recordings, assistant, rules, fires, clicks, screen] = await Promise.all([
+  const [facts, pollRows, questionRows, scriptItems, recordings, assistant, rules, fires, clicks, screen, changes] = await Promise.all([
     loadAttendeeFacts(db, sessionRow),
     listPollRows(db, { sessionId: session.id, webinarId }),
     report.questions.top.length > 0 ? listQuestionRows(db, { limit: 100, order: "votes", sessionId: session.id }) : Promise.resolve([]),
@@ -285,7 +289,8 @@ export async function loadWebinarReportPage(db: WebinarsDb, webinarId: string, o
     loadSimulationRules(db, session),
     withSimulation(session) ? listSimulationScriptFires(db, [session.id]) : Promise.resolve(new Map<string, Map<string, number>>()),
     withOffer ? unlessMissing(() => listSessionOfferClicks(db, session.id), []) : Promise.resolve([]),
-    session.kind === "replay" ? Promise.resolve<ScreenReportData>({ displays: [], stats: {} }) : (options.screen ?? screenReportOf)(session.id, now)
+    session.kind === "replay" ? Promise.resolve<ScreenReportData>({ displays: [], stats: {} }) : (options.screen ?? screenReportOf)(session.id, now),
+    withSimulation(session) ? readSimulationChanges(db, [session.id]) : Promise.resolve([])
   ]);
   const recording = sessionRecordingOf(recordings, session);
   const transcript = recording && report.presence.drops.length > 0 ? await fetchTranscriptRow(db, recording.id) : null;
@@ -300,6 +305,7 @@ export async function loadWebinarReportPage(db: WebinarsDb, webinarId: string, o
     ...reportUserIds(report),
     ...facts.attendees.map((attendee) => attendee.userId),
     ...(session.simulationDecidedBy ? [session.simulationDecidedBy] : []),
+    ...changes.flatMap((change) => (change.changedBy ? [change.changedBy] : [])),
     ...Object.values(questions).flatMap((question) => (question.answeredBy ? [question.answeredBy] : []))
   ]);
   const polls: Poll[] = pollRows.polls.map((poll) => pollFromRow(poll, pollRows.options));
@@ -329,6 +335,13 @@ export async function loadWebinarReportPage(db: WebinarsDb, webinarId: string, o
     session,
     simulation: {
       ackText: session.simulationAckText,
+      changes: changes.map((change) => ({
+        atMs: change.atMs,
+        changedAt: change.changedAt,
+        changedByName: (change.changedBy ? people[change.changedBy]?.name : null) ?? WEBINAR_COPY.simulacao.card.equipe,
+        extra: change.rule.mode === "off" ? 0 : change.rule.mode === "fixed" ? change.rule.base : null,
+        source: change.source
+      })),
       decidedAt: session.simulationDecidedAt,
       decidedByName: session.simulationDecidedBy ? (people[session.simulationDecidedBy]?.name ?? null) : null,
       live: session.kind === "live",

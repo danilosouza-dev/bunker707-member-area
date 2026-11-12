@@ -364,8 +364,8 @@ export const JITSI_LISTENED_EVENTS = [
   // Dispara pouco, e nao vai ao servidor (toRoomEvent devolve nulo). Os sinais so do console ficam em CONSOLE_EXTRA_EVENTS.
   "notificationTriggered",
   // A moderacao de audio ou de video ligou ou desligou ({ enabled, mediaType }): o microfone sozinho (docs/31 caminho
-  // A) so abre com a de audio desligada, e o vigia do console a liga quando lota. Dispara pouco (so quando a equipe ou o
-  // vigia muda a moderacao) e nao vai ao servidor (toRoomEvent devolve nulo).
+  // A) so abre com a de audio desligada, e o console de quem apresenta a desliga quando a politica liga (sem teto desde
+  // 11/11/2026, D84). Dispara pouco (so quando a equipe muda a moderacao) e nao vai ao servidor (toRoomEvent devolve nulo).
   "moderationStatusChanged"
 ] as const;
 export type JitsiListenedEvent = (typeof JITSI_LISTENED_EVENTS)[number];

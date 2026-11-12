@@ -7,7 +7,7 @@
 
 export const SIMULACAO_COPY = {
   card: {
-    contador: "Contador de plateia",
+    contador: "Participantes simulados",
     contadorModos: { curve: "Real + faixa que varia", fixed: "Real + número fixo", off: "Só o real" },
     contadorDicas: {
       curve: (minimo: number, maximo: number) => `Soma de +${minimo} a +${maximo}: sobe no começo, fica e desce de leve no fim.`,
@@ -41,7 +41,7 @@ export const SIMULACAO_COPY = {
     limiteAvisos: (total: number) => `Até ${total} avisos por sessão.`,
     avisoCdc:
       "Pela lei (CDC, art. 37), nunca anuncie uma sessão gravada como ao vivo fora da área de membros. Dentro dela, o selo e os números simulados são sua decisão e ficam registrados com seu nome e a data.",
-    numerosPadrao: "Números de plateia: reais, a não ser na sessão em que você ligar o contador ou as entradas.",
+    numerosPadrao: "Números de plateia: reais, a não ser na sessão em que você somar participantes simulados ou ligar as entradas.",
     caixa: "Confirmo a decisão acima para esta sessão.",
     salvar: "Salvar simulação",
     salvando: "Gravando…",
@@ -60,7 +60,7 @@ export const SIMULACAO_COPY = {
     erroCarregar: "Não foi possível carregar a simulação.",
     tentarDeNovo: "Tentar de novo",
     sessaoEncerrada: "Sessão encerrada: a decisão fica registrada como estava.",
-    sessaoComecou: "A sessão já começou: o que a turma vê não muda até o fim.",
+    sessaoComecou: "A sessão já começou: os participantes simulados mudam aqui ou no console; as entradas e os avisos de venda ficam como estão até o fim.",
     congelado: (contador: number, entradas: number, avisos: number) =>
       `Nesta sessão: contador com até +${contador}, ${entradas} ${entradas === 1 ? "entrada" : "entradas"} e ${avisos} ${avisos === 1 ? "aviso" : "avisos"} de venda.`,
     soLiveGravada: "A Simulação existe só na sessão gravada.",
@@ -68,16 +68,18 @@ export const SIMULACAO_COPY = {
     /* A Live ao vivo (R7). */
     avisoCdcLive:
       "Pela lei (CDC, art. 37), nunca divulgue fora da área de membros os números simulados como se fossem reais. Dentro dela, os números e os avisos simulados são sua decisão e ficam registrados com seu nome e a data.",
-    numerosPadraoLive: "Números de plateia: reais, a não ser que você ligue o contador ou as entradas da live.",
+    numerosPadraoLive: "Números de plateia: reais, a não ser que você some participantes simulados ou ligue as entradas da live.",
     sessaoLive: (quando: string) => `Live de ${quando}`,
     avisoMinutoLive: "Minuto da live",
     avisoMinutoLiveDica: "Contado do Começar para todos: minuto ou minuto:segundo, como 12 ou 12:30.",
-    liveComecou: "A live já começou: o que a turma vê não muda até o fim."
+    liveComecou: "A live já começou: os participantes simulados mudam aqui ou no console; as entradas e os avisos de venda ficam como estão até o fim.",
+    /* A revisão v8 (achado 6): o botão do aviso de que a simulação mudou em outro lugar. */
+    recarregar: "Recarregar"
   },
   /** As recusas das Server Actions do card (simulation-actions.ts). */
   servidor: {
     encerrada: "Essa sessão já terminou: a decisão fica registrada como estava.",
-    comecou: "Essa sessão já começou: a Simulação não muda no meio, e o relatório guarda o que a turma viu.",
+    comecou: "Essa sessão já começou: as entradas e os avisos de venda não mudam no meio, e o relatório guarda o que a turma viu. Os participantes simulados mudam em Participantes simulados.",
     fraseNaoBate: "A confirmação não bate com a frase de hoje. Marque de novo.",
     naoExiste: "Essa sessão não existe mais.",
     usarCardNovo: "Esta sessão tem números ou avisos simulados: decida pelo card Simulação, com a frase completa.",
@@ -85,12 +87,60 @@ export const SIMULACAO_COPY = {
     /* A Live ao vivo (R7). */
     semReplay: "O Replay nunca tem Simulação.",
     liveSemSelo: "A live já é ao vivo: o selo \"Ao vivo\" da sessão gravada não existe nela.",
-    liveComecou: "Essa live já começou: a Simulação não muda no meio, e o relatório guarda o que a turma viu.",
-    precisaMigracaoLive: (migracao: string) => `A Simulação na live ao vivo precisa da atualização do banco (migração ${migracao}).`
+    liveComecou: "Essa live já começou: as entradas e os avisos de venda não mudam no meio, e o relatório guarda o que a turma viu. Os participantes simulados mudam em Participantes simulados.",
+    precisaMigracaoLive: (migracao: string) => `A Simulação na live ao vivo precisa da atualização do banco (migração ${migracao}).`,
+    /* Os participantes simulados mudados a qualquer momento (D79). */
+    plateiaEncerrada: "Essa sessão já terminou: os participantes simulados não mudam mais.",
+    plateiaFraseNaoBate: "A confirmação não bate com a frase do número novo. Marque de novo.",
+    plateiaIgual: "Esse já é o número somado agora.",
+    plateiaLimite: (limite: number) => `Esta sessão chegou ao limite de ${limite} mudanças dos participantes simulados.`,
+    precisaMigracaoPlateia: (migracao: string) => `Mudar os participantes simulados precisa da atualização do banco (migração ${migracao}).`,
+    /* A revisão v8 (achado 6): o card aberto antes de uma mudança feita no console ou noutra aba. */
+    mudouEmOutroLugar: "A simulação desta sessão mudou em outro lugar. Recarregue para ver o número de agora."
   },
   /** O console da equipe (R7): a parte simulada separada do real, ao lado de "12 presentes · pico 14". */
   console: {
     simulados: (n: number) => `+${n.toLocaleString("pt-BR")} simulados`
+  },
+  /**
+   * Os participantes simulados mudados a qualquer momento (docs/30 D79, 11/11/2026): o controle do console (no alto da
+   * entrada Presença, aberto tambem pelo selo dos presentes) e do card Simulacao do editor depois do comeco.
+   */
+  plateia: {
+    titulo: "Participantes simulados",
+    descricao: "Somados ao número de quem assiste que o aluno vê. Você vê a parte simulada separada do real.",
+    agora: "Somados agora",
+    valor: (n: number) => `+${n.toLocaleString("pt-BR")}`,
+    faixa: (minimo: number, maximo: number) => `de +${minimo.toLocaleString("pt-BR")} a +${maximo.toLocaleString("pt-BR")}`,
+    campo: "Somar à plateia",
+    campoDica: "Escolha um atalho ou digite o número que soma ao real.",
+    atalhos: "Atalhos",
+    atalhoRotulo: (n: number) => `Somar +${n.toLocaleString("pt-BR")}`,
+    aplicar: "Aplicar",
+    aplicando: "Aplicando…",
+    tirar: "Tirar",
+    tirarRotulo: "Tirar os participantes simulados (volta a +0)",
+    caixa: "Confirmo a decisão acima.",
+    marqueACaixa: "Marque a confirmação para aplicar.",
+    igual: "Esse já é o número somado agora.",
+    numeroInvalido: (maximo: number) => `Use um número inteiro de 0 a ${maximo.toLocaleString("pt-BR")}.`,
+    antesDoComeco: "Antes do começo, o número novo vale na hora.",
+    noAr: "No ar, o número sobe ou desce em linha reta em 1 min 30 s, igual para todos.",
+    subindo: (n: number) => `A sala está chegando a +${n.toLocaleString("pt-BR")}.`,
+    ultima: (nome: string, quando: string, origem: string) => `Mudado por ${nome} em ${quando}, ${origem}.`,
+    origens: { console: "pelo console", editor: "pelo editor" },
+    semMudanca: "Ainda sem mudança no console nem no editor.",
+    encerrada: "A sessão terminou: os participantes simulados não mudam mais.",
+    semPermissao: "Só quem publica na Comunicação muda os participantes simulados.",
+    travados: "Os participantes simulados mudam a qualquer momento, também no ar, aqui ou no console. As entradas e os avisos de venda simulados travam quando a sessão começa.",
+    verNoEditor: "Ver no editor",
+    abrirConsole: "Mudar no console",
+    aplicado: (n: number) => (n > 0 ? `Participantes simulados: +${n.toLocaleString("pt-BR")}. A sala recebe em segundos.` : "Participantes simulados tirados. A sala recebe em segundos."),
+    abrirControle: (rotulo: string) => `${rotulo}. Abrir os participantes simulados`,
+    previa: "A simulação não aparece na prévia.",
+    historico: "Mudanças",
+    mudancaLinha: (quando: string, valor: string, nome: string) => `${quando} · ${valor} · ${nome}`,
+    antes: "antes do começo"
   },
   aluno: {
     entrou: (nome: string) => `${nome} entrou`,

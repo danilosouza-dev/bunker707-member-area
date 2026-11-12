@@ -963,16 +963,105 @@ o 16, o tick que solta o item vencido da live com a foto e o **Enviar agora**; o
 resumo e o relatório da live com o bloco Simulação à parte), todos os `tests/integration/webinarios*.test.mjs` passaram
 um arquivo por vez contra o banco local, e o ponta a ponta novo `produtor-solta-comentario-na-live` rodou no Chromium com
 os de webinário de antes. Os testes 5 a 7 já conferem, no banco local, o check novo, os checks da foto e a troca da
-`webinar_open_session`. **Na nuvem de teste, pendente**: **antes
-do merge na `dev`, o produtor aplica a `202611100002` na nuvem de teste** (o arquivo inteiro, como acima), roda as oito
-consultas de conferência e confere a linha `202611100002` em `supabase_migrations.schema_migrations`. Quem escreveu
-esta parte não tocou na nuvem de teste: a aplicação fica com o produtor, como na §9.12. Quando aplicar, atualizar este parágrafo com a data e quem aplicou. Se o arquivo mudar depois disso, ele não roda de
+`webinar_open_session`. **Na nuvem de teste, aplicada em 11/11/2026** pelo produtor, no SQL Editor (o arquivo
+inteiro e a linha `202611100002` em `supabase_migrations.schema_migrations`), antes do merge da PR #169 na `dev`; a
+conferência de uma linha deu 2 tabelas, versão 1 e a regra da live 1. Se o arquivo mudar depois disso, ele não roda de
 novo na nuvem de teste: a mudança vira uma migração nova, e a guarda (o hash) avisa.
 
 **Produção (Hetzner)**: nada manual. O `deploy-membros` roda o `migrate.sh` antes de recriar o app, na ordem dos nomes;
 basta a promoção `dev` -> `main` que levar este código passar pelo `deploy-membros`. Antes de qualquer deploy na
 produção vale a regra R1 do `docs/29` (a migração no banco antes do app novo no ar), embora este desenho deixe o app de
 antes funcionando sem ela.
+
+### 9.14 Pessoas que comentam e a pergunta simulada: migração `202611140001` antes do merge (11/11/2026)
+
+O retorno do produtor de 11/11/2026 (a lista de pessoas que comentam, escolher e repetir a pessoa, a pergunta simulada;
+`docs/30` D75 a D78, `docs/31` §13.1) tem uma migração só, que vem **depois** da `202611100002` (§9.13) e não muda as de
+antes (a guarda `tests/webinarios-v8.guard.test.mjs` prende o hash acumulado das 66 anteriores e o do arquivo novo).
+
+| Ordem | Arquivo | O que faz | Seções | Nome em `schema_migrations` |
+|---|---|---|---|---|
+| 1 | `202611140001_webinars_v8_pessoas.sql` | cria a função `webinar_persona_name_key` (o nome comparável, o mesmo do app) e a tabela `webinar_personas` (as pessoas de cada webinário, nome único pelo `name_key`, só do `service_role`); `webinar_chat_script_items.persona_id`; em `webinar_questions`, `source` (`audience` por padrão, `scripted`), `persona_id`, `persona_role` e `persona_avatar_path`, o `user_id` passa a aceitar nulo só na `scripted` (check), e o índice único de uma pergunta simulada por mensagem; o preenchimento (uma pessoa por nome dos itens e das mensagens do **Enviar agora**, só com a lista vazia); `webinar_open_session` (o item Pergunta da gravada abre a pergunta simulada) e `webinar_report` e `webinar_panel` (as perguntas só da turma), com os corpos inteiros | 9 (as 3, 4 e 9 começam com `set lock_timeout = '5s';`) | `webinars_v8_pessoas` |
+
+**Antes do merge na `dev`**: sem a migração o app novo continua de pé. Nenhuma coluna dela entra nas listas que o app
+sempre lê (`QUESTION_COLUMNS`, `SCRIPT_ITEM_COLUMNS`); a lista lê vazia (`available` falso) e o editor e o console
+seguem com o Nome digitado em cada comentário, como antes, com a frase da migração no lugar da lista; criar uma pessoa,
+a Pergunta (o Tipo) no **Enviar agora**, no **Guardar na lista** e no Salvar do roteiro voltam 409 com o aviso, que
+aponta a `202611140001` (`WEBINARS_MIGRATION` e `WEBINARS_PERSONAS_MIGRATION`). A migração sozinha não atrapalha o app de
+antes: a tabela é nova, as colunas novas têm padrão ou ficam nulas, o check aceita tudo que o app de antes grava (toda
+pergunta dele tem aluno e fica `audience`), e só o app novo cria item Pergunta e pergunta simulada. O único `drop` é o
+`drop not null` de `webinar_questions.user_id` (afrouxa; nenhum dado sai). O preenchimento muda a cópia dos itens do
+roteiro ligados a uma pessoa (o nome e o papel da mais recente com o mesmo nome e a foto mais recente que existe; a
+correção da revisão v8 de 11/11/2026 mudou o arquivo antes de ele ir para a nuvem); as mensagens já enviadas não
+mudam.
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: o arquivo inteiro pelo `apply_migration` do MCP do Supabase, ou colado
+no SQL Editor (é idempotente; rodar de novo não traz de volta uma pessoa tirada da lista, porque o preenchimento só roda
+com a lista vazia). Pelo MCP seção por seção (`execute_sql`, uma por chamada, na ordem). Depois, gravar a versão:
+`insert into supabase_migrations.schema_migrations (version, name) values ('202611140001', 'webinars_v8_pessoas') on
+conflict (version) do nothing;` e conferir `list_migrations`.
+
+Conferência depois de aplicar, numa linha só (a do cabeçalho da migração; 12 = a tabela, a coluna do item, as quatro da
+pergunta, os quatro checks validados da pergunta, a função e o `user_id` que aceita nulo):
+
+```sql
+select (select count(*) from information_schema.tables where table_schema = 'public' and table_name = 'webinar_personas') + (select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'webinar_chat_script_items' and column_name = 'persona_id') + (select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'webinar_questions' and column_name in ('source', 'persona_id', 'persona_role', 'persona_avatar_path')) + (select count(*) from pg_constraint where conname like 'webinar_questions_%_v8' and convalidated) + (select count(*) from pg_proc where proname = 'webinar_persona_name_key') + (select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'webinar_questions' and column_name = 'user_id' and is_nullable = 'YES') as total; -- 12
+```
+
+E, à parte: `select public.webinar_persona_name_key('  Adriano   SOUZA ');` (`adriano souza`) e
+`select count(*) from public.webinar_personas;` (as pessoas que o preenchimento criou dos roteiros que já existiam, como
+o "Adriano Souza" do teste do produtor).
+
+Estado em 11/11/2026: escrita e aplicada no Supabase **local** pelo `psql` (duas vezes, para conferir que é idempotente),
+com a consulta acima dando 12 e o preenchimento e a `webinar_open_session` conferidos numa transação desfeita. A
+integração `tests/integration/webinarios-pessoas.test.mjs` e o ponta a ponta `tests/e2e/produtor-pessoas-que-comentam.spec.ts`
+foram escritos e ainda não rodaram (quem junta a rodada v8 roda). Depois, em 11/11/2026, a integração e o ponta a
+ponta rodaram contra o banco local com as quatro frentes juntas. **Na nuvem de teste, aplicada em 12/11/2026** pelo
+produtor, no SQL Editor, antes do merge da PR #172 na `dev`: a conferência deu `12` e o preenchimento criou o "Adriano
+Souza". O arquivo foi aplicado ainda com o nome de antes (`202611110001`), que colidiu com a `202611110001` do produto
+licenciado (PR #168, `license_state_request_host`): o `insert` da versão não gravou nada (`on conflict do nothing`) e,
+depois da renumeração para `202611140001`, a linha `('202611140001', 'webinars_v8_pessoas')` foi gravada à parte e
+conferida. O conteúdo é o mesmo; nada roda de novo.
+
+**Produção (Hetzner)**: nada manual; o `deploy-membros` roda o `migrate.sh` antes de recriar o app. Vale a regra R1 do
+`docs/29` (a migração no banco antes do app novo no ar).
+
+### 9.15 Participantes simulados no ar: migração `202611140002` antes do merge (11/11/2026)
+
+Os participantes simulados mudados a qualquer momento, também no ar, pelo console e pelo card (`docs/30` D79 e D80,
+§4.1 e §4.3; `docs/31` §13.2) têm uma migração só, que vem **depois** da `202611100002` (§9.13) e da `202611140001` (§9.14) e não muda as de antes (a guarda `tests/webinarios-v8-plateia.guard.test.mjs`
+prende o hash acumulado das 66 anteriores e o do arquivo novo).
+
+| Ordem | Arquivo | O que faz | Seções | Nome em `schema_migrations` |
+|---|---|---|---|---|
+| 1 | `202611140002_webinars_v8_plateia.sql` | cria `webinar_simulation_changes` (cada mudança dos participantes simulados de uma sessão: o offset em que vale, a regra, a frase confirmada, quem e de onde; só acrescenta), com o índice `(session_id, created_at)`, RLS e só o `service_role`; nenhuma coluna nova em `webinar_sessions` | 2: a tabela; o índice e as permissões | `webinars_v8_plateia` |
+
+**Antes do merge na `dev`**: sem a migração o app novo continua de pé. Nada que o app sempre lê vem dela; as leituras
+das mudanças devolvem vazio (a Simulação segue como antes) e só mudar o número, no console ou no card, volta 409 com
+"Mudar os participantes simulados precisa da atualização do banco (migração 202611140002)." antes de gravar qualquer
+coisa. Ela é a mais nova dos webinários, então `WEBINARS_MIGRATION` passa a apontá-la (e `WEBINARS_AUDIENCE_MIGRATION`).
+A migração sozinha não atrapalha o app de antes: a tabela é nova e ele nunca a lê.
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: o arquivo inteiro pelo `apply_migration` do MCP do Supabase, ou colado
+no SQL Editor (é idempotente, sem `drop`). Depois, gravar a versão:
+`insert into supabase_migrations.schema_migrations (version, name) values ('202611140002', 'webinars_v8_plateia') on
+conflict (version) do nothing;` e conferir `list_migrations`.
+
+Conferência depois de aplicar (uma linha só; a do cabeçalho da migração):
+
+```sql
+select has_table_privilege('authenticated', 'public.webinar_simulation_changes', 'select'), (select relrowsecurity from pg_class where oid = 'public.webinar_simulation_changes'::regclass), (select count(*) from pg_indexes where schemaname = 'public' and tablename = 'webinar_simulation_changes'); -- false, true, 2
+```
+
+Estado em 11/11/2026: escrita, sem aplicar em lugar nenhum (a rodada que a escreveu não tocou no banco local, que outras
+frentes usavam). A integração `tests/integration/webinarios-plateia.test.mjs` e o ponta a ponta
+`tests/e2e/produtor-muda-plateia-no-ar.spec.ts` rodam contra ela no Supabase local (rodaram em 11/11/2026, com as
+quatro frentes juntas). **Na nuvem de teste, aplicada em 12/11/2026** pelo produtor, no SQL Editor, antes do merge da
+PR #172 na `dev`: a conferência deu `false | true | 2`. Como a §9.14, foi aplicada ainda com o nome de antes
+(`202611110002`, que é a `held_sales` do produto licenciado): a linha `('202611140002', 'webinars_v8_plateia')` foi
+gravada à parte depois da renumeração e conferida.
+
+**Produção (Hetzner)**: nada manual, como na §9.13: o `deploy-membros` roda o `migrate.sh` antes de recriar o app.
 
 ## 10. Producao guardada em snapshot (03/11/2026)
 

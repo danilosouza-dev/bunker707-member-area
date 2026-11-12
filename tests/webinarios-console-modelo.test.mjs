@@ -447,3 +447,19 @@ test("consoleComment (docs/31 §10): o comentario do YouTube do console com o no
   assert.equal(replay.time, null);
   assert.equal(replay.srAuthor, "Ana M.: ");
 });
+
+test("D82: o avatar ao lado do campo de quem esta no console (Escreva para a turma e a resposta do fio): a foto do Perfil; sem ela, as iniciais do nome com que a pessoa escreve; o icone da equipe so sem o nome", () => {
+  const FOTO = "https://projeto.supabase.co/storage/v1/object/public/content-assets/avatars/u/danilo.webp";
+  assert.deepEqual(console_.consoleWriterAvatar(FOTO, "Danilo S."), { imageSrc: FOTO, kind: "person", name: "Danilo S." });
+  assert.deepEqual(console_.consoleWriterAvatar(null, "Danilo S."), { imageSrc: null, kind: "person", name: "Danilo S." }, "sem foto, as iniciais (nunca so o icone)");
+  assert.deepEqual(console_.consoleWriterAvatar("  ", " Danilo S. "), { imageSrc: null, kind: "person", name: "Danilo S." }, "a foto em branco conta como sem foto");
+  assert.deepEqual(console_.consoleWriterAvatar(FOTO, null), { imageSrc: FOTO, kind: "team", name: null }, "sem o nome, a foto continua");
+  assert.deepEqual(console_.consoleWriterAvatar(null, "   "), { imageSrc: null, kind: "team", name: null }, "sem foto e sem nome, o icone da equipe");
+  assert.deepEqual(console_.consoleWriterAvatar(undefined, undefined), { imageSrc: null, kind: "team", name: null });
+
+  // O nome e o mesmo das mensagens que a equipe escreve pelo console (room-actions, teamAuthorName).
+  assert.equal(room.teamAuthorName("Danilo de Souza"), "Danilo S.");
+  assert.equal(room.teamAuthorName("Produtor de Teste"), "Produtor T.");
+  assert.equal(room.teamAuthorName("Caio"), "Caio");
+  assert.equal(room.teamAuthorName(`${"a".repeat(120)} Silva`).length, 80, "o teto do nome do chat");
+});

@@ -32,6 +32,8 @@ import {
 // no sessionStorage), mandado depois de 0 a 5 s ao acaso por POST .../screen-events; o clique e o fechar na hora, pelo
 // sendBeacon; no pagehide e ao sair da sala, o que esperava vai pelo sendBeacon. As regras ficam em room-screen-model.ts
 // (createShownWatcher, createScreenEventSender); aqui so o navegador. Nada e medido no "ver como" (`enabled` falso).
+// O estado leva tambem o resumo da decisao da Simulacao (`simulationKey`, docs/30 D79): a sala o passa ao
+// useRoomSimulation, que pede a janela de novo quando ele muda (os participantes simulados mudados no ar em segundos).
 
 export type { ScreenEvent };
 
@@ -49,6 +51,11 @@ export type RoomScreen = {
   pinnedPollId: string | null;
   /** O resumo das enquetes da sessao: mudou, a sala rele as enquetes (useRoomPolls). Nulo sem estado. */
   pollsKey: string | null;
+  /**
+   * O resumo da decisao da Simulacao (docs/30 D79): mudou, a sala pede a janela da Simulacao de novo (useRoomSimulation).
+   * Vazio sem decisao; nulo sem estado.
+   */
+  simulationKey: string | null;
 };
 
 type ClosedStore = { read: () => string | null; subscribe: (listener: () => void) => () => void; write: (value: string) => void };
@@ -130,7 +137,8 @@ export function useRoomScreen(input: { sessionId: string; sessionPinned: Student
     onChatScreen,
     pinned: state ? state.pinned : sessionPinned,
     pinnedPollId: state?.pinnedPollId ?? null,
-    pollsKey: state ? state.pollsKey : null
+    pollsKey: state ? state.pollsKey : null,
+    simulationKey: state ? (state.simulationKey ?? "") : null
   };
 }
 

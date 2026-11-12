@@ -1,13 +1,19 @@
 "use client";
 
+import { ListPlus } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import type { ActionResult } from "@/lib/action-result";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
+import type { ConsolePollLaunch } from "@/server/webinars/chat-schemas";
 import { pollPercent, type ConsolePollView } from "@/server/webinars/console-model";
 import { WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
-import type { Poll } from "@/server/webinars/model";
+import { CHAT_LIMITS, type Poll } from "@/server/webinars/model";
 import { pollPinnable } from "@/server/webinars/screen-model";
 import { SectionCard } from "../../../settings/kit";
 import { StatusChip } from "../../../status-chip";
+import { returnConsoleFocus } from "./console-focus";
+import { ConsolePollForm, emptyConsolePoll, type ConsolePollFormInput, type ConsolePollFormState } from "./console-poll-form";
 
 // O painel Enquetes do console (docs/30 §2.4): as prontas (os modelos do editor) com Abrir, e as desta sessao com
 // as contagens ao vivo, Encerrar e Compartilhar resultado. A enquete fixada (a Na tela, R2; especificacao de
@@ -15,10 +21,16 @@ import { StatusChip } from "../../../status-chip";
 // (screen-model.pollPinnable), o Fixar; a fixada (o pinnedPollId do retrato) leva o selo Fixada e o Desafixar. Em
 // "Prontas", o "Abrir e fixar" ao lado do Abrir. O Compartilhar resultado mantem a fixada (agora com as barras); o
 // Encerrar sem compartilhar desafixa (o servidor tira da tela). Os avisos ficam com quem chama (session-console.tsx).
+// A "Nova enquete" (D83, 11/11/2026): o botao no cabecalho abre o formulario (console-poll-form.tsx) no lugar da lista,
+// como o "Novo comentário" do Roteiro; ao fechar (Voltar, Cancelar, depois de abrir ou guardar), o foco volta ao "Nova
+// enquete" (ou ao titulo das Enquetes; console-focus.ts). Com a sessao fora do canAct, o formulario so guarda nas
+// prontas; com as prontas no teto (CHAT_LIMITS.pollTemplatesMax), o botao fica desligado com a frase do limite.
 
 const copy = WEBINAR_ADMIN_COPY.console.polls;
 const pollsCopy = WEBINAR_ADMIN_COPY.polls;
 const pinCopy = WEBINAR_COPY.naTela.enquetes;
+const TITLE_ID = "console-polls-title";
+const FULL_ID = "console-polls-full";
 
 type ConsolePollsProps = {
   busyKey: string | null;
@@ -34,13 +46,63 @@ type ConsolePollsProps = {
   /** A enquete fixada da sessao (snapshot.pinnedPollId); nula sem ela. */
   pinnedPollId: string | null;
   templates: readonly Poll[];
+  /** A "Nova enquete" aberta ao desenhar, com o que ja foi escrito (o teste de tela). */
+  initialCreate?: ConsolePollFormState | null;
+  /** "Abrir agora", "Abrir e fixar" e "Guardar nas prontas" da "Nova enquete" (createConsolePoll); sem ele, o botao nao aparece. */
+  onCreate?: (input: ConsolePollFormInput, launch: ConsolePollLaunch) => Promise<ActionResult<unknown> | null>;
 };
 
-export function ConsolePolls({ busyKey, canAct, launched, onClose, onLaunch, onPin, onUnpin, pinnedPollId, templates }: ConsolePollsProps) {
+export function ConsolePolls({ busyKey, canAct, initialCreate = null, launched, onClose, onCreate, onLaunch, onPin, onUnpin, pinnedPollId, templates }: ConsolePollsProps) {
+  const [creating, setCreating] = useState<ConsolePollFormState | null>(initialCreate);
+  const returnFocus = useRef(false);
   const openTemplates = new Set(launched.filter((poll) => poll.status === "open").map((poll) => poll.templatePollId));
+  const full = templates.length >= CHAT_LIMITS.pollTemplatesMax;
+
+  useEffect(() => {
+    if (creating || !returnFocus.current) {
+      return;
+    }
+    returnFocus.current = false;
+    returnConsoleFocus({ heading: TITLE_ID, opener: "[data-console-poll-new]" });
+  }, [creating]);
+
+  if (creating && onCreate) {
+    return (
+      <ConsolePollForm
+        busy={busyKey !== null}
+        canOpen={canAct}
+        initialState={creating}
+        onBack={() => {
+          returnFocus.current = true;
+          setCreating(null);
+        }}
+        onSubmit={onCreate}
+      />
+    );
+  }
 
   return (
-    <SectionCard title={copy.title} titleId="console-polls-title">
+    <SectionCard
+      actions={
+        onCreate ? (
+          <Button
+            aria-describedby={full ? FULL_ID : undefined}
+            className="h-8! px-2 text-[13px]"
+            data-console-poll-new=""
+            disabled={full}
+            onClick={() => setCreating(emptyConsolePoll())}
+            type="button"
+            variant="secondary"
+          >
+            <ListPlus aria-hidden="true" className="size-4" />
+            {copy.create.novaEnquete}
+          </Button>
+        ) : undefined
+      }
+      title={copy.title}
+      titleFocusable
+      titleId={TITLE_ID}
+    >
       <div className="flex min-w-0 flex-col gap-4">
         {launched.length > 0 ? (
           <div className="flex min-w-0 flex-col gap-3">
@@ -111,6 +173,11 @@ export function ConsolePolls({ busyKey, canAct, launched, onClose, onLaunch, onP
         <div className="flex min-w-0 flex-col gap-3">
           <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{copy.templates}</span>
           {templates.length === 0 ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{copy.empty}</p> : null}
+          {onCreate && full ? (
+            <p className="text-[13px] leading-5 text-[var(--text-secondary)]" id={FULL_ID}>
+              {pollsCopy.limit(CHAT_LIMITS.pollTemplatesMax)}
+            </p>
+          ) : null}
           <ul className="flex min-w-0 flex-col gap-2" data-console-polls-templates="">
             {templates.map((poll) => (
               <li className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border-subtle)] px-3 py-2" data-console-poll-template={poll.id} key={poll.id}>

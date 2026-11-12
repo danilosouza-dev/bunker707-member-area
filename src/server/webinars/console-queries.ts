@@ -15,7 +15,10 @@
 // Adendo de 10/11/2026 (R7): na gravada e na Live ao vivo com a decisao registrada, a parte simulada do contador agora
 // (`simulatedNow`, uma leitura das regras pela chave so nessas sessoes), so para a equipe ver separada do real. R8 e R9:
 // o roteiro (com o que ja entrou) tambem na sessao da Live ao vivo, com a foto de quem comenta de cada item, e a foto de
-// quem comenta nas mensagens do roteiro (lida a parte pelo id: a coluna nao entra em CHAT_MESSAGE_COLUMNS).
+// quem comenta nas mensagens do roteiro (lida a parte pelo id: a coluna nao entra em CHAT_MESSAGE_COLUMNS). As pessoas
+// que comentam (11/11/2026, D75 a D78): o retrato leva a lista do webinario (`personas`, so com o roteiro e nunca no
+// Replay; banco sem a 202611140001, `available` falso), e a pergunta simulada vem nas perguntas com a foto da pessoa e
+// so quando a hora dela chega; a mensagem do item Pergunta (o registro de que o item entrou) fica fora do chat.
 
 import "server-only";
 
@@ -40,20 +43,31 @@ import {
 } from "./live-console-model";
 import { liveBanState, liveRoomConfigured, presenceOffsetMs } from "./live-model";
 import { fetchSessionRecordingRow, listRecordingEventRows, listSessionBanRows, listUserBanRows, recentRecorderPrepareDurations } from "./live-store";
-import { chatConsentAllowsReplay, type QuestionReply, type ScriptItem, type WebinarKind, type WebinarSession } from "./model";
-import { readScriptPersonaAvatars, withPersonaAvatars } from "./persona-store";
+import { chatConsentAllowsReplay, type QuestionReply, type ScriptItem, type SimulationChangeRecord, type WebinarKind, type WebinarSession } from "./model";
+import { NO_PERSONA_LIST } from "./persona-model";
+import { listPersonas, readScriptPersonaAvatars, withPersonaAvatars } from "./persona-store";
 import { baseRecordingOf } from "./queries";
 import { recorderDispatcherFrom } from "./recorder-dispatch";
 import { anchorDriftMs, parseJibriStartedAt, prepareEstimateMinutes } from "./recorder-model";
 import { authorPhotoUrl, bunnyEmbedUrl, parseBunnyEmbed, presenceBucket } from "./room-model";
-import { bunnyViewToken, questionPhotoUrl, replyPhotoUrl, scriptedAvatarUrls } from "./room-queries";
+import { bunnyViewToken, questionPhotoUrl, replyPhotoUrl, scriptedAvatarUrls, scriptedQuestionAvatarUrls } from "./room-queries";
+import { questionVisibleAt } from "./room-rules";
 import { RECORDING_COLUMNS, recorderStatusOf, roomSettingsOfRow, sessionFromRow, type RecordingRow, type SessionBanRow, type SessionRow, type WebinarRow } from "./rows";
 import { reportViewOf } from "./report-queries";
 import { screenDisplayFromRow, screenItemFromRow } from "./screen-rows";
 import { loadScreenStats } from "./screen-queries";
 import { loadConsoleScreenRows } from "./screen-store";
-import { liveSimulationEndOffsetMs, liveSimulationShapeMs, simulationClockMs, simulationCounterNow, simulationDecisionRecorded, simulationEndOffsetMs } from "./simulation-model";
-import { fetchSessionSimulation } from "./simulation-store";
+import { simulationAudienceViewOf, type SimulationAudienceView } from "./simulation-audience-model";
+import {
+  liveSimulationEndOffsetMs,
+  liveSimulationShapeMs,
+  simulationAudienceFlagsOf,
+  simulationClockMs,
+  simulationCounterNow,
+  simulationDecisionRecorded,
+  simulationEndOffsetMs
+} from "./simulation-model";
+import { fetchSessionSimulation, listSimulationChanges, loadSimulationChangeNames } from "./simulation-store";
 import { fetchSessionRow, fetchWebinarRow, listPresenterRows, listRecordingRows, listSessionRows } from "./store";
 import { saoPauloDayKey } from "../../lib/webinar-time";
 
@@ -84,9 +98,15 @@ export type ConsoleWebinar = {
   waitingRoom: boolean;
 };
 
+/** Quem abre o console: o id (a foto do proprio perfil) e o nome com que a equipe escreve (room-model.teamAuthorName). */
+export type ConsoleViewerInput = { id: string; name: string | null };
+
 export type SessionConsoleData = {
-  /** Quem esta no console: a foto do proprio perfil para o campo da equipe (nula sem foto ou sem `viewerUserId`). */
-  viewer?: { avatarUrl: string | null };
+  /**
+   * Quem esta no console, para o avatar do campo da equipe (D82): a foto do proprio perfil (nula sem foto) e o nome para
+   * as iniciais sem ela (o mesmo das mensagens que a pessoa escreve; nulo sem quem abriu, e o campo mostra a equipe).
+   */
+  viewer?: { avatarUrl: string | null; name: string | null };
   sessions: WebinarSession[];
   /** Nulo quando o webinario ainda nao tem sessao nenhuma. */
   snapshot: ConsoleSnapshot | null;
@@ -489,20 +509,41 @@ async function loadConsolePresence(session: WebinarSession, offsetMs: number, no
 /**
  * A parte simulada do contador agora (R7), so para a equipe: na gravada (o relogio e a duracao do video) e na Live ao
  * vivo (o relogio desde o started_at e a forma pela duracao prevista), com a decisao registrada (simulationDecisionRecorded,
- * como a sala) e a sessao de pe. Uma leitura das regras pela chave so nesse caso; banco sem a 202610300003 ou a leitura
- * que falha: nulo (o selo fica so com o real).
+ * como a sala) e a sessao de pe. Desde 11/11/2026 (D79), com as mudancas dos participantes simulados no ar (a rampa
+ * inclusa) e a vista do controle "Participantes simulados" (o numero de agora, a rampa e as mudancas com o nome), na
+ * gravada e na Live ao vivo de pe ou encerrada (nunca no Replay nem na cancelada), mesmo sem decisao. Uma leitura das
+ * regras pela chave e uma das mudancas so nesse caso; banco sem a 202610300003 ou a leitura que falha: nulo nos dois (o
+ * selo fica so com o real e o controle nao aparece); sem a 202611140002, o controle sem os botoes.
  */
-async function loadConsoleSimulated(db: WebinarsDb, input: { durationMs: number; nowMs: number; session: WebinarSession; webinar: WebinarRow | undefined }): Promise<number | null> {
+async function loadConsoleSimulated(
+  db: WebinarsDb,
+  input: { durationMs: number; nowMs: number; session: WebinarSession; webinar: WebinarRow | undefined }
+): Promise<{ audience: SimulationAudienceView | null; simulatedNow: number | null }> {
   const { session } = input;
   const live = session.kind === "live";
-  if ((session.kind !== "simulated" && !live) || session.status === "ended" || session.status === "cancelled" || !simulationDecisionRecorded(session)) {
-    return null;
+  if ((session.kind !== "simulated" && !live) || session.status === "cancelled") {
+    return { audience: null, simulatedNow: null };
   }
   try {
     const simulation = await fetchSessionSimulation(db, session.id);
+    if (!simulation) {
+      return { audience: null, simulatedNow: null };
+    }
     const offsetMs = simulationClockMs(session, input.nowMs);
+    const changes = await loadAudienceChanges(db, session.id);
+    const audience = simulationAudienceViewOf({
+      flags: simulationAudienceFlagsOf({ joins: simulation.joins, saleNotices: simulation.saleNotices, showLiveBadge: session.showLiveBadge }),
+      names: await loadSimulationChangeNames(db, changes.records),
+      offsetMs,
+      pendingMigration: changes.pending,
+      records: changes.records,
+      simulation
+    });
+    if (session.status === "ended" || !simulationDecisionRecorded(session)) {
+      return { audience, simulatedNow: null };
+    }
     if (live) {
-      return simulationCounterNow({
+      const simulatedNow = simulationCounterNow({
         durationMs: liveSimulationShapeMs(input.webinar?.duration_minutes ?? 1),
         endMs: liveSimulationEndOffsetMs(session),
         kind: "live",
@@ -510,16 +551,32 @@ async function loadConsoleSimulated(db: WebinarsDb, input: { durationMs: number;
         simulation,
         status: session.status
       });
+      return { audience, simulatedNow };
     }
     if (!Number.isFinite(input.durationMs) || input.durationMs <= 0) {
-      return null;
+      return { audience, simulatedNow: null };
     }
-    return simulationCounterNow({ durationMs: input.durationMs, endMs: simulationEndOffsetMs(session, input.durationMs), kind: "simulated", offsetMs, simulation, status: session.status });
+    return {
+      audience,
+      simulatedNow: simulationCounterNow({ durationMs: input.durationMs, endMs: simulationEndOffsetMs(session, input.durationMs), kind: "simulated", offsetMs, simulation, status: session.status })
+    };
   } catch (error) {
     if (!isPendingMigrationError(error) && !isMissingWebinarSchema(error)) {
       console.error(`[admin/webinarios] parte simulada do console da sessao ${session.id}: ${error instanceof Error ? error.message : String(error)}`);
     }
-    return null;
+    return { audience: null, simulatedNow: null };
+  }
+}
+
+/** As mudancas da sessao para o controle; sem a tabela (banco sem a 202611140002), nenhuma e `pending`. */
+async function loadAudienceChanges(db: WebinarsDb, sessionId: string): Promise<{ pending: boolean; records: SimulationChangeRecord[] }> {
+  try {
+    return { pending: false, records: await listSimulationChanges(db, [sessionId]) };
+  } catch (error) {
+    if (isPendingMigrationError(error) || isMissingWebinarSchema(error)) {
+      return { pending: true, records: [] };
+    }
+    throw error;
   }
 }
 
@@ -552,7 +609,7 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
   const presenceMs = presenceOffsetMs(session, nowMs);
   // O roteiro: no webinario gravado e, desde o adendo de 10/11/2026 (R8), na sessao da Live ao vivo.
   const withScript = input.kind === "simulated" || session.kind === "live";
-  const [chatRows, scriptItems, fired, launched, templates, questionRows, replyRows, presentIds, durationMs, screen] = await Promise.all([
+  const [loadedChatRows, scriptItems, fired, launched, templates, questionRows, replyRows, presentIds, durationMs, screen, personaList] = await Promise.all([
     listSessionChatRows(db, { sessionId: session.id }),
     withScript ? loadConsoleScriptItems(db, session.webinarId) : Promise.resolve([]),
     withScript ? loadFiredScript(db, session.id) : Promise.resolve({}),
@@ -562,15 +619,19 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
     listQuestionReplyRows(db, { sessionId: session.id }),
     Number.isFinite(presenceMs) ? listPresentUserIds(db, { currentBucket: presenceBucket(Math.floor(presenceMs / 1000)), sessionId: session.id }) : Promise.resolve([]),
     simulatedDurationMs(db, session, input.webinar),
-    loadConsoleScreen(db, session, nowMs)
+    loadConsoleScreen(db, session, nowMs),
+    // As pessoas que comentam (11/11/2026, D75): a lista do webinario, para o Roteiro do console (nunca no Replay).
+    withScript && session.kind !== "replay" ? listPersonas(db, session.webinarId) : Promise.resolve(NO_PERSONA_LIST)
   ]);
+  // A mensagem do item Pergunta do roteiro (D77) nao aparece no chat do console: a pergunta esta na aba Perguntas.
+  const chatRows = loadedChatRows.filter((row) => !(row.source === "scripted" && row.kind === "question"));
   const audienceAuthors = chatRows.filter((row) => row.source === "audience" && row.author_user_id).map((row) => row.author_user_id as string);
   const chatMessages = chatRows.map(chatMessageFromRow);
   const askable = askableMessageIds(chatMessages);
   // A fixada pela chave: da lista quando esta entre as 200 mais novas; senao, uma leitura.
   const pinnedInList = session.pinnedMessageId ? (chatRows.find((row) => row.id === session.pinnedMessageId) ?? null) : null;
   const chatAuthors = chatRows.map((row) => row.author_user_id).filter((id): id is string => Boolean(id));
-  const [chatConsented, pinnedRow, live, presence, askedMessageIds, barred, simulatedNow] = await Promise.all([
+  const [chatConsented, pinnedRow, live, presence, askedMessageIds, barred, simulated] = await Promise.all([
     chatAuthors.length > 0 ? loadConsentFlags(db, chatAuthors) : Promise.resolve(new Set<string>()),
     pinnedInList ? Promise.resolve(pinnedInList) : fetchPinnedMessageRow(db, session.pinnedMessageId),
     session.kind === "live" && input.webinar ? loadLiveConsole(db, { authors: audienceAuthors, now: input.now, session: input.session, webinar: input.webinar }) : Promise.resolve(null),
@@ -587,16 +648,19 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
   // A foto de quem escreveu e de quem perguntou, pela regra da equipe (authorPhotoUrl: nunca no anonimo, que desde
   // 10/11/2026 so existe nas linhas antigas); a leitura
   // fica 60 s na memoria do processo, entao o retrato de 5 s nao vira uma consulta a `profiles` por vez.
-  const questions = questionRows.map(questionFromRow);
+  // A pergunta simulada (D77) entra no console junto com a turma: so quando a hora dela chega.
+  const questions = questionRows.map(questionFromRow).filter((question) => questionVisibleAt(question, nowMs));
   const replies = replyRows.map(questionReplyFromRow);
-  const [photos, personas] = await Promise.all([
+  const [photos, personas, questionPersonas] = await Promise.all([
     loadAuthorPhotos(
       db,
       [...authors, ...questions.filter((question) => !question.anonymous).map((question) => question.userId), ...replies.filter((reply) => !reply.anonymous).map((reply) => reply.userId)],
       nowMs
     ),
     // A foto de quem comenta das mensagens do roteiro (R9), pela memoria do processo.
-    scriptedAvatarUrls(db, pinnedMessage ? [...chatMessages, pinnedMessage] : chatMessages, nowMs)
+    scriptedAvatarUrls(db, pinnedMessage ? [...chatMessages, pinnedMessage] : chatMessages, nowMs),
+    // A foto da pessoa das perguntas simuladas (D77), pela mesma memoria.
+    scriptedQuestionAvatarUrls(db, questions, nowMs)
   ]);
   // O fio de cada pergunta (docs/30 §2.4), em ordem, com a foto de quem escreveu.
   const thread = new Map<string, QuestionReply[]>();
@@ -622,6 +686,7 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
 
   return {
     askedMessageIds,
+    audience: simulated.audience,
     barred,
     live,
     messages,
@@ -631,12 +696,13 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
     polls: { launched, templates: templates.polls.map((poll) => pollFromRow(poll, templates.options)) },
     presence,
     presentNow: presentIds.length,
-    questions: questions.map((question) => ({ ...question, avatarUrl: questionPhotoUrl(question, session.webinarId, photos, "team"), replies: thread.get(question.id) ?? [] })),
+    personas: personaList,
+    questions: questions.map((question) => ({ ...question, avatarUrl: questionPhotoUrl(question, session.webinarId, photos, "team", questionPersonas), replies: thread.get(question.id) ?? [] })),
     scriptFired: fired,
     scriptItems,
     screen,
     serverTime: input.now.toISOString(),
-    simulatedNow,
+    simulatedNow: simulated.simulatedNow,
     session: consoleSessionOf(session)
   };
 }
@@ -657,7 +723,7 @@ async function loadPresenterName(db: WebinarsDb, hostUserId: string | null): Pro
   }
 }
 
-export async function getSessionConsoleData(webinarId: string, requestedSessionId: string | null, now: Date = new Date(), viewerUserId: string | null = null): Promise<SessionConsoleData | null> {
+export async function getSessionConsoleData(webinarId: string, requestedSessionId: string | null, now: Date = new Date(), viewer: ConsoleViewerInput | null = null): Promise<SessionConsoleData | null> {
   const db = webinarsDb();
   const row = await fetchWebinarRow(db, webinarId);
 
@@ -678,7 +744,7 @@ export async function getSessionConsoleData(webinarId: string, requestedSessionI
 
   return {
     sessions,
-    viewer: { avatarUrl: viewerUserId ? await loadOwnPhoto(db, viewerUserId, now.getTime()) : null },
+    viewer: { avatarUrl: viewer ? await loadOwnPhoto(db, viewer.id, now.getTime()) : null, name: viewer?.name?.trim() || null },
     snapshot: pickedRow ? await loadConsoleSnapshot(db, { kind, now, session: pickedRow, webinar: row }) : null,
     webinar: {
       allowStudentCamera: row.allow_student_camera !== false,

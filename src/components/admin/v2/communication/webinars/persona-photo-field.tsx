@@ -13,10 +13,13 @@ import type { UploadedPersonaPhoto } from "@/server/webinars/script-actions";
 // console: a previa redonda (a foto do nosso bucket, pelo endereco montado com a origem do Supabase), Enviar foto /
 // Trocar / Remover (o navegador reduz a 512 px e ate 100.000 bytes em WebP pelo prepareFreeImage do Livre, carregado so
 // quando a equipe escolhe a imagem, e envia pelo uploadPersonaPhoto, que devolve so o caminho), a dica do formato, a
-// linha do consentimento ("Use imagem gerada ou com autorização...") e, com a foto e o nome, a caixa "Usar esta foto em
-// todos os comentários de {nome}" (ligada por padrao; quem usa decide o que ela faz). Nenhuma frase escrita aqui. O
-// "enviando" fica com quem usa (`uploading` e `onUploadingChange`): o Salvar do editor e o "Enviar agora" e o "Guardar
-// na lista" do console esperam a foto chegar (um envio no meio sairia sem a foto e deixaria o arquivo sem dono).
+// linha do consentimento ("Use imagem gerada ou com autorização...") e, ate 11/11/2026, com a foto e o nome, a caixa
+// "Usar esta foto em todos os comentários de {nome}". A caixa saiu com a lista "Pessoas que comentam" (docs/30 D75): a
+// foto e da pessoa, e editar a pessoa troca a foto de todos os comentarios dela; o campo agora e o da pessoa (o
+// formulario da lista e a pessoa nova do Novo comentário) e, no banco sem a lista, o de cada item. Nenhuma frase escrita
+// aqui. O "enviando" fica com quem usa (`uploading` e `onUploadingChange`): o Salvar do editor, o salvar da pessoa e o
+// "Enviar agora" e o "Guardar na lista" do console esperam a foto chegar (um envio no meio sairia sem a foto e deixaria
+// o arquivo sem dono).
 
 const COPY = WEBINAR_COPY.naTela.comentarios;
 
@@ -28,13 +31,10 @@ export const PERSONA_PHOTO_PREP: FreeImageLimits = {
 };
 
 export type PersonaPhotoFieldProps = {
-  /** A caixa "Usar esta foto em todos os comentários de {nome}". */
-  applyToAll: boolean;
   disabled: boolean;
   idBase: string;
-  /** O nome de quem comenta (a caixa so aparece com ele). */
+  /** O nome de quem comenta (o texto alternativo da previa). */
   name: string;
-  onApplyToAllChange: (checked: boolean) => void;
   /** A foto nova (o caminho devolvido pelo envio) ou nula (Remover). */
   onChange: (path: string | null) => void;
   /** Envia o WebP preparado no navegador (uploadPersonaPhoto). */
@@ -48,7 +48,7 @@ export type PersonaPhotoFieldProps = {
   uploading: boolean;
 };
 
-export function PersonaPhotoField({ applyToAll, disabled, idBase, name, onApplyToAllChange, onChange, onUpload, onUploadingChange, origin, path, uploading }: PersonaPhotoFieldProps) {
+export function PersonaPhotoField({ disabled, idBase, name, onChange, onUpload, onUploadingChange, origin, path, uploading }: PersonaPhotoFieldProps) {
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const url = personaAvatarUrl(path, origin === undefined ? (process.env.NEXT_PUBLIC_SUPABASE_URL ?? null) : origin);
@@ -133,20 +133,6 @@ export function PersonaPhotoField({ applyToAll, disabled, idBase, name, onApplyT
       <p className="text-xs leading-5 text-[var(--text-secondary)]" data-persona-photo-consent="">
         {COPY.fotoConsentimento}
       </p>
-      {path && trimmedName ? (
-        <label className="flex min-w-0 items-start gap-2 text-[13px] leading-5 text-[var(--text-primary)]" htmlFor={`${idBase}-todos`}>
-          <input
-            checked={applyToAll}
-            className="mt-0.5 size-4 shrink-0 accent-[var(--text-primary)]"
-            data-persona-photo-all=""
-            disabled={disabled || uploading}
-            id={`${idBase}-todos`}
-            onChange={(event) => onApplyToAllChange(event.target.checked)}
-            type="checkbox"
-          />
-          {COPY.usarEmTodos(trimmedName)}
-        </label>
-      ) : null}
     </div>
   );
 }

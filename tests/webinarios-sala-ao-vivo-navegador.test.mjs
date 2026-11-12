@@ -372,14 +372,14 @@ test("microfone sozinho (docs/31 caminho A): a sala guarda a moderacao de audio 
   assert.equal(sinal(dentro, "moderationStatusChanged", { enabled: true, mediaType: "video" }), dentro);
   assert.equal(sinal(dentro, "moderationStatusChanged", { enabled: "sim", mediaType: "audio" }), dentro);
 
-  // O aluno abriu sozinho (o microfone ligado marca micAllowed); o vigia ligou a moderacao: a liberacao sai, o
-  // Microfone fica pelo audioOn; fechado, so uma aprovacao nova o libera.
+  // O aluno abriu sozinho (o microfone ligado marca micAllowed); a moderacao ligou (o fechar da turma; sem teto desde
+  // 11/11/2026, D84): a liberacao sai, o Microfone fica pelo audioOn; fechado, so uma aprovacao nova o libera.
   const falando = sinal(model.acceptMic(dentro), "audioMuteStatusChanged", { muted: false });
   assert.equal(falando.micAllowed, true);
   const lotou = sinal(falando, "moderationStatusChanged", { enabled: true, mediaType: "audio" });
   assert.deepEqual([lotou.audioModeration, lotou.micAllowed, lotou.audioOn], [true, false, true]);
   const fechou = sinal(model.expectAudioToggle(lotou), "audioMuteStatusChanged", { muted: true });
-  assert.equal(model.micBlocked({ ...fechou, selfUnmute: true }), true, "fechado com a sala lotada: bloqueado");
+  assert.equal(model.micBlocked({ ...fechou, selfUnmute: true }), true, "fechado com a moderacao ligada: bloqueado");
   const liberou = sinal(fechou, "moderationStatusChanged", { enabled: false, mediaType: "audio" });
   assert.equal(model.micBlocked({ ...liberou, selfUnmute: true }), false, "a moderacao desligada: livre de novo");
 

@@ -24,8 +24,10 @@ import {
 } from "./model";
 import type { ConsolePresence } from "./console-presence-model";
 import type { LiveConsolePerson, LiveConsoleSnapshot } from "./live-console-model";
+import type { PersonaList } from "./persona-model";
 import type { ScreenDisplay, ScreenItem } from "./screen-model";
 import type { ScreenStats } from "./screen-rows";
+import type { SimulationAudienceView } from "./simulation-audience-model";
 import { sessionOffsetMs, simulatedPhase, simulationAckSentence } from "./room-model";
 import { scriptOffsetOf, sortScriptItems } from "./script-model";
 
@@ -383,6 +385,19 @@ export function consoleComment(input: {
   return { avatar, name, role, srAuthor: WEBINAR_COPY.salaV2.chat.autor(parts), time };
 }
 
+/** O avatar do campo de quem esta no console (o RoomCommentField e o RoomCommentAvatar da sala). */
+export type ConsoleWriterAvatar = { imageSrc: string | null; kind: "person" | "team"; name: string | null };
+
+/**
+ * O avatar ao lado do campo de quem esta no console, o "Escreva para a turma" e o campo da resposta do fio (docs/30
+ * D82): a foto do Perfil; sem ela, as iniciais do nome com que a pessoa escreve; o icone da equipe so sem o nome
+ * (nunca so o icone quando o nome vem).
+ */
+export function consoleWriterAvatar(avatarUrl: string | null | undefined, name: string | null | undefined): ConsoleWriterAvatar {
+  const shown = name?.trim() || null;
+  return { imageSrc: avatarUrl?.trim() || null, kind: shown ? "person" : "team", name: shown };
+}
+
 /** De onde saiu uma acao do chat do console: o card da fila ou o balao da lista, a posicao dele e a do botao no item. */
 export type ConsoleChatFocusFrom = { area: "log" | "queue"; id: string; index: number; position: number };
 
@@ -492,6 +507,12 @@ export type ConsoleSnapshot = {
    */
   askedMessageIds: string[];
   /**
+   * Os participantes simulados (docs/30 D79, 11/11/2026): o controle no alto da entrada Presença (o numero de agora, a
+   * rampa, as mudancas com o nome e o que a frase diz alem do numero), na gravada e na Live ao vivo de pe ou encerrada.
+   * Nulo no Replay, na cancelada, sem as colunas da Simulacao ou com a leitura que falhou.
+   */
+  audience?: SimulationAudienceView | null;
+  /**
    * So na Live gravada (a moderacao por pessoa, docs/30 §2.4): quem esta removido, silenciado ou banido nesta sessao (ou
    * banido de todas, entre quem escreveu no chat), com o nome, no formato da lista da Live ao vivo (LiveConsolePerson,
    * so os barrados). Nulo nas outras: na Live ao vivo a lista vem em `live.people`; no Replay nada muda.
@@ -518,6 +539,12 @@ export type ConsoleSnapshot = {
    */
   presence?: ConsolePresence | null;
   presentNow: number;
+  /**
+   * As pessoas que comentam do webinario (11/11/2026, D75): a mesma lista do card Roteiro do editor, que o Roteiro do
+   * console cria, edita, remove e escolhe. So com o roteiro e nunca no Replay; ausente ou `available` falso (o banco sem
+   * a 202611140001), o "Novo comentário" segue com o Nome digitado.
+   */
+  personas?: PersonaList;
   questions: WebinarQuestion[];
   /**
    * A parte simulada do contador agora (adendo de 10/11/2026, R7), so para a equipe ver separada do real ("· +300

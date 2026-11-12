@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useRef, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useAutoGrowTextarea } from "@/components/use-auto-grow-textarea";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { replyFieldKey } from "./room-composer-model";
 import { RoomPill } from "./room-pill";
 
 // O campo de responder dentro do fio de uma pergunta (docs/30 §1.3; decisao do produtor de 10/11/2026), o da resposta
-// de um comentario do YouTube: o avatar de 24 de quem responde, o texto com a linha embaixo (a linha clareia com o
-// foco) e, a direita, o Cancelar (texto) e o Responder (a pilula de envio, desligada com o campo vazio). Abre ja com o
+// de um comentario do YouTube: o avatar de 24 de quem responde (a foto ou as iniciais, D82), o texto com a linha
+// embaixo (a linha clareia com o foco; a altura pelo useAutoGrowTextarea, D81) e, a direita, o Cancelar (texto) e o Responder (a pilula de envio, desligada com o campo vazio). Abre ja com o
 // foco no texto; o Ctrl ou o ⌘ com o Enter envia; o Esc em qualquer parte do campo (o texto, o Cancelar ou o Responder)
 // cancela e nao chega a sala (que perguntaria se quer sair). Quando o campo fecha com o foco nele (Esc, Cancelar ou o
 // envio), quem usa o campo devolve o foco ao Responder da pergunta (returnFocusFromReply), nunca ao body. O erro e o
@@ -61,14 +62,8 @@ export function RoomReplyField({ ariaLabel, avatar, busy = false, disabled = fal
     areaRef.current?.focus();
   }, []);
 
-  // O campo cresce com o texto ate o teto.
-  useEffect(() => {
-    const area = areaRef.current;
-    if (area) {
-      area.style.height = "auto";
-      area.style.height = `${Math.min(area.scrollHeight, MAX_HEIGHT)}px`;
-    }
-  }, [value]);
+  // O campo cresce com o texto ate o teto; mede de novo quando aparece ou muda de largura (D81).
+  useAutoGrowTextarea(areaRef, value, MAX_HEIGHT);
 
   function submit(event?: FormEvent) {
     event?.preventDefault();

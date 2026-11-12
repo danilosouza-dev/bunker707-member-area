@@ -179,22 +179,28 @@ function usar(tables = cenario()) {
 
 /**
  * O banco sem a 202611100002 para a foto: 42703 em qualquer leitura que pede persona_avatar_path e em qualquer escrita
- * que a leva (o resto do banco segue igual).
+ * que a leva (o resto do banco segue igual). Sem ela tambem nao ha a 202611140001 (vem depois): a lista de pessoas
+ * (webinar_personas) e o persona_id do item e da pergunta tambem nao existem.
  */
 function semAColunaDaFoto(db) {
   const from = db.from.bind(db);
   const erro = { code: "42703", message: "column webinar_chat_messages.persona_avatar_path does not exist" };
+  const semTabela = { code: "PGRST205", message: "Could not find the table 'public.webinar_personas' in the schema cache" };
+  const nova = /persona_avatar_path|persona_id/;
   db.from = (name) => {
     const chain = from(name);
-    const falhar = () => {
-      chain.then = (resolve, reject) => Promise.resolve({ data: null, error: erro }).then(resolve, reject);
+    const falhar = (error = erro) => {
+      chain.then = (resolve, reject) => Promise.resolve({ data: null, error }).then(resolve, reject);
       return chain;
     };
+    if (name === "webinar_personas") {
+      return falhar(semTabela);
+    }
     for (const metodo of ["select", "insert", "update", "upsert"]) {
       const original = chain[metodo];
       chain[metodo] = (payload, ...resto) => {
         original(payload, ...resto);
-        const leva = metodo === "select" ? String(payload ?? "").includes("persona_avatar_path") : JSON.stringify(payload ?? {}).includes("persona_avatar_path");
+        const leva = metodo === "select" ? nova.test(String(payload ?? "")) : nova.test(JSON.stringify(payload ?? {}));
         return leva ? falhar() : chain;
       };
     }
@@ -240,16 +246,26 @@ test("R9 modelo: o endereco da foto so pela origem conferida do nosso Supabase e
   assert.deepEqual(persona.PERSONA_AVATAR_LIMITS, { bytes: 100_000, sideMax: 512, sideMin: 16 });
 });
 
-test("R9 modelo: o mesmo nome de quem comenta (sem caixa nem espacos sobrando) e a foto nos itens com o mesmo nome", () => {
+test("R9 modelo: o mesmo nome de quem comenta (sem caixa nem espacos sobrando); desde 11/11/2026 a foto vai pela pessoa da lista, nos itens ligados a ela", () => {
   assert.equal(persona.samePersonaName("Bia C.", "  bia   c. "), true);
   assert.equal(persona.samePersonaName("Bia C.", "Bia D."), false);
   assert.equal(persona.samePersonaName("", ""), false, "sem nome, nunca");
-  const itens = [{ personaAvatarPath: null, personaName: "Bia C." }, { personaAvatarPath: OUTRA_FOTO, personaName: "BIA C." }, { personaAvatarPath: null, personaName: "Caio D." }];
+  // O "Usar esta foto em todos os comentários de {nome}" saiu (D75): editar a pessoa troca a copia dos itens dela.
+  assert.equal("withPersonaAvatarForName" in persona, false);
+  const itens = [
+    { personaAvatarPath: null, personaId: "p1", personaName: "Bia C.", personaRole: "student" },
+    { personaAvatarPath: OUTRA_FOTO, personaId: null, personaName: "BIA C.", personaRole: "student" },
+    { personaAvatarPath: null, personaId: "p2", personaName: "Caio D.", personaRole: "team" }
+  ];
   assert.deepEqual(
-    persona.withPersonaAvatarForName(itens, "bia c.", FOTO).map((entry) => entry.personaAvatarPath),
-    [FOTO, FOTO, null]
+    persona.withPersonaCopy(itens, { avatarPath: FOTO, id: "p1", name: "Bia Costa", role: "team" }).map((entry) => [entry.personaName, entry.personaRole, entry.personaAvatarPath]),
+    [
+      ["Bia Costa", "team", FOTO],
+      ["BIA C.", "student", OUTRA_FOTO],
+      ["Caio D.", "team", null]
+    ],
+    "so os itens ligados a pessoa; o de mesmo nome fora da lista fica"
   );
-  assert.deepEqual(persona.withPersonaAvatarForName(itens, "Bia C.", null).map((entry) => entry.personaAvatarPath), [null, null, null], "nulo tira");
 });
 
 test("R8 modelo: o tick solta so 'Num minuto da live' prontos que nao entraram, nunca antes do Começar para todos e no maximo 5 min atrasados, na ordem do minuto", () => {
@@ -320,7 +336,9 @@ test("vocabulario (adendo): nenhuma frase da tela diz 'personagem'; os campos do
   assert.ok(textos.length > 500);
   assert.deepEqual(textos.filter((texto) => /personage/i.test(texto)), []);
   assert.deepEqual([COPY.quemComenta, COPY.nome, COPY.foto, COPY.apareceComo, COPY.papeis.student, COPY.papeis.team, COPY.comentario], ["Quem comenta", "Nome", "Foto (opcional)", "Aparece como", "Aluno", "Equipe", "Comentário"]);
-  assert.equal(COPY.usarEmTodos("Bia C."), "Usar esta foto em todos os comentários de Bia C.");
+  // A caixa "Usar esta foto em todos os comentários de {nome}" saiu em 11/11/2026 (D75), com o aviso dela.
+  assert.equal("usarEmTodos" in COPY, false);
+  assert.equal("fotoEmTodos" in COPY.avisos, false);
   assert.equal(COPY.fotoConsentimento, "Use imagem gerada ou com autorização. Nunca a foto de uma pessoa real sem o consentimento dela.");
 });
 
@@ -396,7 +414,8 @@ test("R8 tick: a espera (sem started_at), a gravada e o Replay ficam de fora; o 
   });
   const [pendente, avisos] = await silenciando(() => tick.runLiveScriptTick({ db: semTabela, now: new Date() }));
   assert.deepEqual(pendente, { failed: 0, pendingMigration: true, released: 0, sessions: 0, skipped: 0 });
-  assert.ok(avisos.some((linha) => linha.includes("migracao 202611100002 pendente")));
+  // O log aponta a mais nova dos webinarios (WEBINARS_MIGRATION; desde 11/11/2026 a 202611140002).
+  assert.ok(avisos.some((linha) => linha.includes("migracao 202611140002 pendente")));
 });
 
 test("R8 tick: a corrida com o Soltar agora (a chave unica) nao repete; o banco sem a coluna da foto solta sem a foto", async () => {
@@ -430,27 +449,43 @@ test("R8 tick: a corrida com o Soltar agora (a chave unica) nao repete; o banco 
  * As Server Actions
  * ---------------------------------------------------------------------------------------------- */
 
-test("R8 Enviar agora: a mensagem do roteiro sem item, com o nome, o papel e a foto; a foto vai para os itens com o mesmo nome; a auditoria sem o texto", async () => {
+test("R8 Enviar agora: a mensagem do roteiro sem item, com o nome, o papel e a foto da pessoa; a pessoa nova entra na lista (11/11/2026, D76), os itens do roteiro nao mudam; a auditoria sem o texto", async () => {
   const db = usar();
-  const enviado = ok(await scriptActions.sendScriptedComment({ applyToName: true, body: "  Que aula!  ", personaAvatarPath: OUTRA_FOTO, personaName: " bia c. ", personaRole: "team", sessionId: SESSION }));
+  const enviado = ok(await scriptActions.sendScriptedComment({ applyToName: true, body: "  Que aula!  ", personaAvatarPath: OUTRA_FOTO, personaName: " bia   c. ", personaRole: "team", sessionId: SESSION }));
   const linha = db.tables.webinar_chat_messages.find((row) => row.id === enviado.message.id);
   assert.deepEqual(
     [linha.source, linha.script_item_id, linha.display_name, linha.role, linha.body, linha.persona_avatar_path, linha.master, linha.approved, linha.session_id],
     ["scripted", null, "bia c.", "team", "Que aula!", OUTRA_FOTO, false, true, SESSION]
   );
   assert.ok(Math.abs(linha.offset_ms - 10 * MIN) < 5_000);
-  // "Usar esta foto em todos os comentários de bia c.": os 6 itens "Bia C." (o "Caio D." fica).
-  assert.equal(enviado.photoApplied, 6);
-  const fotos = Object.fromEntries(db.tables.webinar_chat_script_items.map((row) => [row.id, row.persona_avatar_path]));
-  assert.equal(fotos[ITENS.aos9], null);
-  assert.equal(fotos[ITENS.aos5], OUTRA_FOTO);
+  // A pessoa nova entrou na lista (o nome sem espacos sobrando), e o "Usar esta foto em todos" saiu: os itens ficam.
+  assert.equal(enviado.created, true);
+  assert.deepEqual(
+    db.tables.webinar_personas.map((row) => [row.name, row.role, row.avatar_path, row.webinar_id, row.created_by]),
+    [["bia c.", "team", OUTRA_FOTO, WEBINAR, EQUIPE]]
+  );
+  assert.equal(enviado.persona.id, db.tables.webinar_personas[0].id);
+  assert.equal(enviado.question, null, "Tipo Comentário: nada na aba Perguntas");
+  assert.equal(db.tables.webinar_chat_script_items.find((row) => row.id === ITENS.aos5).persona_avatar_path, FOTO, "os itens do roteiro nao mudam");
   const [auditoria] = audits(db, "webinar.script_comment_sent");
-  assert.deepEqual(Object.keys(auditoria.metadata).sort(), ["message_id", "offset_ms", "photo_applied", "role", "session_id", "with_photo"]);
-  assert.doesNotMatch(JSON.stringify(auditoria), /Que aula/);
+  assert.deepEqual(Object.keys(auditoria.metadata).sort(), ["kind", "message_id", "offset_ms", "persona_created", "persona_id", "question_id", "role", "session_id", "with_photo"]);
+  assert.doesNotMatch(JSON.stringify(auditoria), /Que aula|bia c\./);
 
-  const semTodos = ok(await scriptActions.sendScriptedComment({ applyToName: false, body: "Oi", personaAvatarPath: FOTO, personaName: "Caio D.", sessionId: SESSION }));
-  assert.equal(semTodos.photoApplied, 0, "com a caixa desligada, so a mensagem leva a foto");
-  assert.equal(db.tables.webinar_chat_script_items.find((row) => row.id === ITENS.aos9).persona_avatar_path, null);
+  // Repetir (D78): a pessoa da lista pelo id; o nome digitado junto nao vale, vale a copia da pessoa.
+  const deNovo = ok(await scriptActions.sendScriptedComment({ body: "De novo", personaId: enviado.persona.id, personaName: "Outro nome", sessionId: SESSION }));
+  const segunda = db.tables.webinar_chat_messages.find((row) => row.id === deNovo.message.id);
+  assert.deepEqual([segunda.display_name, segunda.role, segunda.persona_avatar_path, deNovo.created], ["bia c.", "team", OUTRA_FOTO, false]);
+  assert.equal(db.tables.webinar_personas.length, 1, "nenhuma pessoa a mais");
+
+  // O mesmo nome como pessoa nova (sem caixa nem espacos): o erro no campo Nome, nada gravado.
+  const quantas = db.tables.webinar_chat_messages.length;
+  const repetido = await scriptActions.sendScriptedComment({ body: "Oi", personaName: "BIA C.", sessionId: SESSION });
+  assert.deepEqual([repetido.status, repetido.fieldErrors?.personaName?.[0]], [400, WEBINAR_COPY.pessoas.erros.nomeRepetido]);
+  assert.equal(db.tables.webinar_chat_messages.length, quantas);
+  // A pessoa de outro webinario (ou que saiu da lista): o erro no campo da escolha.
+  const sumiu = await scriptActions.sendScriptedComment({ body: "Oi", personaId: "99999999-0000-4000-8000-000000000001", personaName: "X", sessionId: SESSION });
+  assert.deepEqual([sumiu.status, sumiu.fieldErrors?.personaId?.[0]], [400, WEBINAR_COPY.pessoas.erros.sumiu]);
+
   const semFoto = ok(await scriptActions.sendScriptedComment({ body: "Sem foto", personaName: "Duda E.", sessionId: SESSION }));
   assert.ok(!("persona_avatar_path" in db.tables.webinar_chat_messages.find((row) => row.id === semFoto.message.id)), "sem foto, a chave fica de fora");
   assert.equal(semFoto.message.role, "student", "Aparece como Aluno por padrao");
@@ -478,18 +513,20 @@ test("R8 Enviar agora recusa: o Replay e a sessao encerrada (409), o nome e o co
   assert.equal(db.tables.webinar_chat_messages.length, quantas, "nada gravado");
 });
 
-test("R8 Guardar na lista: um item 'Pelo botão da equipe' pronto no fim do roteiro, com a foto (e nos itens com o mesmo nome); o webinario arquivado, 409", async () => {
+test("R8 Guardar na lista: um item 'Pelo botão da equipe' pronto no fim do roteiro, ligado a pessoa (a nova entra na lista, 11/11/2026) e com a copia dela; os outros itens nao mudam; o webinario arquivado, 409", async () => {
   const db = usar();
   const guardado = ok(await scriptActions.saveScriptComment({ body: "Pergunta boa", personaAvatarPath: OUTRA_FOTO, personaName: "Caio D.", personaRole: "team", sessionId: SESSION }));
   const novo = db.tables.webinar_chat_script_items.find((row) => row.id === guardado.item.id);
+  const pessoa = db.tables.webinar_personas.find((row) => row.name === "Caio D.");
   assert.deepEqual(
-    [novo.trigger_kind, novo.status, novo.offset_ms, novo.position, novo.persona_name, novo.persona_role, novo.persona_avatar_path, novo.created_by, novo.webinar_id],
-    ["manual", "ready", null, 7, "Caio D.", "team", OUTRA_FOTO, EQUIPE, WEBINAR]
+    [novo.trigger_kind, novo.status, novo.offset_ms, novo.position, novo.persona_name, novo.persona_role, novo.persona_avatar_path, novo.persona_id, novo.kind, novo.created_by, novo.webinar_id],
+    ["manual", "ready", null, 7, "Caio D.", "team", OUTRA_FOTO, pessoa.id, "message", EQUIPE, WEBINAR]
   );
   assert.equal(guardado.item.triggerKind, "manual");
   assert.equal(guardado.item.personaAvatarPath, OUTRA_FOTO);
-  assert.equal(guardado.photoApplied, 2, "o novo e o 'Caio D.' de antes");
-  assert.equal(db.tables.webinar_chat_script_items.find((row) => row.id === ITENS.aos9).persona_avatar_path, OUTRA_FOTO);
+  assert.equal(guardado.item.personaId, pessoa.id);
+  assert.equal(guardado.created, true);
+  assert.equal(db.tables.webinar_chat_script_items.find((row) => row.id === ITENS.aos9).persona_avatar_path, null, "o 'Caio D.' de antes fica como estava");
   assert.equal(soltas(db).length, 1, "guardar nao solta nada");
   assert.equal(audits(db, "webinar.script_item_added").length, 1);
 
@@ -580,13 +617,15 @@ test("S1 e achado 2 (revisao de 11/11/2026): sem a 202611100002, nenhuma escrita
   ok(await scriptActions.saveScriptComment({ body: "Pergunta boa", personaName: "Caio D.", sessionId: SESSION }));
 });
 
-test("achado 3 (revisao de 11/11/2026): o Salvar do editor com a pagina velha so apaga os ids que carregou; o comentario que o console guardou depois fica, e a foto que o console pos em todos nao volta", async () => {
+test("achado 3 (revisao de 11/11/2026): o Salvar do editor com a pagina velha so apaga os ids que carregou; o comentario que o console guardou depois fica, ligado a pessoa e com a foto dela", async () => {
   const db = usar();
   // O editor abriu e carregou os 7 itens (Caio D. sem foto).
   const carregados = db.tables.webinar_chat_script_items.map((row) => row.id);
-  // Depois, no console: "Guardar na lista" com foto e "Usar esta foto em todos os comentários de Caio D.".
+  // Depois, no console: "Guardar na lista" com a pessoa nova (com foto), que entra na lista. O "Usar esta foto em todos"
+  // saiu em 11/11/2026 (a chave da pagina antiga e ignorada): o "Caio D." de antes, fora da lista, fica sem foto.
   const guardado = ok(await scriptActions.saveScriptComment({ applyToName: true, body: "Pergunta boa", personaAvatarPath: OUTRA_FOTO, personaName: "Caio D.", personaRole: "team", sessionId: SESSION }));
-  assert.equal(db.tables.webinar_chat_script_items.find((row) => row.id === ITENS.aos9).persona_avatar_path, OUTRA_FOTO);
+  assert.equal(db.tables.webinar_chat_script_items.find((row) => row.id === ITENS.aos9).persona_avatar_path, null);
+  assert.equal(db.tables.webinar_chat_script_items.find((row) => row.id === guardado.item.id).persona_id, guardado.persona.id);
 
   // O editor (a pagina velha) tira o item desligado e salva o resto como carregou: a foto que nao mudou vai ausente.
   const base = { kind: "message", phrase: null, phraseDelayMs: 0, status: "draft" };
@@ -602,7 +641,7 @@ test("achado 3 (revisao de 11/11/2026): o Salvar do editor com a pagina velha so
   assert.ok(ids.includes(guardado.item.id), "o comentario guardado pelo console depois fica");
   assert.ok(!ids.includes(ITENS.desligado), "o que o editor carregou e tirou sai");
   assert.equal(ids.length, 7);
-  assert.equal(db.tables.webinar_chat_script_items.find((row) => row.id === ITENS.aos9).persona_avatar_path, OUTRA_FOTO, "a foto que o console pos em todos nao volta");
+  assert.equal(db.tables.webinar_chat_script_items.find((row) => row.id === guardado.item.id).persona_id, guardado.persona.id, "a pagina velha (sem personaId) nao solta o item da pessoa");
   assert.equal(salvo.items.find((item) => item.id === guardado.item.id).personaAvatarPath, OUTRA_FOTO);
 
   // Sem os ids carregados (o pedido de antes), nada sai.
@@ -628,15 +667,21 @@ test("achado 1 (revisao de 11/11/2026): o CSV do roteiro da live le e escreve o 
   assert.equal(gravada.items.at(-1).offsetMs, 12_000, "na gravada, 12 = 12 segundos do video");
 });
 
-test("S4 e achado 7 (revisao de 11/11/2026): o 'Usar esta foto em todos' chega a todos os itens com o nome, alem dos 1.000 primeiros (o teto do PostgREST)", async () => {
+test("S4 e achado 7 (revisao de 11/11/2026; desde 11/11/2026 pela pessoa da lista): editar a pessoa troca a copia de todos os itens dela, alem dos 1.000 primeiros (uma escrita so, sem o teto do PostgREST)", async () => {
+  const personas = await import("../src/server/webinars/persona-actions.ts");
   const tables = cenario();
+  const PESSOA = "eeeeeeee-0000-4000-8000-0000000000aa";
+  tables.webinar_personas = [{ avatar_path: null, created_at: iso(Date.now() - MIN), id: PESSOA, name: "Bia C.", role: "student", updated_at: iso(Date.now() - MIN), webinar_id: WEBINAR }];
   tables.webinar_chat_script_items = Array.from({ length: 1005 }, (_, index) =>
-    item(`dddddddd-0000-4000-8000-${String(100000 + index).padStart(12, "0")}`, { offset_ms: null, persona_name: "Bia C.", position: index, trigger_kind: "manual" })
+    item(`dddddddd-0000-4000-8000-${String(100000 + index).padStart(12, "0")}`, { offset_ms: null, persona_id: PESSOA, persona_name: "Bia C.", position: index, trigger_kind: "manual" })
   );
   const db = usar(tables);
-  const enviado = ok(await scriptActions.sendScriptedComment({ applyToName: true, body: "Oi", personaAvatarPath: FOTO, personaName: "Bia C.", sessionId: SESSION }));
-  assert.equal(enviado.photoApplied, 1005);
-  assert.ok(db.tables.webinar_chat_script_items.every((row) => row.persona_avatar_path === FOTO), "todos, nenhum fica sem a foto");
+  const salvo = ok(await personas.savePersona({ avatarPath: FOTO, id: PESSOA, name: "Bia Costa", role: "team", webinarId: WEBINAR }));
+  assert.deepEqual([salvo.created, salvo.items], [false, 1005]);
+  assert.ok(
+    db.tables.webinar_chat_script_items.every((row) => row.persona_avatar_path === FOTO && row.persona_name === "Bia Costa" && row.persona_role === "team"),
+    "todos, nenhum fica com a copia velha"
+  );
 });
 
 test("achado 12 (revisao de 11/11/2026): na Live ao vivo, o Enviar agora e o Soltar agora valem na espera e no ar; so os itens 'Num minuto da live' esperam o Começar para todos", async () => {

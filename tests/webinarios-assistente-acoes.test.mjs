@@ -10,7 +10,8 @@ import { atendente, EQUIPE, EQUIPE_2, montarEscola, OUTRA_SESSAO, PRODUTO, SESSA
 // editor (ler, salvar com as perguntas trocadas, o "Responder tudo" padrao nas sessoes que ainda nao comecaram, o zod
 // por campo, a auditoria so com contagens, o banco sem a 202610300004); o "Responder tudo" da sessao; "Atender" /
 // "Pausar" com a auditoria so na troca; Assumir, Passar para (so quem atende) e Devolver; "Corrigir resposta" so na do
-// Assistente (e a pergunta da aba junto); o retrato do Atendimento que distribui as perguntas novas entre os online; a
+// Assistente (e a pergunta da aba junto); o retrato do Atendimento que distribui as perguntas novas entre os online (a
+// simulada do futuro fica fora ate a hora dela: revisao v8, achado 2); a
 // resposta da equipe que grava answer_source 'team' e vai ao sino quando o aluno pediu a equipe, a sessao acabou ou ele
 // saiu da sala (uma vez por pergunta).
 
@@ -321,6 +322,32 @@ test("loadAttendanceSnapshot: distribui as perguntas novas entre quem esta atend
 
   montar({}, { semMigracao: true });
   assert.deepEqual((await acoes.loadAttendanceSnapshot({ sessionId: SESSAO })).data, { migration: "202610300004", pendingMigration: true });
+});
+
+test("revisao v8, achado 2: a pergunta simulada do futuro (criada na abertura da gravada) fica fora do Atendimento ate a hora dela: nem na fila, nem distribuida, nem na conta", async () => {
+  const { db, userId } = montar();
+  db.tables.webinar_attendants.push(atendente(EQUIPE), atendente(EQUIPE_2));
+  const daTurma = perguntaDoAluno(userId, { created_at: new Date(Date.now() - 40_000).toISOString() });
+  // A do roteiro que ja apareceu (o minuto dela passou) e a que ainda vai aparecer daqui a 20 min (sem aluno, D77).
+  const simuladaJa = perguntaDoAluno(null, { body: "Serve para iniciante?", created_at: new Date(Date.now() - 30_000).toISOString(), display_name: "Carla M." });
+  const simuladaDepois = perguntaDoAluno(null, { body: "Tem bonus para quem entra hoje?", created_at: new Date(Date.now() + 20 * 60_000).toISOString(), display_name: "Rui P." });
+  // A do futuro que um retrato de antes da correcao ja tinha dado a alguem: tambem nao entra na conta de abertas.
+  const simuladaDada = perguntaDoAluno(null, { assigned_at: agora(), assigned_to: EQUIPE, body: "E o certificado?", created_at: new Date(Date.now() + 30 * 60_000).toISOString(), display_name: "Lia S." });
+  db.tables.webinar_questions.push(daTurma, simuladaJa, simuladaDepois, simuladaDada);
+
+  const lido = await acoes.loadAttendanceSnapshot({ sessionId: SESSAO });
+  assert.equal(lido.ok, true, JSON.stringify(lido));
+  const retrato = lido.data;
+  const ids = retrato.queue.map((item) => item.id);
+  assert.ok(ids.includes(daTurma.id) && ids.includes(simuladaJa.id), "a da turma e a simulada que ja apareceu entram");
+  assert.ok(!ids.includes(simuladaDepois.id) && !ids.includes(simuladaDada.id), "a simulada do futuro nao aparece no painel");
+  assert.equal(simuladaDepois.assigned_to, null, "o distribute nao atribui o que a sala ainda nao perguntou");
+  assert.equal(retrato.distributed, 2);
+  assert.equal(retrato.questionMarks[simuladaDepois.id], undefined);
+  assert.equal(retrato.questionMarks[simuladaDada.id], undefined);
+  const abertas = Object.fromEntries(retrato.attendants.map((item) => [item.userId, item.openCount]));
+  assert.equal(abertas[EQUIPE] + abertas[EQUIPE_2], 2, "a conta de abertas so soma as duas que apareceram");
+  assert.equal(abertas[EQUIPE], 1, "a do futuro dada antes nao pesa para quem a recebeu");
 });
 
 /* ------------------------------------------------------------------------------------------------

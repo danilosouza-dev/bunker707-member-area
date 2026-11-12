@@ -21,7 +21,6 @@ import type { ConsoleWebinar } from "@/server/webinars/console-queries";
 import {
   CONSOLE_ROOM_RULES,
   EMPTY_ROOM,
-  MIC_LIMIT_TOGGLE_MS,
   browserRecordingChange,
   consoleFilmstripPendingAfter,
   consoleFilmstripShouldToggle,
@@ -31,13 +30,12 @@ import {
   liveRoomReducer,
   menuKickPlan,
   micCloseCommands,
-  micLimitStep,
-  micOpenOrder,
   participantMenuClickOf,
   presenterSetupCommands,
   recordingSignalMessage,
   rolesToRead,
   screenShareWatchStep,
+  selfUnmuteModerationStep,
   sharingIdsOf,
   shouldAutoStartRecording,
   shouldEnterRoom,
@@ -58,7 +56,8 @@ import { adminToast } from "../../../toast";
 // (configOverwrite do papel, nonce da pagina), renova o token antes do `exp` sem derrubar a sala, junta os sinais do
 // iframe num reducer (quem esta, maos, sala de espera, gravacao), e faz sozinho o que a sala precisa de quem a
 // comanda: ao virar moderador, a sala de espera certa (Sessao de pratica, Sala de espera, tranca), a moderacao de audio
-// (o aluno so fala depois de Liberar), a de video quando o webinario nao tem camera de aluno e o "seguir a visao do
+// (o aluno so fala depois de Liberar; com o microfone sozinho ligado ela fica desligada, sem teto de alunos falando desde
+// 11/11/2026, D84), a de video quando o webinario nao tem camera de aluno e o "seguir a visao do
 // apresentador" (a de tela nao liga pelo IFrame API da tag: docs/31 §5.4); o "Gravar" da fila dispara uma vez no ready; a ancora sai no recordingStatusChanged ligado (uma vez).
 // O vigia da tela (docs/31 §5.4): o console escuta tambem CONSOLE_EXTRA_EVENTS (quem compartilha a tela), le os papeis
 // pelo getRoomsInfo (quem ja era moderador quando o console entrou nunca gera participantRoleChanged) e, no navegador de
@@ -169,7 +168,7 @@ export type LiveRoomHandle = {
   audioOn: boolean;
   /**
    * O microfone sozinho foi gravado (setSelfUnmute): vale ja, antes do retrato seguinte; desligado, fecha o microfone
-   * da turma (micCloseCommands). Ligado, o vigia decide pela conta.
+   * da turma (micCloseCommands). Ligado, a moderacao de audio fica desligada, sem teto (selfUnmuteModerationStep, D84).
    */
   applySelfUnmute: (allowed: boolean) => void;
   /** Os botoes de cada papel (live-console-model.liveControlsFor). */
@@ -280,13 +279,11 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
   const [audioModeration, setAudioModeration] = useState<boolean | null>(null);
   /** O microfone sozinho gravado por este console (`base`: o do retrato na hora); vale ate o retrato mudar. */
   const [selfUnmuteSaved, setSelfUnmuteSaved] = useState<{ base: boolean; value: boolean } | null>(null);
-  /** O vigia do microfone sozinho volta a olhar quando a histerese acaba (um toggle segurado nao se perde). */
-  const [micTick, setMicTick] = useState(0);
-  /** A ordem em que os microfones abriram (micOpenOrder), quem ja recebeu o mudo do vigia e a hora do ultimo toggle. */
-  const micOrderRef = useRef<string[]>([]);
-  const micAskedRef = useRef<ReadonlySet<string>>(new Set<string>());
-  const micToggleAtRef = useRef<number | null>(null);
-  const micTimerRef = useRef<number | null>(null);
+  /**
+   * O microfone sozinho ja conferiu a moderacao de audio nesta politica ligada e neste iframe (selfUnmuteModerationStep,
+   * D84): depois da primeira leitura, nada mais, ate a politica desligar ou um iframe novo.
+   */
+  const micCheckedRef = useRef(false);
   const lobbySent = useRef<boolean | null>(null);
   const setupDone = useRef(false);
   const anchorMarked = useRef(false);
@@ -493,13 +490,11 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
     [readRoomsInfo]
   );
 
-  // Um iframe novo ou a saida: a moderacao de audio volta a ser lida, e o vigia do microfone esquece a ordem, os pedidos
-  // de mudo e a hora do ultimo toggle (eram do iframe anterior).
+  // Um iframe novo ou a saida: a moderacao de audio volta a ser lida, e o microfone sozinho confere de novo (era do
+  // iframe anterior).
   const resetMicWatch = useCallback(() => {
     setAudioModeration(null);
-    micOrderRef.current = [];
-    micAskedRef.current = new Set<string>();
-    micToggleAtRef.current = null;
+    micCheckedRef.current = false;
   }, []);
 
   const onEvent = useCallback(
@@ -511,7 +506,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
         // fatal o Tentar de novo monta outro sem o videoConferenceLeft (os sinais do descartado nao chegam). A sala
         // volta ao comeco (a acao `frame`: o motor dele no Palco, com a coluna, sem o papel nem quem estava), o
         // preparo de quem apresenta (o seguir a visao nao e guardado pelo motor) e a sala de espera saem de novo, as
-        // leituras pedidas ao anterior nao valem e o vigia esquece os pedidos que foram para ele.
+        // leituras pedidas ao anterior nao valem e o vigia da tela e o microfone sozinho esquecem o que foi para ele.
         signalFrameRef.current = frame;
         setupDone.current = false;
         lobbySent.current = null;
@@ -557,9 +552,9 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
       } else if (name === "contentSharingParticipantsChanged" && rolesToRead({ roles: roomRef.current.roles, selfId: roomRef.current.selfId, sharing: sharingIdsOf(payload) }).length > 0) {
         readRoomsInfo();
       }
-      // Na entrada, o que o motor ja tem: o proprio microfone e a propria tela, as moderacoes de video e de audio (o vigia
-      // do microfone sozinho) e quem compartilha a tela (o vigia tambem le daqui quem ja compartilhava). Cada resposta so
-      // vale deste iframe e desta entrada.
+      // Na entrada, o que o motor ja tem: o proprio microfone e a propria tela, as moderacoes de video e de audio (o
+      // microfone sozinho a desliga) e quem compartilha a tela (o vigia tambem le daqui quem ja compartilhava). Cada
+      // resposta so vale deste iframe e desta entrada.
       if (name === "videoConferenceJoined") {
         readFrame(
           (frame) => frame.isAudioMuted?.(),
@@ -720,59 +715,21 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
     }
   }, [command, joined, liveReady, presenter, role, room.moderator, selfUnmute, webinar.allowStudentCamera]);
 
-  // O vigia do microfone sozinho (docs/31 caminho A, teto MIC_LIMIT): com a politica ligada, a moderacao de audio
-  // desligada abaixo do teto e ligada nele, e o mudo a quem abriu depois do teto (micLimitStep), uma vez por id ate ele
-  // fechar. So o navegador de quem apresenta e modera; sem ele na sala, nao ha teto (docs/31 §7).
+  // O microfone sozinho sem teto (docs/31 caminho A; D84, 11/11/2026, no lugar do vigia de 4 alunos do V2-A60): com a
+  // politica ligada, a moderacao de audio fica desligada. So o navegador de quem apresenta e modera, e uma vez por
+  // politica ligada e por iframe (selfUnmuteModerationStep): a primeira leitura do motor com a moderacao ligada a desliga;
+  // depois nada fecha o microfone de ninguem por conta (a equipe silencia uma pessoa ou todos pela aba Pessoas).
   useEffect(() => {
-    const audio: Record<string, boolean> = {};
-    for (const [id, media] of Object.entries(room.media)) {
-      if (media.audio === true) {
-        audio[id] = true;
-      }
-    }
-    micOrderRef.current = micOpenOrder(micOrderRef.current, audio);
-    const asked = new Set(Array.from(micAskedRef.current).filter((id) => audio[id] === true));
-    micAskedRef.current = asked;
     if (!joined || !room.moderator || !presenter || !liveReady) {
       return;
     }
-    const nowMs = Date.now();
-    const step = micLimitStep({
-      audio,
-      lastToggleMs: micToggleAtRef.current,
-      moderationOn: audioModeration,
-      nowMs,
-      order: micOrderRef.current,
-      policy: selfUnmute,
-      roles: room.roles,
-      selfId: room.selfId
-    });
-    if (step.toggle !== null && command("toggleModeration", step.toggle, "audio")) {
-      micToggleAtRef.current = nowMs;
-      // Um toggle segurado pela histerese e decidido de novo quando ela acaba.
-      if (micTimerRef.current !== null) {
-        window.clearTimeout(micTimerRef.current);
-      }
-      micTimerRef.current = window.setTimeout(() => {
-        micTimerRef.current = null;
-        setMicTick((tick) => tick + 1);
-      }, MIC_LIMIT_TOGGLE_MS);
+    const step = selfUnmuteModerationStep({ checked: micCheckedRef.current, moderationOn: audioModeration, policy: selfUnmute });
+    // Sem a sala montada o comando nao sai: confere de novo na proxima mudanca.
+    if (step.toggleOff && !command("toggleModeration", false, "audio")) {
+      return;
     }
-    for (const id of step.mute) {
-      if (!asked.has(id) && command("muteRemoteParticipant", id, "audio")) {
-        asked.add(id);
-      }
-    }
-  }, [audioModeration, command, joined, liveReady, micTick, presenter, room.media, room.moderator, room.roles, room.selfId, selfUnmute]);
-
-  useEffect(
-    () => () => {
-      if (micTimerRef.current !== null) {
-        window.clearTimeout(micTimerRef.current);
-      }
-    },
-    []
-  );
+    micCheckedRef.current = step.checked;
+  }, [audioModeration, command, joined, liveReady, presenter, room.moderator, selfUnmute]);
 
   // O vigia da tela: quem compartilha com papel conhecido de participante e sem liberacao tem a tela parada, uma vez por
   // id ate sair de `sharing`, e de novo se voltar a compartilhar (screenShareWatchStep; so o navegador de quem apresenta

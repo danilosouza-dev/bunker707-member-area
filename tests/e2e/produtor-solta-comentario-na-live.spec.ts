@@ -17,6 +17,7 @@ import { LIVE_AO_VIVO_DE_TESTE, expect, salaFalsaDoJitsi, seedLiveAoVivoDeTeste,
 const { id, roomName, sessaoId, slug, titulo } = LIVE_AO_VIVO_DE_TESTE;
 const CONSOLE = `/admin/comunicacao/webinarios/${id}/sala?sessao=${sessaoId}`;
 const COMENTARIOS = WEBINAR_COPY.naTela.comentarios;
+const PESSOAS = WEBINAR_COPY.pessoas;
 const NOME = "Bia Comentarista";
 const TEXTO = "Que aula boa, pessoal! Tô amando o exemplo.";
 
@@ -87,13 +88,19 @@ test.describe("produtor", () => {
     const previa = formulario.locator("[data-persona-photo-preview]");
     await expect(previa).toHaveAttribute("src", /\/storage\/v1\/object\/public\/content-assets\/webinars\/personas\/[a-f0-9]{24}\.webp$/);
     await expect(formulario.getByText(COMENTARIOS.fotoConsentimento, { exact: true })).toBeVisible();
-    await expect(formulario.getByLabel(COMENTARIOS.usarEmTodos(NOME))).toBeChecked();
-    await formulario.getByRole("radio", { exact: true, name: COMENTARIOS.papeis.student }).check();
-    await formulario.getByLabel(COMENTARIOS.comentario, { exact: true }).fill(TEXTO);
+    // Desde 11/11/2026 (D75) a caixa "Usar esta foto em todos" saiu: a pessoa nova entra na lista ao enviar.
+    await expect(formulario.locator("[data-persona-photo-all]")).toHaveCount(0);
+    // O radio da pilula e sr-only (coberto pelo rotulo): o clique vai no rotulo, como a pessoa faz.
+    await formulario.locator("label:has(input[value='student'])").click();
+    await expect(formulario.getByRole("radio", { exact: true, name: COMENTARIOS.papeis.student })).toBeChecked();
+    await formulario.getByLabel(PESSOAS.comentario, { exact: true }).fill(TEXTO);
     await formulario.getByRole("button", { exact: true, name: COMENTARIOS.enviarAgora }).click();
     await expect(page.getByText(COMENTARIOS.avisos.enviado)).toBeVisible();
-    // De volta ao Roteiro (o formulario fecha): o "Enviar agora" nao vira item, entao a live segue sem roteiro, com a
-    // frase e o Novo comentário de novo (sem item, nenhuma lista vazia).
+    // Desde 11/11/2026 (D78) o formulario fica aberto para o proximo, com a mesma pessoa e o texto limpo; o Voltar volta
+    // ao Roteiro. O "Enviar agora" nao vira item, entao a live segue sem roteiro, com a frase e o Novo comentário de novo
+    // (sem item, nenhuma lista vazia).
+    await expect(formulario.getByText(WEBINAR_COPY.pessoas.avisos.enviado, { exact: true })).toBeVisible();
+    await page.locator("[data-console-script-back]").click();
     await expect(formulario).toHaveCount(0);
     await expect(roteiro.getByText(WEBINAR_ADMIN_COPY.console.script.emptyLive, { exact: true })).toBeVisible();
     await expect(roteiro.getByRole("button", { exact: true, name: COMENTARIOS.novoComentario })).toBeVisible();
@@ -135,6 +142,9 @@ test.describe("aluna", () => {
     // O selo do palco: o real (a aluna, e quem mais estiver) mais os 300 simulados; nunca so o real.
     const quemAssiste = dialogo.locator("[data-lesson-player-stage]").getByTestId("room-present");
     await expect(quemAssiste).toHaveAttribute("title", /^\d+ assistindo agora$/);
-    await expect.poll(async () => Number((await quemAssiste.getAttribute("title"))?.match(/^(\d+)/)?.[1] ?? 0)).toBeGreaterThanOrEqual(301);
+    // A sessao de teste tem o id fixo: logo depois de outro arquivo que usou a mesma live, o servidor ainda pode ler a
+    // sessao de antes (o contexto da sala guardado ate 10 s na live, room-route.ts) e a janela vem sem a Simulacao; a sala
+    // pede de novo quando a decisao chega pela consulta de 5 s do chat (D79). Ate 30 s cobre os dois.
+    await expect.poll(async () => Number((await quemAssiste.getAttribute("title"))?.match(/^(\d+)/)?.[1] ?? 0), { timeout: 30_000 }).toBeGreaterThanOrEqual(301);
   });
 });

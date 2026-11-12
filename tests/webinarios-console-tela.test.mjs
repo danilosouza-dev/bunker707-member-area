@@ -59,6 +59,11 @@ export function DropdownMenuItem({ children, disabled, render }) {
 }`,
   "@/server/webinars/actions": `${fail}
 export const saveWebinarDraft = fail; export const publishWebinar = fail; export const cancelWebinar = fail; export const duplicateWebinar = fail; export const deleteWebinar = fail; export const archiveWebinar = fail; export const unarchiveWebinar = fail; export const rescheduleSession = fail; export const uploadWebinarCover = fail;`,
+  // As pessoas que comentam (11/11/2026, D75): a lista do Roteiro grava pela propria Server Action.
+  "@/server/webinars/persona-actions": `${fail}
+export const savePersona = fail; export const deletePersona = fail;`,
+  "@/server/webinars/simulation-actions": `${fail}
+export const loadSessionSimulations = fail; export const saveSessionSimulation = fail; export const saveSimulatedAudience = fail;`,
   "@/server/webinars/script-actions": `${fail}
 export const saveScriptItems = fail; export const importScriptCsv = fail; export const exportScriptCsv = fail; export const exportSessionChatCsv = fail; export const saveTranscript = fail; export const resolveScriptPhrases = fail; export const fireScriptItem = fail; export const sendScriptedComment = fail; export const saveScriptComment = fail; export const uploadPersonaPhoto = fail;`,
   "@/server/webinars/live-actions": `${fail}
@@ -75,7 +80,8 @@ export const clearMessageTranslations = fail;`,
   "@/server/webinars/screen-actions": `${fail}
 export const saveScreenItem = fail; export const archiveScreenItem = fail; export const uploadScreenImage = fail; export const showScreenItem = fail; export const hideScreenItem = fail;`,
   "@/server/webinars/room-actions": `${fail}
-export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const pinPoll = fail; export const unpinPoll = fail; export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;`
+export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const pinPoll = fail; export const unpinPoll = fail; export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;
+export const createConsolePoll = fail;`
 };
 
 function withExtension(base) {
@@ -538,6 +544,28 @@ test("caixa da equipe durante o envio (docs/31 V2-15 e §10, WCAG 2.4.3): o camp
   assert.doesNotMatch(campo(html(createElement(ConsoleChat, { ...props, busyKey: "moderate:m-ana" }))), /\s(?:readOnly|disabled)=""/i);
   const semAcao = campo(html(createElement(ConsoleChat, { ...props, busyKey: null, canAct: false })));
   assert.match(semAcao, /\sdisabled=""/, "a sessao que nao aceita a equipe desliga o campo");
+});
+
+test("D82: ao lado de Escreva para a turma, a foto do Perfil de quem esta no console ou as iniciais do nome dele (nunca so o icone); o icone da equipe so sem o nome", () => {
+  const props = { askedMessageIds: [], busyKey: null, canAct: true, currentUserId: "u-host", hostUserId: "u-host", messages, onChatMode() {}, onModerate() {}, onSend: async () => true, pinnedMessageId: null, session: session() };
+  /** O avatar da linha do campo: o primeiro filho da linha, antes da coluna do textarea. */
+  const avatarDoCampo = (markup) => {
+    const linha = markup.indexOf('<div class="mr-4 flex items-start">');
+    assert.ok(linha >= 0 && markup.indexOf('id="console-composer"', linha) > linha, "a linha do campo da equipe");
+    return markup.slice(linha, markup.indexOf('<div class="ml-3 min-w-0 flex-1">', linha));
+  };
+  const FOTO = "https://projeto.supabase.co/storage/v1/object/public/content-assets/avatars/u-host/danilo.webp";
+
+  const iniciais = avatarDoCampo(html(createElement(ConsoleChat, { ...props, currentUserName: "Danilo S." })));
+  assert.match(iniciais, /<span aria-hidden="true" class="[^"]*\bsize-6\b[^"]*"><span[^>]*>DS<\/span><\/span>/, "sem foto, as iniciais no avatar de 24");
+  assert.doesNotMatch(iniciais, /lucide-users-round|<img/, "nem o icone da equipe, nem foto");
+
+  const foto = avatarDoCampo(html(createElement(ConsoleChat, { ...props, currentUserAvatarUrl: FOTO, currentUserName: "Danilo S." })));
+  assert.match(foto, new RegExp(`<img[^>]*src="${FOTO.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}"`), "com foto, a foto");
+  assert.doesNotMatch(foto, />DS</);
+
+  // Sem o nome (quem chama sem o viewer), o icone da equipe, como antes.
+  assert.match(avatarDoCampo(html(createElement(ConsoleChat, props))), /lucide-users-round/);
 });
 
 test("roteiro: a fila com o que entrou, Soltar agora so no que falta e no manual, a desligada sem botao, o resumo; enquetes e perguntas, cada um no painel dele (o Roteiro e as Enquetes no ⋯, as Perguntas na aba), montado e escondido", () => {

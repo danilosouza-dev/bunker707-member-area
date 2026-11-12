@@ -1,6 +1,7 @@
 // O banco falso das rotas da Sala (tests/webinarios-sala-rotas.test.mjs e tests/webinarios-na-tela-rotas.test.mjs;
 // docs/18 §2.2): tabelas como listas, os filtros do PostgREST que as rotas usam, as chaves unicas das tabelas da
-// 202610290001, a RPC webinar_chat_window com a linha mestre deslocada pela ancora e a escola de mentira (uma Live
+// 202610290001 (e o nome unico da pessoa que comenta da 202611140001, com o insert de varias linhas atomico), a RPC
+// webinar_chat_window com a linha mestre deslocada pela ancora e a escola de mentira (uma Live
 // gravada publicada para todos, com a gravacao da Bunny e a live de origem). Cada `from` fica em `calls.from` e cada
 // escrita em `calls.writes`: os testes contam as consultas. Nada aqui e importado por src/.
 
@@ -23,10 +24,22 @@ export const iso = (time) => new Date(time).toISOString();
 
 export const UNIQUE = {
   webinar_chat_consents: [["user_id"]],
+  // O indice unico (webinar_id, name_key) da 202611140001: name_key e a coluna gerada (webinar_persona_name_key).
+  webinar_personas: [["webinar_id", "name_key"]],
   webinar_poll_answers: [["poll_id", "user_id"]],
   webinar_presence_samples: [["session_id", "user_id", "bucket"]],
   webinar_question_votes: [["question_id", "user_id"]]
 };
+
+/** As colunas geradas que o banco calcula (as linhas dos testes nao trazem): o nome comparavel da pessoa que comenta. */
+const GENERATED = {
+  webinar_personas: { name_key: (row) => String(row.name ?? "").normalize("NFC").replace(/\s+/g, " ").trim().toLocaleLowerCase("pt-BR") }
+};
+
+function columnOf(name, row, key) {
+  const generated = GENERATED[name]?.[key];
+  return generated ? generated(row) : row[key];
+}
 export const NO_ID = new Set(["webinar_attendance", "webinar_chat_consents", "webinar_presence_samples", "webinar_question_votes"]);
 export const DEFAULTS = {
   student_events: { entity_id: null, entity_type: null, metadata: {} },
@@ -92,7 +105,7 @@ export function bancoFalso({ rpc = {}, tables = {} } = {}) {
   const table = (name) => (tables[name] ??= []);
 
   function violates(name, row, ignore) {
-    return (UNIQUE[name] ?? []).some((keys) => table(name).some((existing) => existing !== ignore && keys.every((key) => existing[key] === row[key])));
+    return (UNIQUE[name] ?? []).some((keys) => table(name).some((existing) => existing !== ignore && keys.every((key) => columnOf(name, existing, key) === columnOf(name, row, key))));
   }
 
   function query(name) {
@@ -128,6 +141,11 @@ export function bancoFalso({ rpc = {}, tables = {} } = {}) {
           }
           const row = stamp(payload);
           if (violates(name, row)) {
+            // Um insert de varias linhas e atomico no banco: o lote recusado nao deixa nenhuma linha gravada.
+            for (const added of touched) {
+              const index = rows.indexOf(added);
+              if (index !== -1 && state.op === "insert") rows.splice(index, 1);
+            }
             return { data: null, error: { code: "23505", message: `duplicate key (${name})` } };
           }
           rows.push(row);

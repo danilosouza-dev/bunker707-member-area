@@ -7,10 +7,12 @@ import { PageHeader } from "@/components/admin/v2/page-header";
 import { PendingMigrationNotice } from "@/components/admin/v2/pending-migration-notice";
 import { requirePageArea } from "@/server/auth/permissions";
 import { can } from "@/server/auth/roles";
+import { getUserDisplayName } from "@/server/auth/session";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 import { getSessionConsoleData } from "@/server/webinars/console-queries";
 import { WEBINARS_MIGRATION } from "@/server/webinars/db";
 import { WEBINARS_HREF, WEBINAR_ADMIN_COPY, WEBINAR_SESSION_PARAM, webinarAdminHref } from "@/server/webinars/editor-model";
+import { teamAuthorName } from "@/server/webinars/room-model";
 import { webinarTranslationEnabled } from "@/server/webinars/v4-env";
 import { WEBINARS_FEATURE } from "@/server/licensing/features";
 import { requireFeaturePage } from "@/server/licensing/guards";
@@ -50,7 +52,9 @@ export default async function AdminWebinarConsolePage({ params, searchParams }: 
   }
 
   const now = new Date();
-  const loaded = await loadUnlessPendingMigration(() => getSessionConsoleData(id, firstParam(query[WEBINAR_SESSION_PARAM]), now, user.id));
+  // Quem abre o console: a foto do Perfil e, sem ela, as iniciais do nome com que a pessoa escreve para a turma (D82).
+  const viewer = { id: user.id, name: teamAuthorName(getUserDisplayName(user).fullName) };
+  const loaded = await loadUnlessPendingMigration(() => getSessionConsoleData(id, firstParam(query[WEBINAR_SESSION_PARAM]), now, viewer));
 
   if (!loaded.ok) {
     return (
@@ -72,6 +76,7 @@ export default async function AdminWebinarConsolePage({ params, searchParams }: 
   return (
     <SessionConsole
       currentUserId={user.id}
+      currentUserName={getUserDisplayName(user).fullName}
       data={loaded.data}
       key={loaded.data.snapshot?.session.id ?? "sem-sessao"}
       nonce={requestHeaders.get("x-nonce")}

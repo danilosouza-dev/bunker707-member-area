@@ -300,7 +300,7 @@ test("card Gravacao: o rotulo de cada recorder_status (§2.2); Preparar gravaç�
   assert.equal(liveRoomConfigured({ WEBINAR_JWT_SECRET: "s".repeat(40), WEBINAR_MEET_DOMAIN: "meet.exemplo.test" }), true);
 });
 
-test("card Sala: o microfone sozinho liga na Live ao vivo (o teto na dica) e fica desligado na gravada; o clique muda so a chave do room_settings", () => {
+test("card Sala: o microfone sozinho liga na Live ao vivo (a dica sem teto, D84) e fica desligado na gravada; o clique muda so a chave do room_settings", () => {
   const micSelf = (markup) => markup.match(/<button[^>]*id="webinar-room-micSelf"[^>]*>/)?.[0] ?? "";
   const card = (draft, onChange = () => {}) => html(createElement(RoomCard, { disabled: false, draft, errorFor: () => undefined, now: Date.now(), onBlur() {}, onChange }));
 
@@ -309,7 +309,10 @@ test("card Sala: o microfone sozinho liga na Live ao vivo (o teto na dica) e fic
   assert.match(micSelf(ligado), /aria-checked="true"/);
   assert.doesNotMatch(micSelf(ligado), /\sdisabled=""/, "na Live ao vivo o switch funciona");
   assert.match(textOf(ligado), new RegExp(vm.WEBINAR_ADMIN_COPY.fields.micSelfHint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(textOf(ligado), new RegExp(`Até ${model.MIC_LIMIT} alunos falam ao mesmo tempo`), "o teto da dica sai do MIC_LIMIT");
+  // D84 (11/11/2026): sem teto; a dica do editor e a mesma frase do console, sem numero e sem "quando lota".
+  assert.equal(vm.WEBINAR_ADMIN_COPY.fields.micSelfHint, "Todos os alunos podem abrir o microfone ao mesmo tempo. A equipe silencia uma pessoa ou todos quando precisar.");
+  assert.doesNotMatch(textOf(ligado), /alunos falam ao mesmo tempo|quando lota/, "a frase do teto saiu");
+  assert.equal(model.MIC_LIMIT, undefined);
   assert.match(micSelf(card({ ...live, roomSettings: model.defaultRoomSettings() })), /aria-checked="false"/, "o padrao e desligado");
 
   const gravada = { ...model.emptyWebinarDraft("simulated"), roomSettings: { ...model.defaultRoomSettings(), selfUnmute: true } };

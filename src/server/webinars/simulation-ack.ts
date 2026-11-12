@@ -5,6 +5,10 @@
 // entra" (4e) usam a mesma frase. A Live ao vivo (adendo de 10/11/2026, R7) tem a variante dela
 // (simulationAckSentenceLive): sem o trecho do selo "Ao vivo" (a live e ao vivo de verdade, e o "nunca e anunciada como ao
 // vivo" fala do selo), com "nesta live ao vivo" e o resto igual; continua obrigatoria e conferida no servidor.
+// Os participantes simulados mudados a qualquer momento (docs/30 D79, 11/11/2026): a frase de cada mudanca e a mesma
+// frase da decisao com o numero novo dito nela (`audience`: "A partir de agora, os participantes simulados somam +300
+// ao número de quem assiste."), logo antes do "Fora da área" na gravada e do "Responsável" na live. Sem `audience`, a
+// frase e exatamente a de antes (o card Simulacao e o "Comeca quando voce entra" nao mudam).
 
 export type SimulationAckInput = {
   badgeOn: boolean;
@@ -17,7 +21,25 @@ export type SimulationAckInput = {
   responsible: string;
   /** Avisos de venda (simulated_sale_notices ligado com pelo menos um). */
   saleNoticesSimulated: boolean;
+  /**
+   * Os participantes simulados de uma mudanca (D79): o +N que vale a partir de agora (0 tira). Ausente ou nulo, a frase
+   * da decisao como sempre foi.
+   */
+  audience?: number | null;
 };
+
+const integer = new Intl.NumberFormat("pt-BR");
+
+/** O trecho do numero novo (D79), com o espaco do fim; vazio sem mudanca de participantes. */
+export function simulationAudienceClause(audience: number | null | undefined): string {
+  if (typeof audience !== "number" || !Number.isFinite(audience)) {
+    return "";
+  }
+  const extra = Math.max(0, Math.trunc(audience));
+  return extra > 0
+    ? `A partir de agora, os participantes simulados somam +${integer.format(extra)} ao número de quem assiste. `
+    : "A partir de agora, sem participantes simulados: o aluno vê só o número real de quem assiste. ";
+}
 
 /** Algo simulado ligado: o editor so salva com a caixa marcada (simulationNeedsAck em simulation-schemas.ts). */
 export function simulationIsOn(input: Pick<SimulationAckInput, "badgeOn" | "countSimulated" | "joinsSimulated" | "saleNoticesSimulated">): boolean {
@@ -30,6 +52,7 @@ export function simulationAckSentenceV4(input: SimulationAckInput): string {
     `Decisão do produtor em ${input.date}: nesta sessão gravada, dentro da área de membros, o selo "Ao vivo" ` +
     `${input.badgeOn ? "fica ligado" : "fica desligado"}, os números de plateia ${numbers ? "são simulados" : "são reais"} ` +
     `e os avisos de venda ${input.saleNoticesSimulated ? "são simulados" : "não aparecem"}. ` +
+    simulationAudienceClause(input.audience) +
     `Fora da área de membros, esta sessão nunca é anunciada como ao vivo. Responsável: ${input.responsible.trim() || "—"}.`
   );
 }
@@ -44,6 +67,7 @@ export function simulationAckSentenceLive(input: Omit<SimulationAckInput, "badge
     `Decisão do produtor em ${input.date}: nesta live ao vivo, dentro da área de membros, ` +
     `os números de plateia ${numbers ? "são simulados" : "são reais"} ` +
     `e os avisos de venda ${input.saleNoticesSimulated ? "são simulados" : "não aparecem"}. ` +
+    simulationAudienceClause(input.audience) +
     `Responsável: ${input.responsible.trim() || "—"}.`
   );
 }

@@ -15,7 +15,10 @@ import "./support/resolve-extensionless-ts.mjs";
 //   continuam texto, e nenhum href que nao seja https;
 // - R2, a entrada Enquetes: em "Nesta sessão", o Fixar na aberta e na encerrada com o resultado compartilhado (nunca na
 //   encerrada sem compartilhar), o selo Fixada e o Desafixar na fixada (o pinnedPollId do retrato); em "Prontas", o
-//   "Abrir e fixar" ao lado do Abrir; sem poder agir, nenhum botao de fixar;
+//   "Abrir e fixar" ao lado do Abrir; sem poder agir, nenhum botao de fixar; e, desde 11/11/2026 (D83), a "Nova
+//   enquete" no cabecalho (desligada no teto de 20 prontas, com a frase), o formulario no lugar da lista (Pergunta, Tipo,
+//   Opções com adicionar e remover, Abrir agora, Abrir e fixar, Guardar nas prontas e Cancelar; sem poder agir, so
+//   Guardar), os erros pelo mesmo zod do servidor so depois da primeira tentativa, e a nova na lista das prontas;
 // - R3 e R4, a entrada Na tela: "Na tela agora" com a mensagem e a enquete fixadas, o banner e o QR Code com ha quanto
 //   tempo, os numeros e o Tirar da tela; os Prontos com o resumo, a Previa e o botao de cada estado (Mostrar, Mostrar no
 //   lugar do atual, Na tela, Mostrar de novo) e o ⋯ com Editar e Excluir; o aviso da migracao; os dois formularios com
@@ -76,6 +79,11 @@ export function DropdownMenuItem({ children, disabled, render }) {
 }`,
   "@/server/webinars/actions": `${fail}
 export const saveWebinarDraft = fail; export const publishWebinar = fail; export const cancelWebinar = fail; export const duplicateWebinar = fail; export const deleteWebinar = fail; export const archiveWebinar = fail; export const unarchiveWebinar = fail; export const rescheduleSession = fail; export const uploadWebinarCover = fail;`,
+  // As pessoas que comentam (11/11/2026, D75): a lista do Roteiro grava pela propria Server Action.
+  "@/server/webinars/persona-actions": `${fail}
+export const savePersona = fail; export const deletePersona = fail;`,
+  "@/server/webinars/simulation-actions": `${fail}
+export const loadSessionSimulations = fail; export const saveSessionSimulation = fail; export const saveSimulatedAudience = fail;`,
   "@/server/webinars/script-actions": `${fail}
 export const saveScriptItems = fail; export const importScriptCsv = fail; export const exportScriptCsv = fail; export const exportSessionChatCsv = fail; export const saveTranscript = fail; export const resolveScriptPhrases = fail; export const fireScriptItem = fail; export const sendScriptedComment = fail; export const saveScriptComment = fail; export const uploadPersonaPhoto = fail;`,
   "@/server/webinars/live-actions": `${fail}
@@ -89,7 +97,8 @@ export const clearMessageTranslations = fail;`,
   "@/server/webinars/screen-actions": `${fail}
 export const saveScreenItem = fail; export const archiveScreenItem = fail; export const uploadScreenImage = fail; export const showScreenItem = fail; export const hideScreenItem = fail;`,
   "@/server/webinars/room-actions": `${fail}
-export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const pinPoll = fail; export const unpinPoll = fail; export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;`
+export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const pinPoll = fail; export const unpinPoll = fail; export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;
+export const createConsolePoll = fail;`
 };
 
 function withExtension(base) {
@@ -504,6 +513,153 @@ test("a enquete fixada pelo retrato chega a entrada Enquetes: o SessionConsole p
 });
 
 /* ------------------------------------------------------------------------------------------------
+ * D83 (11/11/2026): a "Nova enquete" do console
+ * ---------------------------------------------------------------------------------------------- */
+
+const pollForm = await import("../src/components/admin/v2/communication/webinars/session-console/console-poll-form.tsx");
+const { ConsolePollForm, consolePollErrors, consolePollInput, emptyConsolePoll, withNewOption, withoutOption } = pollForm;
+const { CHAT_MESSAGES } = await import("../src/server/webinars/chat-schemas.ts");
+const { WEBINAR_ADMIN_COPY } = await import("../src/server/webinars/editor-model.ts");
+const novaCopy = WEBINAR_ADMIN_COPY.console.polls.create;
+const pollsCopy = WEBINAR_ADMIN_COPY.polls;
+/** Os rotulos dos botoes do rodape do formulario, na ordem. */
+const rodape = (markup) => Array.from(block(markup, "data-console-poll-form", "form").matchAll(/<button[^>]*data-console-poll-submit="[a-z]+"[^>]*>([^<]*)<\/button>|<button(?![^>]*data-console-poll)[^>]*>(Cancelar)<\/button>/g)).map((match) => match[1] ?? match[2]);
+const pollFormState = (extra = {}) => ({ kind: "single", options: [{ key: "a", label: "" }, { key: "b", label: "" }], question: "", ...extra });
+const pollFormProps = (extra = {}) => ({ busy: false, canOpen: true, onBack() {}, onSubmit: async () => null, ...extra });
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+test("D83 Enquetes: o Nova enquete no cabecalho so com o onCreate; no teto de 20 prontas, desligado com a frase do limite pelo aria-describedby", () => {
+  assert.equal(novaCopy.novaEnquete, "Nova enquete");
+  const semCriar = html(createElement(ConsolePolls, pollsProps()));
+  assert.doesNotMatch(semCriar, /data-console-poll-new/);
+
+  const comCriar = html(createElement(ConsolePolls, pollsProps({ onCreate: async () => null })));
+  const botao = comCriar.match(/<button[^>]*data-console-poll-new=""[^>]*>[\s\S]*?<\/button>/)?.[0] ?? "";
+  assert.match(textOf(botao), /^Nova enquete$/);
+  assert.doesNotMatch(botao, /\sdisabled=""/);
+  assert.ok(comCriar.indexOf("data-console-poll-new") < comCriar.indexOf("data-console-polls-launched"), "no cabecalho, antes da lista");
+  assert.doesNotMatch(comCriar, /id="console-polls-full"/);
+  assert.match(textOf(comCriar), new RegExp(escapeRegExp(pollsCopy.kinds.single)), "a lista das prontas continua");
+
+  const cheias = Array.from({ length: 20 }, (_, index) => ({ ...templates[1], id: `t-${index}`, question: `Pergunta ${index}?` }));
+  const noTeto = html(createElement(ConsolePolls, pollsProps({ onCreate: async () => null, templates: cheias })));
+  const desligado = noTeto.match(/<button[^>]*data-console-poll-new=""[^>]*>/)?.[0] ?? "";
+  assert.match(desligado, /\sdisabled=""/);
+  assert.match(desligado, /aria-describedby="console-polls-full"/);
+  assert.match(noTeto, /<p[^>]*id="console-polls-full"[^>]*>Até 20 enquetes por webinário\.<\/p>/);
+});
+
+test("D83 Nova enquete: o formulario no lugar da lista, com Voltar, Pergunta, Tipo (Uma opção), Opções (duas, sem remover no minimo), Adicionar opção e os botoes Abrir agora, Abrir e fixar, Guardar nas prontas e Cancelar", () => {
+  const markup = html(createElement(ConsolePolls, pollsProps({ initialCreate: pollFormState(), onCreate: async () => null })));
+  assert.doesNotMatch(markup, /data-console-polls-launched|data-console-polls-templates|data-console-poll-new/, "a lista sai da tela");
+  const form = block(markup, "data-console-poll-form", "form");
+  assert.ok(textOf(markup).startsWith(`Nova enquete ${novaCopy.dica} Voltar`), "o titulo, a dica e o Voltar no cabecalho");
+  assert.match(markup, /data-console-poll-back=""/);
+  // Pergunta, Tipo e Opções, na ordem, com os rotulos do card do editor.
+  const ordem = ["Pergunta", "Tipo", "Uma opção", "Várias opções", "Pesquisa", "Opções", "Adicionar opção"].map((rotulo) => textOf(form).indexOf(rotulo));
+  assert.ok(ordem.every((at, index) => at >= 0 && (index === 0 || at > ordem[index - 1])), `os rotulos na ordem: ${ordem}`);
+  assert.match(form, /<label[^>]*for="console-poll-form-[^"]*-pergunta"[^>]*>Pergunta<\/label>/);
+  assert.match(form, /<input[^>]*value="single"[^>]*checked=""|<input[^>]*checked=""[^>]*value="single"/, "Uma opção marcada");
+  assert.equal(count(form, /aria-label="Opção \d+"/g), 2, "duas opcoes (o minimo)");
+  const remover = (markup) => (markup.match(/<button[^>]*>/g) ?? []).filter((tag) => /aria-label="Remover opção \d+"/.test(tag));
+  assert.deepEqual(remover(form).map((tag) => /\sdisabled=""/.test(tag)), [true, true], "no minimo, o remover fica desligado");
+  assert.doesNotMatch(form, /an[oô]nim/i, "nada de anonimato (D64)");
+  assert.deepEqual(rodape(markup), [novaCopy.abrirAgora, naTela.enquetes.abrirEFixar, novaCopy.guardar, novaCopy.cancelar]);
+  assert.deepEqual([novaCopy.abrirAgora, novaCopy.guardar, novaCopy.cancelar], ["Abrir agora", "Guardar nas prontas", "Cancelar"]);
+  assert.doesNotMatch(textOf(markup), new RegExp(escapeRegExp(novaCopy.soGuardar)));
+  // Nenhum erro antes da primeira tentativa.
+  assert.doesNotMatch(form, /aria-invalid="/);
+});
+
+test("D83 Nova enquete sem poder agir (a sessao encerrada, o Replay): so Guardar nas prontas e Cancelar, com a frase; ocupada, os botoes do rodape desligados", () => {
+  const soGuardar = html(createElement(ConsolePolls, pollsProps({ canAct: false, initialCreate: pollFormState(), onCreate: async () => null })));
+  assert.deepEqual(rodape(soGuardar), [novaCopy.guardar, novaCopy.cancelar]);
+  assert.match(textOf(soGuardar), new RegExp(escapeRegExp(novaCopy.soGuardar)));
+  assert.equal(novaCopy.soGuardar, "Esta sessão não abre enquetes agora. A nova fica nas prontas.");
+
+  const ocupada = html(createElement(ConsolePollForm, pollFormProps({ busy: true })));
+  for (const tag of ocupada.match(/<button[^>]*data-console-poll-submit="[a-z]+"[^>]*>/g) ?? []) {
+    assert.match(tag, /\sdisabled=""/);
+  }
+  assert.equal(count(ocupada, /data-console-poll-submit=/g), 3);
+});
+
+test("D83 Nova enquete: os erros so depois da primeira tentativa, cada um no seu campo (a pergunta, a opcao vazia), pelo mesmo zod do servidor, com aria-invalid e o aria-describedby do erro", () => {
+  const tentado = html(createElement(ConsolePollForm, pollFormProps({ initialState: pollFormState({ options: [{ key: "a", label: "Sim" }, { key: "b", label: "  " }] }), initialTried: true })));
+  const pergunta = tentado.match(/<input[^>]*id="console-poll-form-[^"]*-pergunta"[^>]*>/)?.[0] ?? "";
+  assert.match(pergunta, /aria-invalid="true"/);
+  assert.match(pergunta, /aria-describedby="console-poll-form-[^"]*-pergunta-error"/);
+  assert.match(textOf(tentado), new RegExp(escapeRegExp(CHAT_MESSAGES.pollQuestion)));
+  const primeira = tentado.match(/<input[^>]*aria-label="Opção 1"[^>]*>/)?.[0] ?? "";
+  const segunda = tentado.match(/<input[^>]*aria-label="Opção 2"[^>]*>/)?.[0] ?? "";
+  assert.doesNotMatch(primeira, /aria-invalid="/, "a opcao escrita fica sem erro");
+  assert.match(segunda, /aria-invalid="true"/);
+  assert.match(segunda, /aria-describedby="console-poll-form-[^"]*-opcao-2-error"/);
+  assert.match(tentado, /<p[^>]*id="console-poll-form-[^"]*-opcao-2-error"[^>]*>Escreva cada opção \(até 120 caracteres\)\.<\/p>/);
+
+  // O estado puro: os erros pelo pollDraftSchema, no caminho do campo; o que vai para a acao, sem espacos nas pontas.
+  assert.deepEqual(consolePollErrors(pollFormState()), { "options.0.label": CHAT_MESSAGES.option, "options.1.label": CHAT_MESSAGES.option, question: CHAT_MESSAGES.pollQuestion });
+  assert.deepEqual(consolePollErrors(pollFormState({ options: [{ key: "a", label: "Sim" }, { key: "b", label: "Não" }], question: " Vem? " })), {});
+  assert.deepEqual(consolePollInput(pollFormState({ kind: "survey", options: [{ key: "a", label: " Sim " }, { key: "b", label: "Não" }], question: " Vem? " })), {
+    kind: "survey",
+    options: [{ label: "Sim" }, { label: "Não" }],
+    question: "Vem?"
+  });
+  assert.equal(consolePollErrors(pollFormState({ options: [{ key: "a", label: "x".repeat(121) }, { key: "b", label: "Não" }], question: "Vem?" }))["options.0.label"], CHAT_MESSAGES.option);
+});
+
+test("D83 Nova enquete: adicionar ate 20 opcoes e remover ate 2 (as escritas ficam no lugar); o formulario novo com duas vazias e Uma opção", () => {
+  const inicio = emptyConsolePoll();
+  assert.deepEqual([inicio.kind, inicio.question, inicio.options.map((option) => option.label)], ["single", "", ["", ""]]);
+  assert.notEqual(inicio.options[0].key, inicio.options[1].key);
+  let state = { ...inicio, options: [{ key: "a", label: "Sim" }, { key: "b", label: "Não" }] };
+  state = withNewOption(state);
+  assert.deepEqual(state.options.map((option) => option.label), ["Sim", "Não", ""]);
+  assert.deepEqual(withoutOption(state, "a").options.map((option) => option.label), ["Não", ""], "remove a escolhida, as outras ficam");
+  assert.equal(withoutOption({ ...state, options: state.options.slice(0, 2) }, "a").options.length, 2, "no minimo, nada sai");
+  let cheio = state;
+  for (let index = 0; index < 30; index += 1) {
+    cheio = withNewOption(cheio);
+  }
+  assert.equal(cheio.options.length, 20, "no maximo 20");
+  const markup = html(createElement(ConsolePollForm, pollFormProps({ initialState: { ...cheio, question: "Vem?" } })));
+  assert.match(markup.match(/<button[^>]*data-console-poll-add-option=""[^>]*>/)?.[0] ?? "", /\sdisabled=""/, "no maximo, Adicionar opção desligado");
+  const remover = (tags) => (tags.match(/<button[^>]*>/g) ?? []).filter((tag) => /aria-label="Remover opção \d+"/.test(tag));
+  assert.equal(remover(markup).length, 20);
+  assert.ok(remover(markup).every((tag) => !/\sdisabled=""/.test(tag)), "acima do minimo, todo remover ligado");
+});
+
+test("D83 a lista das prontas com a nova: o SessionConsole passa as prontas do retrato (a criada no console com Abrir e Abrir e fixar) e o Nova enquete", () => {
+  const criada = { ...templates[1], id: "t-nova", position: 2, question: "Qual tema na próxima?" };
+  const snapshot = {
+    askedMessageIds: [],
+    barred: null,
+    live: null,
+    messages: [],
+    pinned: null,
+    pinnedMessageId: null,
+    pinnedPollId: null,
+    polls: { launched, templates: [...templates, criada] },
+    presentNow: 3,
+    questions: [],
+    scriptFired: {},
+    scriptItems: [],
+    screen: { active: [], items: [], pending: false, stats: {} },
+    serverTime: new Date(NOW).toISOString(),
+    session: session()
+  };
+  const webinar = { durationMinutes: 60, hostUserId: "u-host", id: WEBINAR, kind: "simulated", recordingDurationSeconds: 3600, slug: "aula-de-ia", title: "Aula de IA" };
+  const markup = html(createElement(SessionConsole, { currentUserId: "u-host", data: { sessions: [snapshot.session], snapshot, webinar }, permissions: { canPublish: true, canWrite: true }, serverNow: NOW }));
+  assert.deepEqual(botoes(markup, 'data-console-poll-template="t-nova"'), ["Abrir", "Abrir e fixar"]);
+  assert.match(textOf(block(markup, 'data-console-poll-template="t-nova"', "li")), /^Qual tema na próxima\?/);
+  assert.equal(count(markup, /data-console-poll-new=""/g), 1, "o Nova enquete na entrada Enquetes");
+  const fonte = readFileSync(new URL("../src/components/admin/v2/communication/webinars/session-console/session-console.tsx", import.meta.url), "utf8");
+  assert.match(fonte, /onCreate=\{submitPoll\}/);
+  assert.match(fonte, /createConsolePoll\(\{ \.\.\.input, launch, sessionId \}\)/, "a sessao do console e o que fazer vao com o formulario");
+  assert.match(fonte, /setFailure\(result\.data\.launchError\)/, "abrir que falha depois de guardar vai para o banner do console");
+});
+
+/* ------------------------------------------------------------------------------------------------
  * R3 e R4: a entrada Na tela, os prontos e os dois formularios
  * ---------------------------------------------------------------------------------------------- */
 
@@ -712,8 +868,16 @@ test("achado 6 (revisao de 11/11/2026): o foco do teclado: o titulo do formulari
   assert.match(html(createElement(ConsoleScript, roteiro)), /<h2(?=[^>]*id="console-script-title")(?=[^>]*tabindex="-1")/);
   const comentario = html(createElement(ConsoleScript, { ...roteiro, initialComment: { applyToName: true, body: "", personaAvatarPath: null, personaName: "", personaRole: "student" } }));
   assert.match(comentario, /<h2(?=[^>]*id="console-script-comment-[^"]*-titulo")(?=[^>]*tabindex="-1")/);
+  // D83 (11/11/2026): as Enquetes ganharam a "Nova enquete" no lugar da lista, no mesmo padrao do Roteiro: o titulo das
+  // Enquetes e o do formulario tambem recebem o foco.
+  assert.match(html(createElement(ConsolePolls, pollsProps())), /<h2(?=[^>]*id="console-polls-title")(?=[^>]*tabindex="-1")/);
+  const novaEnquete = html(createElement(ConsolePolls, pollsProps({ initialCreate: { kind: "single", options: [{ key: "a", label: "" }, { key: "b", label: "" }], question: "" }, onCreate: async () => null })));
+  assert.match(novaEnquete, /<h2(?=[^>]*id="console-poll-form-[^"]*-titulo")(?=[^>]*tabindex="-1")/);
   // Os outros SectionCard do admin continuam sem tabIndex no titulo.
-  assert.doesNotMatch(html(createElement(ConsolePolls, pollsProps())).match(/<h2[^>]*>/)?.[0] ?? "", /tabindex/);
+  const { ConsolePresencePanel } = await import("../src/components/admin/v2/communication/webinars/session-console/console-presence.tsx");
+  const presenca = html(createElement(ConsolePresencePanel, { presence: { curve: [], messagesLastMinute: 0, messagesPerMinuteAvg: 0, minute: 0, peak: null }, presentNow: 0 }));
+  assert.match(presenca, /<h2[^>]*id="console-presence-title"/);
+  assert.doesNotMatch(presenca.match(/<h2[^>]*>/)?.[0] ?? "", /tabindex/);
 
   // Para onde o foco volta: o botao que abriu, se ainda esta na pagina e ligado; senao o titulo da secao.
   const el = (name, extra = {}) => ({ disabled: false, focus() {}, isConnected: true, name, ...extra });

@@ -9,14 +9,15 @@ import "./support/transpile-tsx.mjs";
 // sem a 202610300003 (o aviso da migracao e o selo da fase 2) e o card lendo as regras; o formulario puro (erros em
 // portugues, minutos dos avisos, mudanca, limite de 50); e a sala: o contador somado ao real no cabecalho, a entrada
 // "Ana M. entrou" no chat por 8 s, o aviso de venda num toast de 4 s (no topo na sala vertical), o leitor de tela no
-// maximo um aviso por minuto, prefers-reduced-motion sem deslizar e, sem regra ligada, tudo como hoje.
+// maximo um aviso por minuto, prefers-reduced-motion sem deslizar e, sem regra ligada, tudo como hoje. Revisao v8
+// (achado 6): o salvar leva a hora da decisao que o card carregou, e a recusa "mudou em outro lugar" mostra o Recarregar.
 
 const fail = `const fail = async () => ({ error: "Falhou.", ok: false, status: 500 });`;
 const STUBS = {
   "@/server/webinars/room-actions": `${fail}
 export const saveSimulation = fail; export const openSessionNow = fail; export const endSessionNow = fail;`,
   "@/server/webinars/simulation-actions": `${fail}
-export const loadSessionSimulations = fail; export const saveSessionSimulation = fail;`
+export const loadSessionSimulations = fail; export const saveSessionSimulation = fail; export const saveSimulatedAudience = fail;`
 };
 
 registerHooks({
@@ -30,7 +31,7 @@ registerHooks({
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { SimulationCard } = await import("../src/components/admin/v2/communication/webinars/simulation-card.tsx");
+const { SimulationCard, SimulationFailureBanner } = await import("../src/components/admin/v2/communication/webinars/simulation-card.tsx");
 const { SimulationSessionRow } = await import("../src/components/admin/v2/communication/webinars/simulation/simulation-session-row.tsx");
 const form = await import("../src/components/admin/v2/communication/webinars/simulation/simulation-card-model.ts");
 const roomSimulation = await import("../src/components/member/webinars/room/room-simulation.tsx");
@@ -140,13 +141,15 @@ test("card: o aviso do CDC, os tres blocos por sessao gravada com o que esta gra
   const markup = card();
   const text = textOf(markup);
   assert.match(text, /Pela lei \(CDC, art\. 37\), nunca anuncie uma sessão gravada como ao vivo fora da área de membros\./);
-  assert.match(text, /Números de plateia: reais, a não ser na sessão em que você ligar o contador ou as entradas\./);
+  // D79 (11/11/2026): o card fala de participantes, e a trava das entradas e dos avisos fica no alto, visivel.
+  assert.match(text, /Números de plateia: reais, a não ser na sessão em que você somar participantes simulados ou ligar as entradas\./);
+  assert.match(markup, /data-simulation-card=""><p[^>]*data-simulation-locked-note="">Os participantes simulados mudam a qualquer momento, também no ar, aqui ou no console\. As entradas e os avisos de venda simulados travam quando a sessão começa\.<\/p>/, "o aviso da trava e o primeiro do card");
   assert.match(text, /Números simulados aparecem no relatório só no bloco Simulação\./);
   assert.equal(count(markup, /data-simulation-session=/g), 2, "so as duas gravadas");
   assert.equal(count(markup, /data-simulation-block="contador"/g), 2);
   assert.equal(count(markup, /data-simulation-block="entradas"/g), 2);
   assert.equal(count(markup, /data-simulation-block="avisos"/g), 2);
-  for (const label of ["Contador de plateia", "Só o real", "Real + número fixo", "Real + faixa que varia", "Entradas e saídas", "Notificações de venda", "Somar ao real", "Mínimo", "Máximo", "Variação"]) {
+  for (const label of ["Participantes simulados", "Só o real", "Real + número fixo", "Real + faixa que varia", "Entradas e saídas", "Notificações de venda", "Somar ao real", "Mínimo", "Máximo", "Variação"]) {
     assert.ok(text.includes(label), label);
   }
   assert.match(text, /O aluno vê quem está na sala \+ 40\./);
@@ -345,7 +348,7 @@ test("R7 card na Live ao vivo: o aviso do CDC da live, 'Live de ...' sem o selo 
   const text = textOf(markup);
   assert.match(text, /Pela lei \(CDC, art\. 37\), nunca divulgue fora da área de membros os números simulados como se fossem reais\./);
   assert.doesNotMatch(text, /nunca anuncie uma sessão gravada como ao vivo/);
-  assert.match(text, /Números de plateia: reais, a não ser que você ligue o contador ou as entradas da live\./);
+  assert.match(text, /Números de plateia: reais, a não ser que você some participantes simulados ou ligue as entradas da live\./);
   assert.equal(count(markup, /data-simulation-session=/g), 1, "so a sessao da live");
   assert.match(text, /Live de 05\/11\/2026 às 20:00/);
   assert.equal(count(markup, /role="switch"/g), 0, "a live nunca tem o selo Ao vivo da gravada");
@@ -391,10 +394,29 @@ test("R7 card na Live ao vivo: a mudanca mostra a frase da live (sem o selo) com
   assert.equal(form.simulationFormSentence(initialForm, { live: true, nowMs: NOW, responsible: "Produtora de Teste" }), frase);
   assert.match(text, /Confirmo a decisão acima para esta sessão\./);
 
-  const noAr = row({ session: liveSession({ startedAt: "2026-11-05T23:01:00.000Z", status: "live" }) });
-  assert.match(textOf(noAr), /A live já começou: o que a turma vê não muda até o fim\./);
-  assert.doesNotMatch(noAr, /data-simulation-sentence/);
-  assert.match(noAr, /<input[^>]*disabled=""[^>]*id="l-base"/);
+  // D79 (11/11/2026, reabre o D74 so para o numero): ja no ar, as entradas e os avisos ficam travados, e os participantes
+  // simulados mudam pelo controle proprio no lugar do bloco do contador, com o atalho para o console.
+  const audience = {
+    changes: [{ atMs: 60_000, changedAt: "2026-11-05T23:02:00.000Z", changedByName: "Produtora de Teste", extra: 300, id: "m1", source: "console" }],
+    current: { base: 300, jitter: 0, mode: "fixed", peak: 300 },
+    flags: { badgeOn: false, joinsSimulated: true, saleNoticesSimulated: true },
+    pendingMigration: false,
+    rampEndsAtMs: null
+  };
+  const noAr = row({ audience, consoleHref: "/admin/comunicacao/webinarios/w/sala?sessao=s", session: liveSession({ startedAt: "2026-11-05T23:01:00.000Z", status: "live" }) });
+  const noArText = textOf(noAr);
+  assert.match(noArText, /A live já começou: os participantes simulados mudam aqui ou no console; as entradas e os avisos de venda ficam como estão até o fim\./);
+  assert.doesNotMatch(noAr, /data-simulation-sentence/, "o Salvar simulacao nao volta no ar");
+  assert.doesNotMatch(noAr, /id="l-base"/, "o bloco do contador da lugar ao controle");
+  assert.match(noAr, /data-simulation-audience=""/);
+  assert.match(noAr, /data-simulation-audience-now="">\+300</);
+  assert.match(noArText, /Mudado por Produtora de Teste em 05\/11\/2026 às 20:02, pelo console\./);
+  assert.match(noAr, /<a[^>]*data-simulation-console-link=""[^>]*href="\/admin\/comunicacao\/webinarios\/w\/sala\?sessao=s"[^>]*>Mudar no console<\/a>/);
+  assert.match(noAr, /<input[^>]*disabled=""[^>]*id="l-every"/, "as entradas travadas no ar");
+  // Sem a vista (o card ainda lendo ou o banco sem a Simulacao completa), o contador fica so para ler, como antes.
+  const semVista = row({ session: liveSession({ startedAt: "2026-11-05T23:01:00.000Z", status: "live" }) });
+  assert.match(semVista, /<input[^>]*disabled=""[^>]*id="l-base"/);
+  assert.match(textOf(semVista), /Sem decisão registrada: nada simulado aparece na live\./, "a live nunca fala do selo");
 });
 
 test("R7 sala ao vivo: o selo de quem assiste soma a parte simulada no relogio desde o started_at (nunca pela ancora); na espera, o numero do zero", async () => {
@@ -417,4 +439,31 @@ test("R7 sala ao vivo: o selo de quem assiste soma a parte simulada no relogio d
   assert.match(source, /topLeftExtra=\{blocked \? null : <RoomSimulationSales layout="cell" offsetMs=\{simulationOffsetMs\}/);
   assert.match(source, /\|\| \(!blocked && simulation\.enabled\) \? \(\s*<RoomScreenLayer/);
   assert.doesNotMatch(source, /<RoomSimulationSales layout="stage"/, "nunca solta por cima das fixadas");
+});
+
+test("revisao v8, achado 6: o salvar leva a hora da decisao que o card carregou; a recusa \"mudou em outro lugar\" mostra a frase com o Recarregar (as outras falhas, o Fechar)", async () => {
+  // A hora que vai no salvar: a lida junto com as regras; sem ela (os dubles antigos), a da sessao; nula sem decisao.
+  assert.equal(form.simulationExpectedDecidedAt({ decidedAt: "2026-11-05T20:00:00.000Z" }, { simulationDecidedAt: "2026-11-01T10:00:00.000Z" }), "2026-11-05T20:00:00.000Z");
+  assert.equal(form.simulationExpectedDecidedAt({ decidedAt: null }, { simulationDecidedAt: "2026-11-01T10:00:00.000Z" }), null, "as regras lidas sem decisao valem mais que a pagina");
+  assert.equal(form.simulationExpectedDecidedAt({}, { simulationDecidedAt: "2026-11-01T10:00:00.000Z" }), "2026-11-01T10:00:00.000Z");
+  assert.equal(form.simulationExpectedDecidedAt(null, { simulationDecidedAt: null }), null);
+
+  const frase = WEBINAR_COPY.simulacao.servidor.mudouEmOutroLugar;
+  assert.equal(frase, "A simulação desta sessão mudou em outro lugar. Recarregue para ver o número de agora.");
+  assert.equal(form.simulationChangedElsewhere({ message: frase, status: 409 }), true);
+  assert.equal(form.simulationChangedElsewhere({ message: WEBINAR_COPY.simulacao.servidor.comecou, status: 409 }), false, "o 409 da sessao que comecou nao recarrega");
+  assert.equal(form.simulationChangedElsewhere(null), false);
+
+  const mudou = html(createElement(SimulationFailureBanner, { failure: { message: frase, status: 409 }, onClose: () => undefined, onReload: () => undefined }));
+  assert.match(textOf(mudou), /A simulação desta sessão mudou em outro lugar\. Recarregue para ver o número de agora\./);
+  assert.match(mudou, /<button[^>]*data-simulation-reload=""[^>]*>Recarregar<\/button>/);
+  assert.doesNotMatch(textOf(mudou), /Fechar/);
+  const outra = html(createElement(SimulationFailureBanner, { failure: { message: "Falhou.", status: 500 }, onClose: () => undefined, onReload: () => undefined }));
+  assert.match(textOf(outra), /Falhou\. Fechar/);
+  assert.doesNotMatch(outra, /data-simulation-reload/);
+
+  // A linha manda a hora no salvar (o fonte: o pedido leva expectedDecidedAt pelo ajudante do modelo).
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("../src/components/admin/v2/communication/webinars/simulation/simulation-session-row.tsx", import.meta.url), "utf8");
+  assert.match(source, /expectedDecidedAt: simulationExpectedDecidedAt\(saved, session\)/);
 });

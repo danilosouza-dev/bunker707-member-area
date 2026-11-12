@@ -11,8 +11,8 @@ import { atendente, EQUIPE, EQUIPE_2, GRAVACAO, iaFalsa, montarEscola, novoAluno
 // sem conexao de IA, desligado no ambiente ou no webinario e o banco sem a 202610300004 calam; a equipe que assume
 // enquanto a IA escreve tambem cala (conferido de novo antes de gravar); a falha e o teto de tempo ficam no pedido; o
 // "Responder tudo"; a pergunta da aba Perguntas respondida pelo Assistente (answer_source ai) e o modo hibrido com
-// alguem atendendo; o GET /assistant; o POST /handoff so no que e do aluno (404 no resto) e o GET /questions com a
-// origem da resposta.
+// alguem atendendo (a pergunta simulada do futuro nunca pesa na conta de abertas: revisao v8, achado 2); o GET
+// /assistant; o POST /handoff so no que e do aluno (404 no resto) e o GET /questions com a origem da resposta.
 
 process.env.WEBINAR_ASSISTANT_ENABLED = "on";
 
@@ -334,6 +334,25 @@ test("modo hibrido: com alguem atendendo e sem Responder tudo, a pergunta da aba
   assert.equal(linha2.assigned_to, null);
   assert.equal(linha2.status, "answered");
   assert.equal(linha2.answer_source, "ai");
+});
+
+test("revisao v8, achado 2: no modo hibrido a pergunta simulada do futuro dada a um atendente nao pesa na conta de abertas dele", async () => {
+  const { db } = montar();
+  db.tables.webinar_attendants.push(atendente(EQUIPE), atendente(EQUIPE_2));
+  const daqui = (ms) => new Date(Date.now() + ms).toISOString();
+  const pergunta = (extra) => ({ anonymous: false, answer_source: null, answer_text: null, answered_at: null, answered_by: null, answered_live: false, assigned_at: daqui(-60_000), body: "?", deleted_at: null, deleted_reason: null, display_name: "Rui P.", handoff_requested_at: null, id: crypto.randomUUID(), message_id: null, offset_ms: 0, session_id: SESSAO, status: "open", upvotes: 0, ...extra });
+  db.tables.webinar_questions.push(
+    // Duas do roteiro da gravada (sem aluno), criadas na abertura para daqui a 10 e 20 min, ja com EQUIPE.
+    pergunta({ assigned_to: EQUIPE, created_at: daqui(10 * 60_000), user_id: null }),
+    pergunta({ assigned_to: EQUIPE, created_at: daqui(20 * 60_000), user_id: null }),
+    // Uma da turma, de agora, com EQUIPE_2.
+    pergunta({ assigned_to: EQUIPE_2, created_at: daqui(-30_000), user_id: OUTRO_ALUNO })
+  );
+  const feita = await perguntar({ body: "Tem certificado?" });
+  assert.equal(feita.status, 201, JSON.stringify(feita.body));
+  const linha = db.tables.webinar_questions.find((row) => row.id === feita.body.data.question.id);
+  assert.equal(linha.assigned_to, EQUIPE, "EQUIPE tem 0 abertas que a sala ja viu; EQUIPE_2 tem 1");
+  assert.notEqual(linha.user_id, null);
 });
 
 test("handoff: so na propria mensagem ou pergunta desta sessao (404 no resto); a mensagem do chat do tipo pergunta marca as duas linhas", async () => {

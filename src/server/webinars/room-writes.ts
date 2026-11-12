@@ -52,6 +52,7 @@ import {
   pollAnsweredMetadata,
   postingRefusal,
   questionReplyRefusal,
+  questionVisibleAt,
   questionReplySentMetadata,
   questionSentMetadata,
   reactionSentMetadata,
@@ -590,7 +591,8 @@ export async function voteStudentQuestion(input: { context: RoomContext; db: Web
   refuse(input.context, now, "interaction");
   await refuseBanned({ context: input.context, db: input.db, kind: "interaction", now, userId: input.userId });
   const row = await fetchQuestionRow(input.db, input.questionId);
-  if (!row || row.session_id !== input.context.session.id || row.deleted_at || !toStudentQuestion(questionFromRow(row), input.userId, false)) {
+  // A pergunta simulada antes da hora dela (D77) ainda nao existe para a turma.
+  if (!row || row.session_id !== input.context.session.id || row.deleted_at || !questionVisibleAt(questionFromRow(row), now) || !toStudentQuestion(questionFromRow(row), input.userId, false)) {
     throw new WebinarError("Pergunta não encontrada.", 404);
   }
   return toggleQuestionVote(input.db, { questionId: input.questionId, userId: input.userId });

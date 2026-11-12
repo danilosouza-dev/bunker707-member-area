@@ -27,6 +27,7 @@ import {
 // ao modelo e iguais para todos os alunos, sem a semente nem as regras; replay, sessao sem regra e banco sem a
 // 202610300003 devolvem enabled false; nada vai para student_events; a resposta e sem cache. R7 (adendo de 10/11/2026):
 // a Live ao vivo com regra e decisao devolve a janela contada do started_at, com a forma pela duracao prevista.
+// Revisao v8 (achado 1): a decisao, a situacao e o fim saem da linha lida agora, nunca da sessao do cache do acesso.
 
 const sessao = (globalThis.__simulacaoRotasSessao ??= { user: null });
 
@@ -207,4 +208,43 @@ test("R7: a Live ao vivo com regra e decisao devolve a janela contada do started
   Object.assign(live, { simulation_ack_text: null });
   resetRoomAccessCache();
   assert.equal((await ler({ from, sessionId: LIVE_SESSION, to })).body.data.enabled, false);
+});
+
+test("revisao v8, achado 1: a primeira decisao chega na hora a quem ja esta na sala; o cache do acesso nunca decide a janela", async () => {
+  // A gravada: o acesso fica guardado 10 min com a sessao de quando o aluno entrou (sem decisao).
+  const { db } = montar({ minutosNoAr: 12, sessao: semDecisao });
+  const row = db.tables.webinar_sessions.find((item) => item.id === SESSION);
+  const from = 10 * MIN;
+  const to = from + 120_000;
+  assert.equal((await ler({ from, to })).body.data.enabled, false, "antes da decisao, nada");
+
+  // A equipe decide (a consulta de 5 s do chat ja le a sessao fresca e leva o carimbo novo a sala).
+  Object.assign(row, DECISAO);
+  const depois = await ler({ from, to });
+  assert.equal(depois.status, 200);
+  assert.equal(depois.body.data.enabled, true, "a janela pedida logo depois do carimbo ja traz o numero");
+  assert.deepEqual(depois.body.data, model.simulationFeed({ durationMs: 60 * MIN, fromMs: from, kind: "simulated", simulation: sessionSimulationFromRow(row), status: "live", toMs: to }));
+
+  // E o contrario: a equipe encerra antes do fim; a janela corta pelo ended_at lido agora, nao pelo do cache.
+  Object.assign(row, { ended_at: iso(Date.parse(row.scheduled_at) + 5 * MIN), status: "ended" });
+  const encerrada = await ler({ from, to });
+  assert.deepEqual([encerrada.body.data.joins, encerrada.body.data.saleNotices], [[], []], "encerrada aos 5 min: nada aos 10");
+
+  // A cancelada some na hora tambem.
+  Object.assign(row, { ended_at: null, status: "cancelled" });
+  assert.equal((await ler({ from, to })).body.data.enabled, false);
+  assert.equal(db.calls.writes.length, 0, "a rota so le");
+});
+
+test("revisao v8, achado 1: na Live ao vivo a decisao gravada ha menos de 10 s (antes da releitura do cache) tambem chega na hora", async () => {
+  const { db } = montar({ webinar: { kind: "live" } });
+  const live = db.tables.webinar_sessions.find((item) => item.id === LIVE_SESSION);
+  Object.assign(live, semDecisao, { ended_at: null, recording_anchor_at: null, scheduled_at: iso(Date.now() - 20 * MIN), started_at: iso(Date.now() - 12 * MIN), status: "live" });
+  const from = 10 * MIN;
+  const to = from + 120_000;
+  assert.equal((await ler({ from, sessionId: LIVE_SESSION, to })).body.data.enabled, false);
+  Object.assign(live, DECISAO);
+  const depois = await ler({ from, sessionId: LIVE_SESSION, to });
+  assert.equal(depois.body.data.enabled, true);
+  assert.ok(depois.body.data.counter.every((point) => point.extra === 40), "Real + 40 fixo");
 });

@@ -224,6 +224,8 @@ const NOT_CONVERTED = {
   "webinar_offer_variants.image_url": "link colado, check https:// (STORAGE_PATHS_SKIPPED_TABLES)",
   "webinar_chat_messages.persona_avatar_path": "so o caminho webinars/personas/<hex>.webp, nunca um endereco (v7)",
   "webinar_chat_script_items.persona_avatar_path": "so o caminho webinars/personas/<hex>.webp, nunca um endereco (v7)",
+  "webinar_personas.avatar_path": "so o caminho webinars/personas/<hex>.webp, nunca um endereco (v8, 202611140001)",
+  "webinar_questions.persona_avatar_path": "so o caminho webinars/personas/<hex>.webp, nunca um endereco (v8, 202611140001)",
   "webinar_screen_items.image_alt": "texto alternativo da imagem, nao endereco (v7)",
   "webinar_screen_items.image_path": "so o caminho webinars/screen/<hex>.webp, nunca um endereco (v7)",
   "webinar_screen_items.link_url": "link de clique do banner e do QR Code, check https:// (STORAGE_PATHS_SKIPPED_TABLES)",

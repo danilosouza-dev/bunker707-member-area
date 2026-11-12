@@ -112,10 +112,13 @@ test("2. a primeira mensagem exige o aceite; com ele grava o aceite, o nome exib
   const semAceite = await enviar(aluna, { body: "oi" });
   assert.equal(semAceite.status, 409, JSON.stringify(semAceite.body));
   assert.equal(semAceite.body.reason, "consent_required");
+  // Antes do aceite, a sala ja recebe o proprio nome (D82: as iniciais ao lado do campo, que so a aluna ve).
+  const esperado = firstNameInitial(ESCOLA_DE_TESTE.contas.aluna.nome);
+  const antes = await sessao(aluna);
+  assert.deepEqual([antes.body.data.me.consented, antes.body.data.me.displayName], [false, esperado]);
 
   const primeira = await enviar(aluna, { body: "oi, turma", consent: true, consentVersion: CHAT_CONSENT_VERSION, offsetMs: 7 });
   assert.equal(primeira.status, 201, JSON.stringify(primeira.body));
-  const esperado = firstNameInitial(ESCOLA_DE_TESTE.contas.aluna.nome);
   assert.equal(primeira.body.data.message.displayName, esperado);
   assert.equal(primeira.body.data.pending, false);
   assert.ok(primeira.body.data.message.offsetMs >= 85_000, `nunca o 7 do navegador (${primeira.body.data.message.offsetMs})`);

@@ -3,7 +3,8 @@
 // aluno -> participante da sala), quem ve qual botao (Apresentador, co-apresentador, Equipe moderadora ou nao; quem
 // publica), o que a sala de espera deve estar fazendo, a fila de maos levantadas e quem esta na sala pelos sinais do
 // iframe do console (um reducer so, com os papeis, o microfone e a camera de cada um tambem pelo getRoomsInfo), o vigia
-// da tela (quem compartilha sem poder, docs/31 §5.4), quando o "Gravar" da fila dispara sozinho e quando a ancora e
+// da tela (quem compartilha sem poder, docs/31 §5.4), o microfone sozinho sem teto (a moderacao de audio desligada com a
+// politica ligada, D84; o vigia de 4 alunos saiu em 11/11/2026), quando o "Gravar" da fila dispara sozinho e quando a ancora e
 // marcada (uma vez), o cartao Gravacao, o ponto do video na previa do "Alinhar chat" e os rotulos do silencio. Sem "server-only", imports
 // relativos: tests/webinarios-console-ao-vivo-modelo.test.mjs carrega direto pelo Node. Nada aqui le o relogio: tudo
 // recebe `nowMs`. As frases vem de WEBINAR_COPY; as que ainda faltam la ficam em LIVE_CONSOLE_COPY (pedido no
@@ -13,7 +14,7 @@ import { LOWER_HAND_SIGNAL, RECORDING_SIGNAL } from "../../lib/jitsi-room-config
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { saoPauloTime } from "../../lib/webinar-time";
 import { desiredLobby, MUTE_MINUTES_OPTIONS, type LiveBanState, type MuteMinutes } from "./live-model";
-import { MIC_LIMIT, type SessionStatus } from "./model";
+import type { SessionStatus } from "./model";
 import { RECORDER_LABELS, canReleaseRecorder, canRequestRecorder, recorderMachineAlive, recorderPrepareStale, recordButtonAction, type RecorderStatus } from "./recorder-model";
 import { displayNameFor, firstNameInitial } from "./room-model";
 
@@ -37,7 +38,7 @@ export const LIVE_CONSOLE_COPY = {
   mensagemDoChat: copy.mensagemDoChat,
   microfoneLiberado: copy.microfoneLiberado,
   microfoneSozinho: copy.microfoneSozinho,
-  microfoneSozinhoTexto: copy.microfoneSozinhoTexto(MIC_LIMIT),
+  microfoneSozinhoTexto: copy.microfoneSozinhoTexto,
   noPalco: WEBINAR_COPY.aoVivo.noPalco,
   noVideo: copy.noVideo,
   removidosESilenciados: copy.removidosESilenciados,
@@ -257,7 +258,7 @@ export function presenterSetupCommands(input: { allowStudentCamera: boolean; rol
   if (input.role !== "host" && input.role !== "co_host") {
     return [];
   }
-  // Com o microfone sozinho ligado, nada de audio aqui: o vigia (micLimitStep) decide a moderacao pela conta.
+  // Com o microfone sozinho ligado, nada de audio aqui: a moderacao fica desligada (selfUnmuteModerationStep, D84).
   const commands: [string, ...unknown[]][] = input.selfUnmute ? [] : [["toggleModeration", true, "audio"]];
   if (!input.allowStudentCamera) {
     commands.push(["toggleModeration", true, "video"]);
@@ -677,50 +678,24 @@ export function screenShareWatchStep(input: {
   return { stopped, toStop };
 }
 
-/** O teto do microfone sozinho (docs/31 V2-A60), do model: quantos alunos falam ao mesmo tempo. */
-export { MIC_LIMIT };
-/** O vigia do microfone liga ou desliga a moderacao de audio no maximo uma vez neste intervalo (cada troca avisa a sala toda). */
-export const MIC_LIMIT_TOGGLE_MS = 2_000;
-
 /**
- * A ordem em que os microfones abriram (o vigia silencia os mais recentes): quem fechou sai, quem continua fica no
- * lugar e quem abriu agora entra no fim. Quem ja falava quando o console entrou (sem ordem conhecida) entra na ordem
- * das chaves.
+ * O microfone sozinho sem teto (D84, 11/11/2026; o vigia de 4 alunos do V2-A60 saiu): com a politica ligada, a moderacao
+ * de audio do motor fica desligada e todo aluno abre o microfone; nada fecha o microfone de ninguem por conta (quem
+ * vira bagunca a equipe silencia: uma pessoa pelo ⋯ ou todos pelo Silenciar todos). Um passo no navegador de quem
+ * apresenta e modera: a primeira leitura da moderacao de audio depois que a politica liga (ou da entrada com ela ligada)
+ * a desliga se estiver ligada (`toggleOff`); depois disso, nada ate a politica desligar (`checked` volta a falso) ou ate
+ * um iframe novo (quem chama zera `checked`). Assim um console com o retrato ainda velho nunca desfaz o fechar que outro
+ * console acabou de fazer (micCloseCommands). Sem leitura do motor (`moderationOn` nulo), espera. Nunca liga a moderacao,
+ * nunca silencia ninguem.
  */
-export function micOpenOrder(previous: readonly string[], audio: Readonly<Record<string, boolean>>): string[] {
-  const kept = previous.filter((id) => audio[id] === true);
-  const added = Object.keys(audio).filter((id) => audio[id] === true && !kept.includes(id));
-  return [...kept, ...added];
-}
-
-/**
- * Um passo do vigia do microfone sozinho (docs/31, caminho A; o molde do vigia da tela), no navegador de quem apresenta:
- * - a politica desligada: nada (o preparo ja ligou a moderacao de audio);
- * - conta os ids com papel conhecido de nao moderador ("participant" ou "none") e o microfone no ar, sem o proprio;
- * - abaixo de MIC_LIMIT, quer a moderacao desligada (todos podem abrir); com MIC_LIMIT ou mais, ligada (ninguem mais
- *   abre, e quem ja fala continua) e silencia os mais recentes acima do teto, pela `order` de quando abriram;
- * - `toggle` so quando o motor (`moderationOn`, nulo sem leitura) difere do querido e no maximo a cada
- *   MIC_LIMIT_TOGGLE_MS; nunca muteEveryone (pegaria o co-apresentador) nem rejectParticipant.
- */
-export function micLimitStep(input: {
-  audio: Readonly<Record<string, boolean>>;
-  lastToggleMs: number | null;
-  moderationOn: boolean | null;
-  nowMs: number;
-  order: readonly string[];
-  policy: boolean;
-  roles: Readonly<Record<string, JitsiRole>>;
-  selfId: string | null;
-}): { mute: string[]; toggle: boolean | null } {
+export function selfUnmuteModerationStep(input: { checked: boolean; moderationOn: boolean | null; policy: boolean }): { checked: boolean; toggleOff: boolean } {
   if (!input.policy) {
-    return { mute: [], toggle: null };
+    return { checked: false, toggleOff: false };
   }
-  const talking = Object.keys(input.audio).filter((id) => input.audio[id] === true && id !== input.selfId && knownNonModerator(input.roles, id));
-  // Sem lugar na ordem (indexOf -1), conta como o mais antigo: o vigia nunca silencia quem ja falava antes dele.
-  const ordered = [...talking].sort((a, b) => input.order.indexOf(a) - input.order.indexOf(b));
-  const wanted = ordered.length >= MIC_LIMIT;
-  const free = input.lastToggleMs === null || input.nowMs - input.lastToggleMs >= MIC_LIMIT_TOGGLE_MS;
-  return { mute: ordered.slice(MIC_LIMIT), toggle: input.moderationOn !== wanted && free ? wanted : null };
+  if (input.checked || input.moderationOn === null) {
+    return { checked: input.checked, toggleOff: false };
+  }
+  return { checked: true, toggleOff: input.moderationOn };
 }
 
 /**
