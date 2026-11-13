@@ -6,7 +6,7 @@ import { startTransition, useId, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import type { ActionResult } from "@/lib/action-result";
 import { cn } from "@/lib/utils";
-import { archiveWebinar, cancelWebinar, deleteWebinar, duplicateWebinar, unarchiveWebinar } from "@/server/webinars/actions";
+import { archiveWebinar, cancelWebinar, deleteWebinar, duplicateWebinar, publishWebinarReplay, unarchiveWebinar } from "@/server/webinars/actions";
 import {
   WEBINAR_ACTION_TOASTS,
   WEBINAR_ADMIN_COPY,
@@ -34,8 +34,9 @@ import { adminToast } from "../../toast";
 // webinario mudou em outra tela, volta 409 e o banner oferece "Recarregar". Abrir o console e Ver relatório so
 // navegam (fase 2b); na fase 3 Abrir a sala tambem leva ao console, e na Live ao vivo o Encerrar live idem (a acao
 // mora la: o navegador do apresentador para a gravacao e desliga a sala). Sem messaging.publish, Abrir a sala e o
-// Encerrar live da Live ao vivo aparecem desligados com "· só quem publica" (§2.6); o que chega em outra fase
-// (Publicar replay) aparece desligado com "em breve" (docs/30 §2.8). Arquivar (o encerrado e o cancelado, com
+// Encerrar live da Live ao vivo aparecem desligados com "· só quem publica" (§2.6); o que chegar em outra fase
+// aparece desligado com "em breve" (docs/30 §2.8). Publicar replay (o encerrado, com confirmacao) cria a aula do
+// replay no destino do card Publicar replay como aula e o toast diz o titulo dela (docs/30 §6.8). Arquivar (o encerrado e o cancelado, com
 // confirmacao), Desarquivar (sem confirmacao: so desfaz) e o Excluir do arquivado, so sem dados de aluno (`deletable`),
 // seguem a decisao do produtor de 10/11/2026 (docs/30 §2.3).
 
@@ -163,6 +164,17 @@ export function useWebinarActions({ onDeleted, permissions }: UseWebinarActionsO
           }
 
           adminToast.success(WEBINAR_ACTION_TOASTS[action] ?? "");
+          refreshInBackground();
+          return;
+        }
+        case "publish_replay": {
+          const result = await publishWebinarReplay(input);
+
+          if (!result.ok) {
+            return fail(result);
+          }
+
+          adminToast.success(result.data.created ? WEBINAR_ADMIN_COPY.toasts.replayLessonPublished(result.data.title) : WEBINAR_ADMIN_COPY.toasts.replayLessonExists(result.data.title));
           refreshInBackground();
           return;
         }

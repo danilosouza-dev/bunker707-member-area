@@ -111,6 +111,7 @@ const { PROIBIDAS_WEBINARIO, WEBINAR_COPY } = await import("../src/lib/webinar-c
 const actions = await import("../src/server/webinars/actions.ts");
 const queries = await import("../src/server/webinars/queries.ts");
 const { RecordingCard, RoomCard } = await import("../src/components/admin/v2/communication/webinars/webinar-editor-cards.tsx");
+const { ReplayLessonCard } = await import("../src/components/admin/v2/communication/webinars/replay-lesson-card.tsx");
 const { WebinarEditor } = await import("../src/components/admin/v2/communication/webinars/webinar-editor.tsx");
 const { WebinarsTable } = await import("../src/components/admin/v2/communication/webinars/webinars-table.tsx");
 
@@ -166,10 +167,10 @@ test("caminhos para o console: Abrir a sala e Abrir o console levam a /[id]/sala
     ["end", "Encerrar live", CONSOLE, null, false]
   ]);
   assert.deepEqual(header("in_progress", "simulated"), [["open_console", "Abrir o console", CONSOLE, null, false]], "na Live gravada o Encerrar fica no menu, com confirmacao");
-  assert.deepEqual(header("ended", "live"), [
-    ["view_report", "Ver relatório", `/admin/comunicacao/webinarios/${ID}/relatorio`, null, false],
-    ["publish_replay", "Publicar replay", null, null, true]
-  ]);
+  // Publicar replay deixou o "em breve" (13/11/2026): e uma acao com confirmacao, entao mora no menu "…", nao no topo.
+  assert.deepEqual(header("ended", "live"), [["view_report", "Ver relatório", `/admin/comunicacao/webinarios/${ID}/relatorio`, null, false]]);
+  assert.equal(vm.webinarActionHref("publish_replay", ID, "live"), null, "Publicar replay roda aqui, nao navega");
+  assert.equal(vm.webinarActionNeedsConfirm("publish_replay", "live"), true);
   assert.deepEqual(header("draft", "live"), [], "Salvar e Publicar ficam na Revisao");
   assert.deepEqual(header("cancelled", "live"), []);
   assert.deepEqual(header("in_progress", "live", { canPublish: false, canWrite: false }), [], "sem messaging.write, nada");
@@ -320,6 +321,41 @@ test("card Sala: o microfone sozinho liga na Live ao vivo (a dica sem teto, D84)
   assert.match(micSelf(desligado), /\sdisabled=""/, "na Live gravada nao ha microfone");
   assert.match(micSelf(desligado), /aria-checked="false"/);
   assert.match(textOf(desligado), /Desligado nesta versão\./);
+});
+
+test("card Publicar replay como aula (13/11/2026, docs/30 §6.8): desligado so o interruptor; ligado nasce com Publicar sozinho; o modulo e uma lista, travada sem produto e lendo com produto, e o modulo salvo continua na lista", () => {
+  const eventos = [];
+  const card = (replayLessonTarget) =>
+    html(createElement(ReplayLessonCard, { disabled: false, draft: { ...model.emptyWebinarDraft("live"), replayLessonTarget }, errorFor: () => undefined, now: Date.now(), onBlur() {}, onChange: (patch) => eventos.push(patch), pickerItems: [] }));
+  const campos = vm.WEBINAR_ADMIN_COPY.fields;
+  const seletor = (markup) => markup.match(/<select[^>]*id="webinar-replayLessonTarget-moduleId"[^>]*>[\s\S]*?<\/select>/)?.[0] ?? "";
+
+  const desligado = card(null);
+  assert.match(desligado, /id="webinar-replayLesson"/);
+  assert.doesNotMatch(desligado, /webinar-replayLessonTarget-/, "sem destino, nenhum campo");
+
+  const semProduto = card({ autoPublish: true, moduleId: null, productId: "", title: null });
+  assert.match(seletor(semProduto), /\sdisabled=""/, "sem produto nao ha o que listar");
+  assert.match(textOf(semProduto), new RegExp(campos.replayLessonModuleNeedsProduct));
+  assert.match(seletor(semProduto), new RegExp(`<option value="" selected="">${campos.replayLessonModuleAuto}</option>`), "sem escolher, o ultimo modulo do produto");
+  assert.doesNotMatch(semProduto, /type="text"[^>]*id="webinar-replayLessonTarget-moduleId"|id="webinar-replayLessonTarget-moduleId"[^>]*type="text"/, "o identificador em texto saiu");
+  assert.match(textOf(semProduto), new RegExp(campos.replayLessonTitleHint));
+  assert.match(textOf(semProduto), new RegExp(campos.replayAutoPublishHint.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(semProduto.match(/<button[^>]*id="webinar-replayLessonTarget-autoPublish"[^>]*>/)?.[0] ?? "", /aria-checked="true"/);
+
+  // Com produto, a primeira pintura ainda nao tem a lista (ela chega pela Server Action): o seletor espera, e o modulo
+  // ja salvo continua escolhido para o Salvar nao o perder.
+  const lendo = card({ autoPublish: false, moduleId: "module-novembro-mf3k4", productId: "course-lives", title: "Live 12" });
+  assert.match(seletor(lendo), /\sdisabled=""/);
+  assert.match(seletor(lendo), new RegExp(`<option value="">${campos.replayLessonModuleLoading}</option>`));
+  assert.match(seletor(lendo), /<option value="module-novembro-mf3k4" selected="">module-novembro-mf3k4<\/option>/);
+  assert.match(lendo, /id="webinar-replayLessonTarget-title"[^>]*value="Live 12"|value="Live 12"[^>]*id="webinar-replayLessonTarget-title"/);
+  assert.match(lendo.match(/<button[^>]*id="webinar-replayLessonTarget-autoPublish"[^>]*>/)?.[0] ?? "", /aria-checked="false"/);
+
+  // O texto do modulo deixou de prometer a lista para depois.
+  assert.doesNotMatch(Object.values(campos).filter((value) => typeof value === "string").join(" "), /chega depois/);
+  assert.equal(vm.WEBINAR_ADMIN_COPY.cards.replayAula.title, "Publicar replay como aula");
+  assert.match(vm.WEBINAR_ADMIN_COPY.cards.replayAula.description, /Uma aula por webinário/);
 });
 
 test("card Sala (D64, 10/11/2026): sem 'Perguntas anônimas permitidas' e sem 'Como o aluno aparece' (nem Apelido, nem Sempre anônimo), na Live ao vivo e na gravada, mesmo com o rascunho antigo", () => {
@@ -966,7 +1002,7 @@ test("frases novas do admin passam pela guarda do Webinario e nada diz 'em breve
   }
   assert.ok(!("roomNameSoon" in vm.WEBINAR_ADMIN_COPY.fields), "a frase '(fase 3)' saiu");
   assert.ok(!("recordingSoon" in vm.WEBINAR_ADMIN_COPY.fields));
-  assert.deepEqual([...vm.WEBINAR_SOON_ACTIONS], ["publish_replay"], "so o replay como aula segue 'em breve'");
+  assert.deepEqual([...vm.WEBINAR_SOON_ACTIONS], [], "nada mais segue 'em breve': o replay como aula passou a valer em 13/11/2026");
 });
 
 /* ------------------------------------------------------------------------------------------------

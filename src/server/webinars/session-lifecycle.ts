@@ -11,6 +11,7 @@ import "server-only";
 import { WebinarError, assertNoDbError, type WebinarsDb } from "./db";
 import type { PresenceSummary } from "./model";
 import { queueWebinarStartedNotices } from "./notify";
+import { autoPublishReplayLesson } from "./replay-lesson";
 import { SESSION_COLUMNS, presenceSummaryOf, type RecordingRow, type SessionRow } from "./rows";
 import { closeSessionRpc, openSessionRpc } from "./chat-store";
 import { fetchSessionRow, listRecordingRows, listSessionRows } from "./store";
@@ -100,7 +101,8 @@ async function insertReplaySession(db: WebinarsDb, row: ReplayInsert): Promise<b
  * pronta: `kind = replay`, disponivel na hora (`live`), `scheduled_at = agora`, apontando para a sessao de origem (o
  * chat dela reaparece pelo segundo do video), sem Entrada atrasada, com os controles de chat da sessao encerrada.
  * Quem chama: finishSession (no fim), o job webinar-recordings (fase 3: o MP4 da live fica pronto horas depois) e o
- * "Enviar gravação" do console. Devolve se criou (outro replay ja existia, ou sem gravacao pronta: false).
+ * "Enviar gravação" do console. Devolve se criou (outro replay ja existia, ou sem gravacao pronta: false). Quando cria,
+ * o replay vira aula se o webinario pede (autoPublishReplayLesson).
  */
 export async function createReplayForSession(db: WebinarsDb, sessionId: string, now: Date): Promise<boolean> {
   const session = await fetchSessionRow(db, sessionId);
@@ -127,7 +129,7 @@ export async function createReplayForSession(db: WebinarsDb, sessionId: string, 
     return false;
   }
 
-  return insertReplaySession(db, {
+  const created = await insertReplaySession(db, {
     chat_mode: session.chat_mode,
     chat_slow_mode_seconds: session.chat_slow_mode_seconds,
     kind: "replay",
@@ -138,6 +140,14 @@ export async function createReplayForSession(db: WebinarsDb, sessionId: string, 
     status: "live",
     webinar_id: session.webinar_id
   });
+
+  // O replay acabou de nascer: com "Publicar sozinho quando o replay ficar pronto" no card Publicar replay como aula,
+  // ele vira aula agora (docs/30 §6.8). Nunca lanca: quem encerra a live ou roda o tick nao falha por causa da aula.
+  if (created) {
+    await autoPublishReplayLesson(db, session.webinar_id, now);
+  }
+
+  return created;
 }
 
 /**

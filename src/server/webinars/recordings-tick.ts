@@ -25,6 +25,8 @@
 //      purge_due_at vencido (prune_webinar_history marca) e apagada na Bunny (404 conta como apagado) e ganha purged_at.
 //      A enviada ou ligada pela equipe (Enviar gravacao: source upload/bunny) nunca e apagada na Bunny: o video pode
 //      ser uma aula da mesma biblioteca (BUNNY_STREAM_API_KEY alcanca tudo nela).
+//      A do nosso gravador que virou aula (Publicar replay como aula, docs/30 §6.8) tambem fica: enquanto uma aula nao
+//      excluida usar o video, a retencao so adia a conferencia (RECORDINGS_LESSON_RECHECK_DAYS).
 // Uma falha numa sessao ou gravacao vira log e o passo segue com as outras. Banco sem a migracao 202610290003: registra
 // e devolve zeros (o tick continua verde). O job e src/server/jobs/webinar-recordings-job.ts.
 
@@ -57,6 +59,8 @@ export const RECORDER_IDLE_RELEASE_MINUTES = 30;
 export const RECORDINGS_BATCH = 20;
 /** A retencao nao tem pressa: o passo 5 roda uma vez por hora, neste minuto (UTC). */
 export const RECORDINGS_PURGE_MINUTE = 49;
+/** A gravacao vencida cujo video virou aula: a retencao confere de novo depois deste tanto de dias. */
+export const RECORDINGS_LESSON_RECHECK_DAYS = 30;
 /** O aviso de 6 h fica no sino por um dia. */
 const ALERT_EXPIRES_MS = 24 * HOUR_MS;
 
@@ -76,6 +80,8 @@ export type WebinarRecordingsResult = {
   alerted: number;
   /** Gravacoes que viraram `failed` (erro na Bunny, video inexistente ou 24 h sem terminar). */
   failed: number;
+  /** Gravacoes vencidas que a retencao poupou porque o video e de uma aula (a conferencia foi adiada). */
+  keptAsLesson: number;
   /** Banco sem a migracao mais nova (WEBINARS_MIGRATION): nada feito, o tick continua verde. */
   pendingMigration: boolean;
   /** Maquinas pedidas pelo preparo automatico. */
@@ -90,7 +96,7 @@ export type WebinarRecordingsResult = {
   replays: number;
 };
 
-export const EMPTY_RECORDINGS_RESULT: WebinarRecordingsResult = { alerted: 0, failed: 0, pendingMigration: false, prepared: 0, purged: 0, ready: 0, released: 0, replays: 0 };
+export const EMPTY_RECORDINGS_RESULT: WebinarRecordingsResult = { alerted: 0, failed: 0, keptAsLesson: 0, pendingMigration: false, prepared: 0, purged: 0, ready: 0, released: 0, replays: 0 };
 
 type TickContext = {
   bunny: BunnyStreamClient | null;
@@ -460,6 +466,23 @@ async function markPurged(db: WebinarsDb, id: string, nowIso: string): Promise<b
   return (data ?? []).length > 0;
 }
 
+/**
+ * O video ainda e de uma aula que nao foi excluida (Publicar replay como aula, ou colado pela equipe numa aula). O id
+ * vale como esta na gravacao e em minusculas: o endereco do player que vira o video da aula sai em minusculas.
+ */
+async function videoIsLesson(db: WebinarsDb, videoId: string): Promise<boolean> {
+  const ids = [...new Set([videoId, videoId.toLowerCase()])];
+  const { data, error } = await db.from("lessons").select("id").in("video_config->>assetId", ids).neq("status", "deleted").limit(1);
+  assertNoDbError(error, "Webinarios: conferir se o video e de uma aula");
+  return (data ?? []).length > 0;
+}
+
+/** Adia a retencao da gravacao (o video virou aula): a proxima conferencia fica para depois, sem travar a fila. */
+async function postponePurge(db: WebinarsDb, id: string, dueIso: string): Promise<void> {
+  const { error } = await db.from("webinar_recordings").update({ purge_due_at: dueIso }).eq("id", id).is("purged_at", null);
+  assertNoDbError(error, "Webinarios: adiar a retencao da gravacao");
+}
+
 async function purgeRecordings(ctx: TickContext, bunny: BunnyStreamClient) {
   const recordings = await listRecordingsToPurge(ctx.db, ctx.nowIso, RECORDINGS_BATCH);
 
@@ -470,6 +493,14 @@ async function purgeRecordings(ctx: TickContext, bunny: BunnyStreamClient) {
     }
 
     const ref = bunnyRefOfRecording(recording, bunny.libraryId);
+
+    // O replay que virou aula (docs/30 §6.8, D113): enquanto a aula existir, o video fica na Bunny. A conferencia
+    // volta em RECORDINGS_LESSON_RECHECK_DAYS; com a aula excluida, a retencao segue como antes.
+    if (ref && (await videoIsLesson(ctx.db, ref.videoId))) {
+      await postponePurge(ctx.db, recording.id, new Date(ctx.nowMs + RECORDINGS_LESSON_RECHECK_DAYS * 24 * HOUR_MS).toISOString());
+      ctx.result.keptAsLesson += 1;
+      return;
+    }
 
     if (ref) {
       try {

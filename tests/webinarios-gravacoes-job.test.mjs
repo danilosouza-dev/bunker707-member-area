@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import "./support/admin-action-stubs.mjs";
+import { actionStubs } from "./support/admin-action-stubs.mjs";
+import { bancoEmMemoria } from "./support/webinarios-banco-em-memoria.mjs";
 
 // O job webinar-recordings do tick (docs/30 §4.5, §6.4 passos 3, 10 e 11, §6.7 e I6; D10), sem banco: relogio falso,
 // o duble do adaptador do GitHub (fakeRecorderDispatcher) e um duble da Bunny. Aqui: o preparo automatico aos 30 min
@@ -20,7 +21,7 @@ const tick = await import("../src/server/webinars/recordings-tick.ts");
 const { WEBINAR_RECORDINGS_JOB_NAME, webinarRecordingsJob } = await import("../src/server/jobs/webinar-recordings-job.ts");
 const { PROIBIDAS_WEBINARIO, WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
 
-const { EMPTY_RECORDINGS_RESULT, RECORDINGS_PURGE_MINUTE, RECORDINGS_TICK_MESSAGES, runRecordingsTick } = tick;
+const { EMPTY_RECORDINGS_RESULT, RECORDINGS_LESSON_RECHECK_DAYS, RECORDINGS_PURGE_MINUTE, RECORDINGS_TICK_MESSAGES, runRecordingsTick } = tick;
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -39,147 +40,18 @@ const iso = (time) => new Date(time).toISOString();
 const em = (time) => new Date(time);
 
 /* ------------------------------------------------------------------------------------------------
- * Banco falso (o mesmo desenho de tests/webinarios-gravador-webhook.test.mjs)
+ * Banco falso (tests/support/webinarios-banco-em-memoria.mjs)
  * ---------------------------------------------------------------------------------------------- */
 
 const UNIQUE = {
+  // A chave primaria das aulas: o replay que vira aula usa um id fixo por webinario (docs/30 §6.8).
+  lessons: (row) => row.id,
   notifications: (row) => `${row.user_id}|${row.dedupe_key}`,
   webinar_recordings: (row) => (row.bunny_video_id ? `${row.provider}|${row.bunny_video_id}` : null),
   webinar_sessions: (row) => (row.kind === "replay" ? row.webinar_id : null)
 };
 
-function compare(a, b) {
-  if (typeof a === "number" && typeof b === "number") return a - b;
-  return String(a).localeCompare(String(b));
-}
-
-function matches(row, [op, column, value]) {
-  const current = row[column];
-  switch (op) {
-    case "eq":
-      return current === value;
-    case "neq":
-      return current !== value;
-    case "in":
-      return value.includes(current);
-    case "is":
-      return value === null ? current === null || current === undefined : current === value;
-    case "gte":
-      return current != null && compare(current, value) >= 0;
-    case "gt":
-      return current != null && compare(current, value) > 0;
-    case "lte":
-      return current != null && compare(current, value) <= 0;
-    case "lt":
-      return current != null && compare(current, value) < 0;
-    default:
-      return true;
-  }
-}
-
-function bancoFalso(seed = {}) {
-  const tables = Object.fromEntries(Object.entries(seed).map(([name, rows]) => [name, rows.map((row) => ({ ...row }))]));
-  const calls = [];
-  const falhas = [];
-  const table = (name) => (tables[name] ??= []);
-  const violates = (name, row, ignore) => {
-    const key = UNIQUE[name]?.(row);
-    return key != null && table(name).some((existing) => existing !== ignore && UNIQUE[name](existing) === key);
-  };
-
-  function query(name) {
-    const state = { filters: [], limit: null, op: null, options: null, order: [], payload: null, single: null };
-    calls.push({ state, table: name });
-
-    function finish(rows) {
-      if (state.single === "single") return rows[0] ? { data: rows[0], error: null } : { data: null, error: { code: "PGRST116", message: "no rows" } };
-      if (state.single === "maybe") return { data: rows[0] ?? null, error: null };
-      return { data: rows, error: null };
-    }
-
-    function run() {
-      const falha = falhas.find((item) => item.table === name && item.op === state.op && item.times > 0);
-      if (falha) {
-        falha.times -= 1;
-        return { data: null, error: falha.error };
-      }
-      const rows = table(name);
-      const filtered = () => rows.filter((row) => state.filters.every((filter) => matches(row, filter)));
-      const now = iso(Date.now());
-      if (state.op === "insert" || state.op === "upsert") {
-        const touched = [];
-        for (const payload of Array.isArray(state.payload) ? state.payload : [state.payload]) {
-          const keys = state.options?.onConflict?.split(",");
-          const existing = state.op === "upsert" && keys ? rows.find((row) => keys.every((key) => row[key] === payload[key])) : null;
-          if (existing) {
-            if (!state.options?.ignoreDuplicates) touched.push(Object.assign(existing, payload));
-            continue;
-          }
-          const row = { id: randomUUID(), created_at: now, updated_at: now, ...payload };
-          if (violates(name, row)) return { data: null, error: { code: "23505", message: `duplicate key (${name})` } };
-          rows.push(row);
-          touched.push(row);
-        }
-        return finish(touched);
-      }
-      if (state.op === "update") {
-        const touched = filtered();
-        touched.forEach((row) => Object.assign(row, state.payload));
-        return finish(touched);
-      }
-      let result = filtered();
-      for (const [column, ascending, nullsFirst] of [...state.order].reverse()) {
-        result = [...result].sort((a, b) => {
-          if (a[column] == null || b[column] == null) {
-            if (a[column] == b[column]) return 0;
-            return (a[column] == null) === nullsFirst ? -1 : 1;
-          }
-          return ascending ? compare(a[column], b[column]) : compare(b[column], a[column]);
-        });
-      }
-      if (state.limit !== null) result = result.slice(0, state.limit);
-      return finish(result);
-    }
-
-    const filter = (op) => (column, value) => {
-      state.filters.push([op, column, value]);
-      return chain;
-    };
-    const chain = {
-      eq: filter("eq"),
-      gt: filter("gt"),
-      gte: filter("gte"),
-      in: filter("in"),
-      insert: (payload) => ((state.op = "insert"), (state.payload = payload), chain),
-      is: filter("is"),
-      limit: (value) => ((state.limit = value), chain),
-      lt: filter("lt"),
-      lte: filter("lte"),
-      maybeSingle: () => ((state.single = "maybe"), chain),
-      neq: filter("neq"),
-      order: (column, options) => (state.order.push([column, options?.ascending !== false, options?.nullsFirst ?? options?.ascending === false]), chain),
-      range: () => chain,
-      select: () => ((state.op ??= "select"), chain),
-      single: () => ((state.single = "single"), chain),
-      then: (resolve, reject) => Promise.resolve().then(run).then(resolve, reject),
-      update: (payload) => ((state.op = "update"), (state.payload = payload), chain),
-      upsert: (payload, options) => ((state.op = "upsert"), (state.payload = payload), (state.options = options ?? null), chain)
-    };
-    return chain;
-  }
-
-  return {
-    calls,
-    falhar(name, op, error, times = 1) {
-      falhas.push({ error, op, table: name, times });
-    },
-    from: query,
-    rpc() {
-      throw new Error("o job nao chama RPC");
-    },
-    tables
-  };
-}
+const bancoFalso = (seed = {}) => bancoEmMemoria(seed, { unique: UNIQUE });
 
 /* ------------------------------------------------------------------------------------------------
  * A escola de mentira
@@ -691,6 +563,120 @@ test("retencao: so o video do nosso gravador (source jibri) e apagado na Bunny; 
 });
 
 /* ------------------------------------------------------------------------------------------------
+ * O replay que vira aula (docs/30 §6.8)
+ * ---------------------------------------------------------------------------------------------- */
+
+const PRODUTO = "course-lives-semanais-mf3k2";
+const MODULO_ANTIGO = "module-outubro-mf3k3";
+const MODULO_NOVO = "module-novembro-mf3k4";
+const AULA_DO_REPLAY = `lesson-replay-${WEBINAR}`;
+
+/** A live encerrada com a gravacao subindo, o produto com dois modulos e o destino do card no webinario. */
+function escolaComDestino(target, { gravacoes = [gravacaoRow()], lessons = [] } = {}) {
+  const db = escola({
+    gravacoes,
+    sessoes: [sessaoRow(SESSION, { ended_at: iso(HORA_MARCADA + 65 * MIN), recorder_status: "uploaded", status: "ended" })],
+    webinars: [webinarRow(WEBINAR, { description: "O que muda com agentes.", replay_lesson_target: target })]
+  });
+  Object.assign(db.tables, {
+    admin_audit_log: [],
+    content_items: [{ id: PRODUTO, image: "/capas/lives.webp", kind: "Curso", publication_status: "published", title: "Lives semanais" }],
+    course_modules: [
+      { id: MODULO_ANTIGO, meta: "0 aulas", owner_id: PRODUTO, sort_order: 0, status: "published", title: "Outubro" },
+      { id: MODULO_NOVO, meta: "0 aulas", owner_id: PRODUTO, sort_order: 1, status: "published", title: "Novembro" }
+    ],
+    lessons
+  });
+  return db;
+}
+
+test("Bunny pronta com Publicar sozinho no card: o replay nasce e vira uma aula publicada no fim do ultimo modulo do produto, com o video da Bunny; o tick seguinte nao cria outra", async () => {
+  const db = escolaComDestino({ autoPublish: true, moduleId: null, productId: PRODUTO, title: null });
+  const bunny = bunnyFalsa({ [VIDEO]: { lengthSeconds: 3700, status: BUNNY_VIDEO_STATUS.finished } });
+  const agora = HORA_MARCADA + 80 * MIN;
+  actionStubs.invalidations.length = 0;
+
+  const result = await rodar(db, agora, { bunny });
+
+  assert.deepEqual(semLogs(result), resultado({ ready: 1, replays: 1 }));
+  assert.equal(db.tables.lessons.length, 1);
+  const aula = db.tables.lessons[0];
+  assert.deepEqual(
+    { description: aula.description, duration: aula.duration, id: aula.id, module_id: aula.module_id, sort_order: aula.sort_order, status: aula.status, title: aula.title, video_config: aula.video_config },
+    {
+      description: "O que muda com agentes.",
+      duration: "1:01:40",
+      id: AULA_DO_REPLAY,
+      module_id: MODULO_NOVO,
+      sort_order: 0,
+      status: "published",
+      title: "Live de agentes",
+      video_config: { assetId: VIDEO, provider: "bunny", url: `https://iframe.mediadelivery.net/embed/42/${VIDEO}` }
+    }
+  );
+  assert.equal(db.tables.course_modules.find((row) => row.id === MODULO_NOVO).meta, "1 aula", "a contagem do modulo acompanha");
+  assert.deepEqual(actionStubs.invalidations, [{ from: "route" }], "no tick o catalogo e invalidado como rota, nunca como Server Action");
+  assert.deepEqual(
+    db.tables.admin_audit_log.map((row) => [row.action, row.actor_id, row.entity_id, row.metadata.lesson_id, row.metadata.mode, row.metadata.module_id, row.metadata.product_id]),
+    [["webinar.replay_lesson_published", null, WEBINAR, AULA_DO_REPLAY, "auto", MODULO_NOVO, PRODUTO]]
+  );
+  assert.ok(result.logs.some((linha) => linha.startsWith("info:") && linha.includes(AULA_DO_REPLAY)));
+
+  await rodar(db, agora + 5 * MIN, { bunny });
+  assert.equal(db.tables.lessons.length, 1, "uma aula por webinario");
+});
+
+test("sem o Publicar sozinho, ou sem destino, o replay nasce e nenhuma aula e criada; a falha ao criar a aula nao derruba o tick nem o replay", async () => {
+  const bunny = () => bunnyFalsa({ [VIDEO]: { lengthSeconds: 3700, status: BUNNY_VIDEO_STATUS.finished } });
+  const agora = HORA_MARCADA + 80 * MIN;
+
+  for (const target of [{ autoPublish: false, moduleId: null, productId: PRODUTO, title: null }, null]) {
+    const db = escolaComDestino(target);
+    assert.deepEqual(semLogs(await rodar(db, agora, { bunny: bunny() })), resultado({ ready: 1, replays: 1 }));
+    assert.equal(db.tables.lessons.length, 0);
+    assert.equal(db.tables.admin_audit_log.length, 0);
+  }
+
+  const quebrado = escolaComDestino({ autoPublish: true, moduleId: null, productId: PRODUTO, title: null });
+  quebrado.falhar("lessons", "insert", { code: "XX000", message: "banco fora" });
+  const result = await rodar(quebrado, agora, { bunny: bunny() });
+  assert.deepEqual(semLogs(result), resultado({ ready: 1, replays: 1 }), "a gravacao fica pronta e o replay nasce do mesmo jeito");
+  assert.equal(quebrado.tables.lessons.length, 0);
+  assert.ok(result.logs.some((linha) => linha.startsWith("error:") && linha.includes(WEBINAR)), "a falha vira log: a equipe usa o Publicar replay");
+});
+
+test("retencao: o video do gravador que virou aula fica na Bunny e a conferencia e adiada; com a aula excluida, a retencao apaga como antes", async () => {
+  const vencida = () => gravacaoRow({ purge_due_at: iso(HORA_MARCADA - HOUR), source: "jibri", status: "ready" });
+  const aula = (status) => ({ id: AULA_DO_REPLAY, module_id: MODULO_NOVO, sort_order: 0, status, title: "Live de agentes", video_config: { assetId: VIDEO, provider: "bunny", url: `https://iframe.mediadelivery.net/embed/42/${VIDEO}` } });
+  const naHora = Date.parse(`2026-11-06T10:${RECORDINGS_PURGE_MINUTE}:00.000Z`);
+
+  const comAula = escolaComDestino(null, { gravacoes: [vencida()], lessons: [aula("published")] });
+  const bunny = bunnyFalsa();
+  const poupada = await rodar(comAula, naHora, { bunny });
+  assert.deepEqual(semLogs(poupada), resultado({ keptAsLesson: 1 }));
+  assert.deepEqual(bunny.log, [], "nenhum DELETE na Bunny: a aula ainda usa o video");
+  const linha = comAula.tables.webinar_recordings[0];
+  assert.equal(linha.purged_at, null);
+  assert.equal(linha.purge_due_at, iso(naHora + RECORDINGS_LESSON_RECHECK_DAYS * 24 * HOUR), "a proxima conferencia fica para depois, sem travar a fila");
+  assert.equal((await rodar(comAula, naHora + HOUR, { bunny })).keptAsLesson, 0, "na hora seguinte a gravacao adiada nem entra na lista");
+
+  // O id do video na gravacao em maiusculas e o da aula em minusculas (como sai do endereco do player): e o mesmo video.
+  const maiusculas = escolaComDestino(null, { gravacoes: [{ ...vencida(), bunny_video_id: VIDEO.toUpperCase() }], lessons: [aula("published")] });
+  assert.equal((await rodar(maiusculas, naHora, { bunny: bunnyFalsa() })).keptAsLesson, 1);
+
+  // Rascunho tambem e aula de pe; so a excluida libera o video.
+  const emRascunho = escolaComDestino(null, { gravacoes: [vencida()], lessons: [aula("draft")] });
+  assert.equal((await rodar(emRascunho, naHora, { bunny: bunnyFalsa() })).keptAsLesson, 1);
+
+  const excluida = escolaComDestino(null, { gravacoes: [vencida()], lessons: [aula("deleted")] });
+  const outraBunny = bunnyFalsa();
+  const apagada = await rodar(excluida, naHora, { bunny: outraBunny });
+  assert.deepEqual(semLogs(apagada), resultado({ purged: 1 }));
+  assert.deepEqual(outraBunny.log, [["DELETE", "42", VIDEO]]);
+  assert.ok(excluida.tables.webinar_recordings[0].purged_at);
+});
+
+/* ------------------------------------------------------------------------------------------------
  * Migracao pendente, frases, o job e o cliente da Bunny
  * ---------------------------------------------------------------------------------------------- */
 
@@ -749,7 +735,7 @@ test("o job: nome, registro depois dos lembretes e as contagens em job_runs quan
     assert.equal(sessaoDe(db).recorder_status, "preparing");
     assert.deepEqual(db.tables.job_runs[0].metadata, {
       tick_run_id: "tick",
-      webinars_recordings: { ...{ alerted: 0, failed: 0, prepared: 1, purged: 0, ready: 0, released: 0, replays: 0 }, job_ms: db.tables.job_runs[0].metadata.webinars_recordings.job_ms }
+      webinars_recordings: { ...{ alerted: 0, failed: 0, kept_as_lesson: 0, prepared: 1, purged: 0, ready: 0, released: 0, replays: 0 }, job_ms: db.tables.job_runs[0].metadata.webinars_recordings.job_ms }
     });
     assert.ok(logs.some((linha) => linha.includes("1 gravador(es) pedido(s)")));
 

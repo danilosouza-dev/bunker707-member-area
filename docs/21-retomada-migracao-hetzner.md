@@ -1209,6 +1209,23 @@ nenhuma etapa `deploy-meet` é necessária para esta rodada.
 
 `WEBINARS_MIGRATION` continua apontando a `202611170001` (§9.18), a mais nova dos webinários.
 
+### 9.20 O replay que vira aula: sem migração (13/11/2026)
+
+**Publicar replay como aula** (`docs/30` §6.8, D108 a D113) não tem migração: o destino já morava em
+`webinars.replay_lesson_target` (migração `202610280001`), a aula usa as colunas de sempre de `lessons` e
+`course_modules`, a ligação entre o webinário e a aula é o id da aula (`lesson-replay-<id do webinário>`), e a
+retenção só adia o `purge_due_at` que já existia.
+
+**Antes do merge na `dev`**: nada a aplicar no SQL Editor. **Produção (Hetzner)**: o app muda, então precisa do
+`deploy-membros` a partir da `main` depois da promoção; nada manual além disso. **O servidor de vídeo**: nenhuma etapa
+`deploy-meet`.
+
+O que muda de comportamento com o app novo no ar: o webinário que já tinha o card **Publicar replay como aula** ligado
+com **Publicar sozinho** passa a criar a aula no próximo replay que nascer (os replays que já existem não viram aula
+sozinhos; para eles, **Publicar replay** no menu do webinário encerrado).
+
+`WEBINARS_MIGRATION` continua apontando a `202611170001` (§9.18).
+
 ## 10. Producao guardada em snapshot (03/11/2026)
 
 **Decisao do produtor (03/11/2026, no chat):** a producao na Hetzner so serve para a equipe testar; ninguem de fora a

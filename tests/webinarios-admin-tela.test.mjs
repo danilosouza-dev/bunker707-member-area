@@ -63,6 +63,8 @@ export const duplicateWebinar = fail;
 export const deleteWebinar = fail;
 export const archiveWebinar = fail;
 export const unarchiveWebinar = fail;
+export const publishWebinarReplay = fail;
+export const listReplayLessonModules = async () => ({ data: { modules: [] }, ok: true });
 export const rescheduleSession = fail;
 export const uploadWebinarCover = fail;`,
   // As pessoas que comentam (11/11/2026, D75): a lista do Roteiro grava pela propria Server Action.
