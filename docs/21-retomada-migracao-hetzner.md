@@ -1209,6 +1209,21 @@ nenhuma etapa `deploy-meet` é necessária para esta rodada.
 
 `WEBINARS_MIGRATION` continua apontando a `202611170001` (§9.18), a mais nova dos webinários.
 
+### 9.20 Promoção #180 e deploy na produção das rodadas v9 a v12 (13/11/2026)
+
+Com o ok do produtor no chat, depois do teste na `dev` ("tudo perfeito e aprovado para produção"; "Eu quero que tudo
+que temos pronto na main ... vá para produção"):
+
+| Hora (UTC) | O que | Resultado |
+|---|---|---|
+| 03:00 | `status` (da `dev`, só leitura) | a produção estava **ligada**: `bunker707-membros` (cx23, fsn1, criado em 11/11), `bunker707-meet` e `bunker707-licencas` no ar; o `marketing` continua guardado em snapshot. Nenhuma etapa `restaurar` foi necessária e nenhum servidor foi criado |
+| 03:02 | PR #180, `dev` -> `main` (squash, `e801382`) | as rodadas v9 a v12 dos Webinários (#176 a #179); a árvore da `main` ficou igual à da `dev` (`312dd58`) |
+| 03:03 a 03:06 | `deploy-membros` da `main` (execução 126 do fluxo de infra) | o `migrate.sh` aplicou cinco migrações pendentes: `202611140001_webinars_v8_pessoas`, `202611140002_webinars_v8_plateia`, `202611150001_webinars_v9`, `202611160001_webinars_v10` e `202611170001_webinars_v11`; o app trocou para `sha-e801382`; smoke verde (app, Auth, REST, Storage, Realtime, Studio fechado, modelos de e-mail); backup novo `20261113T030607Z` |
+
+O servidor de vídeo não precisou de etapa: a folha do motor desta promoção é a que o `deploy-meet` de 12/11/2026 já
+tinha levado (§9.18). A produção continuou ligada depois do deploy, como estava: guardar de novo (`snapshot` com
+`CONFIRMAR=apagar`) é decisão do produtor.
+
 ## 10. Producao guardada em snapshot (03/11/2026)
 
 **Decisao do produtor (03/11/2026, no chat):** a producao na Hetzner so serve para a equipe testar; ninguem de fora a
