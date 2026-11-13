@@ -624,6 +624,14 @@ pela Cloudflare). O IP do C fica visivel; a protecao e o firewall da Hetzner, o 
   `main`, com `SEM_LIVE_2H=sim`, e com o C restaurado do snapshot antes (`restaurar` com `PAPEIS=meet`, §4A.7).
   Conferir depois: numa sala de teste com duas contas, a miniatura de quem tem foto no Perfil mostra a foto; no C,
   `exec-meet` com `docker compose logs prosody | grep -i presence_guard` nao mostra erro ao carregar.
+- **O Jicofo sem dar papel a ninguem (13/11/2026, `docs/30` D116)**: o servico `jicofo` do compose leva
+  `JICOFO_ENABLE_AUTH=0` (o padrao do compose ja e 0, entao vale no C sem mexer no `.env`). Com a autenticacao do
+  Jicofo ligada, todo token valido virava dono da sala, o do aluno tambem. Vale como qualquer `deploy-meet`: da
+  `main`, com `SEM_LIVE_2H=sim`, e com o C restaurado do snapshot antes (`restaurar` com `PAPEIS=meet`, §4A.7); o
+  compose recria o jicofo (o ambiente mudou). Conferir depois: o `smoke.sh` do `deploy-meet` mostra
+  `ok jicofo sem dar papel (JICOFO_ENABLE_AUTH=0)`; numa sala de teste com duas contas, o **Liberar** e o
+  **Silenciar** do microfone, o **Fechar cameras** e a mao levantada funcionam, e a miniatura do aluno nao leva o
+  icone de moderador.
 - O `.env` do C leva `XMPP_MUC_MODULES=token_affiliation,bunker_room_guard,bunker_presence_guard` e `ROOM_GUARD_URL=<origem da area de
   membros>/api/webhooks/room-guard` (o `generate-secrets.sh` deriva os dois; num `.env` gerado antes de 29/10/2026,
   acrescentar as duas linhas a mao antes do proximo `deploy-meet`): o Prosody busca ali, a cada 5 s, quem a equipe
@@ -726,6 +734,7 @@ equipe tecnica). Se o monitor acusar queda com live marcada nas proximas 24 h, o
 | Gravador nao fica saudavel | `exec-jibri` com `COMANDO='docker compose logs --tail 200 jibri'`; sem conserto em 10 min, `jibri-down` com `FORCAR=1` e gravar pelo OBS |
 | Gravador ligado depois da live | `jibri-down` com `CONFIRMADO=sim` (sem `SESSAO`: todos). O app ja pede o `jibri-down` da sessao sozinho (job `webinar-recordings`, de novo a cada 2 h) e avisa no sino depois de 6 h; se o aviso chegou, o pedido do app nao esta passando: conferir o `GITHUB_INFRA_TOKEN` (§8B.9) |
 | Aluno ve a sala mas sem video nem audio | UDP 10000 e TURN no firewall do C; os `webinar_room_error` do aluno (so o codigo) no historico; `exec-meet` com `COMANDO='docker compose logs --tail 200 jvb'`; testar com TURN forcado; TURN em 443 e a opcao B (`docs/30` I7) |
+| Aluno com poder de moderador no motor (remove ou silencia outro pelo navegador; a miniatura dele leva o icone de moderador) | o `smoke.sh` do C falha em `jicofo sem dar papel`: o servico `jicofo` precisa de `JICOFO_ENABLE_AUTH=0` (`docs/30` D116); `exec-meet` com `docker compose exec -T jicofo grep -c "authentication {" /run/jicofo/config/jicofo.conf` tem de responder 0; se responder 1, `deploy-meet` de novo da `main` |
 | Apresentador entra como participante, nao como moderador | `XMPP_MUC_MODULES=token_affiliation` e `ENABLE_AUTO_OWNER=0` no `.env` do C; o claim `moderator` vem do papel no app (o Apresentador precisa de `messaging.publish`; a Equipe so com "Pode remover e silenciar na sala"); `exec-meet` com `docker compose logs prosody`. Nunca imprimir o token nem a chave |
 | "Gravacao pronta" nao chega (o console fica em Preparando) | o Jibri no brewery? a regra 5222 do C para o IP do gravador? `exec-jibri` com `docker compose logs jibri`; o webhook recusou? `webinar_recording_events` da sessao (o motivo do `ignored` em `error_message`; 401 nao grava linha: conferir `WEBINAR_RECORDER_WEBHOOK_SECRET` igual no app e no `JIBRI_SECRETS`); refazer `jibri-up` |
 | Hetzner sem estoque para o gravador | log do `jibri-up` ("unavailable" nos locais e tipos de reserva); o console mostra "Sem gravador hoje: gravar no navegador": gravar no navegador ou no OBS e ligar o video pelo console (**Enviar gravacao**) |

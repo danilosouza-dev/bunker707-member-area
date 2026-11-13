@@ -170,6 +170,10 @@ test("compose do Jitsi: web, prosody, jicofo e jvb na tag stable fixada, saude e
   // jicofo e jvb: tetos da JVM para o cx23, auto-owner desligado, saude em 127.0.0.1, midia em UDP 10000.
   const jicofo = services.get("jicofo");
   assert.match(jicofo, /ENABLE_AUTO_OWNER: "\$\{ENABLE_AUTO_OWNER:-0\}"/, "o primeiro que entra nao vira moderador (D14)");
+  // D116: com a autenticacao do Jicofo ligada (o padrao da imagem com ENABLE_AUTH=1), todo token valido vira dono da
+  // sala, o do aluno tambem. O padrao do compose e 0 para valer no servidor cujo .env e de antes desta linha.
+  assert.match(jicofo, /JICOFO_ENABLE_AUTH: "\$\{JICOFO_ENABLE_AUTH:-0\}"/, "o Jicofo nao da papel a ninguem: so o token decide (D116)");
+  assert.doesNotMatch(jicofo, /JICOFO_ENABLE_AUTH: "\$\{JICOFO_ENABLE_AUTH:-(?!0\})/, "o padrao nunca volta a ligar a autenticacao do Jicofo");
   assert.match(jicofo, /JICOFO_MAX_MEMORY: "\$\{JICOFO_MAX_MEMORY:-512m\}"/);
   assert.match(jicofo, /JICOFO_ENABLE_HEALTH_CHECKS: "\$\{JICOFO_ENABLE_HEALTH_CHECKS:-1\}"/, "sem a saude ligada /about/health responde 404 e o healthcheck nunca passa");
   assert.match(jicofo, /JICOFO_ENABLE_REST: "\$\{JICOFO_ENABLE_REST:-1\}"/, "sem a REST ligada o jicofo ouve so no loopback do container e o smoke.sh (127.0.0.1:8888 do servidor) ve 000");
@@ -318,6 +322,23 @@ test("custom-config.js e custom-interface_config.js, avaliados como o navegador 
   assert.match(loader[1], /link\.href = '\/css\/bunker707\.css\?v=[0-9a-f]{8}';/, "o v e o comeco do sha256 da folha (infra-jitsi-css.guard confere o valor)");
 });
 
+test("smoke.sh confere que o Jicofo nao da papel a ninguem (D116): passa so sem o bloco de autenticacao na configuracao que ele le", () => {
+  // O pedaco do smoke.sh rodado de verdade num bash, com um compose de mentira que responde o que o grep -c daria
+  // dentro do container: 0 (sem o bloco), 1 (a autenticacao ligada: todo token valido vira dono da sala) ou nada (a
+  // configuracao nao esta no caminho da tag fixada).
+  const smokeSource = read(join(jitsiDir, "scripts", "smoke.sh"));
+  const start = smokeSource.indexOf("jicofo_auth=$(");
+  const end = smokeSource.indexOf("fi\n", start) + "fi\n".length;
+  assert.ok(start > 0 && end > start, "o smoke.sh confere a autenticacao do Jicofo");
+  assert.match(smokeSource.slice(start, end), /compose exec -T jicofo sh -c 'grep -c "authentication \{" \/run\/jicofo\/config\/jicofo\.conf \|\| true'/, "pergunta ao container, na configuracao que o Jicofo le");
+  const run = (answer) =>
+    spawnSync("bash", ["-c", `set -euo pipefail\ncompose() { printf '%s' "$ANSWER"; }\nok() { echo "ok $*"; }\nfalha() { echo "FALHA $*"; }\n${smokeSource.slice(start, end)}`], { encoding: "utf8", env: { ...process.env, ANSWER: answer } }).stdout;
+  assert.match(run("0\n"), /^ok jicofo sem dar papel/, "sem o bloco, passa");
+  assert.match(run("0\r\n"), /^ok jicofo sem dar papel/, "o \\r do terminal do compose nao atrapalha");
+  assert.match(run("1\n"), /^FALHA jicofo sem dar papel .*todo token valido vira moderador/, "com a autenticacao ligada, falha e diz por que");
+  assert.match(run(""), /^FALHA jicofo sem dar papel/, "sem resposta (o arquivo mudou de lugar), falha");
+});
+
 test("generate-secrets --local: .env 0600 com senhas e JWT gerados, enderecos locais com CA interna, nada impresso, e nao repete sem --force", () => {
   const { envPath, generate } = prepareGenerator();
   const first = generate(["--local"]);
@@ -340,6 +361,7 @@ test("generate-secrets --local: .env 0600 com senhas e JWT gerados, enderecos lo
   assert.match(env.get("MEET_FRAME_ANCESTORS"), /localhost/);
   assert.equal(env.get("ENABLE_GUESTS"), "0");
   assert.equal(env.get("ENABLE_AUTO_OWNER"), "0");
+  assert.equal(env.get("JICOFO_ENABLE_AUTH"), "0", "o .env gerado desliga a autenticacao do Jicofo (D116)");
   assert.equal(env.get("JITSI_IMAGE_VERSION"), pinnedTag(envExample));
   assert.equal(read(envPath).split("\n").length, envExample.split("\n").length, "o gerador so troca valores; comentarios e ordem ficam");
   assert.match(first.stdout, /WEBINAR_JWT_SECRET/, "lembra que o app precisa do mesmo segredo");
