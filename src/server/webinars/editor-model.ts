@@ -114,7 +114,7 @@ export const WEBINAR_ADMIN_COPY = {
     gravacao: { description: "Só na Live ao vivo: o servidor de gravação é criado antes da live e apagado no fim.", title: "Gravação" },
     qualidade: { description: "Cada aluno recebe o tamanho que cabe na tela dele; em 4G cai sozinho para 720p ou 360p.", title: "Qualidade" },
     quemPode: { description: "Quem não passa por aqui não vê o webinário em lugar nenhum.", title: "Quem pode" },
-    replayAula: { description: "O replay vira uma aula com vídeo da Bunny; o chat da live fica na página do webinário.", title: "Publicar replay como aula" },
+    replayAula: { description: "O replay vira uma aula publicada no produto que você escolher, com o vídeo da Bunny. Uma aula por webinário; o chat da live fica na página do webinário.", title: "Publicar replay como aula" },
     revisao: { description: "", title: "Revisão" },
     roteiro: { description: "Mensagens do roteiro nunca entram nas métricas reais.", title: "Roteiro de chat" },
     sala: { description: "Controles padrão ao começar; a sessão copia ao abrir.", title: "Sala" },
@@ -451,12 +451,20 @@ export const WEBINAR_ADMIN_COPY = {
     reminderSinoHint: "Sempre ligado para quem garantiu vaga.",
     reminderTextEmpty: "Vazio = padrão.",
     replayAutoPublish: "Publicar sozinho quando o replay ficar pronto",
+    replayAutoPublishHint: "Desligado, a aula só nasce quando você clicar em Publicar replay, no menu do webinário encerrado.",
     replayDays: "Replay disponível por (dias)",
     replayDaysHint: "Quantos dias o card do replay fica na página inicial.",
     replayLesson: "Publicar o replay como aula",
     replayLessonModule: "Módulo",
-    replayLessonModuleHint: "O identificador do módulo do produto (a escolha pela lista de módulos chega depois).",
+    replayLessonModuleAuto: "Último módulo do produto",
+    replayLessonModuleEmpty: "Este produto ainda não tem módulo: a aula entra num módulo novo chamado Lives.",
+    replayLessonModuleFailed: "Não foi possível ler os módulos deste produto. O módulo salvo continua valendo.",
+    replayLessonModuleGone: "Módulo que não existe mais",
+    replayLessonModuleHint: "A aula entra no fim do módulo. Sem escolher, vai para o último módulo do produto.",
+    replayLessonModuleLoading: "Lendo os módulos…",
+    replayLessonModuleNeedsProduct: "Escolha o produto primeiro.",
     replayLessonTitle: "Título da aula",
+    replayLessonTitleHint: "Vazio, a aula leva o título do webinário.",
     scheduledAt: "Data e hora",
     sessions: "Horários marcados",
     sessionsAdd: "Adicionar sessão",
@@ -516,6 +524,8 @@ export const WEBINAR_ADMIN_COPY = {
     published: "Webinário publicado. O card entra na página inicial e os lembretes passam a valer.",
     replayCancelled: "Replay fechado.",
     replayCreated: "Replay liberado para quem pode ver.",
+    replayLessonExists: (title: string) => `O replay já é a aula “${title}”. Nada mudou.`,
+    replayLessonPublished: (title: string) => `Replay publicado como a aula “${title}”.`,
     rescheduled: "Hora marcada atualizada. Quem tinha vaga recebe o aviso.",
     saved: "Rascunho salvo.",
     savedPublished: "Webinário atualizado.",
@@ -556,6 +566,13 @@ export const WEBINAR_ADMIN_COPY = {
       confirmLabel: "Encerrar live",
       description: "A sessão que está no ar vira Encerrada para todo mundo e a presença é resumida. Isso não tem volta.",
       title: (title: string) => `Encerrar “${title}” agora?`
+    },
+    /** Publicar replay: a aula nasce publicada no destino do card Publicar replay como aula. */
+    publishReplay: {
+      confirmLabel: "Publicar como aula",
+      description:
+        "O replay vira uma aula publicada, no fim do módulo escolhido no card Publicar replay como aula. Quem tem acesso ao produto já passa a ver. Se o replay já virou aula, nada muda.",
+      title: (title: string) => `Publicar o replay de “${title}” como aula?`
     }
   },
   failures: {
@@ -589,6 +606,15 @@ export const WEBINAR_ADMIN_COPY = {
     save: WEBINAR_COPY.admin.salvar,
     unarchive: WEBINAR_COPY.admin.desarquivar,
     viewReport: WEBINAR_COPY.admin.verRelatorio
+  },
+  /** O cartao Publicar replay como aula do painel Gravação do console (docs/30 §6.8, D114). */
+  replayConsole: {
+    description: "Para qual curso vai o replay desta live. É o mesmo destino do card Publicar replay como aula, no editor.",
+    existing: (title: string) => `O replay desta live já é a aula “${title}”. Mudar o destino não mexe nessa aula.`,
+    failed: "Não foi possível ler o destino do replay agora. Recarregue a página para tentar de novo.",
+    loading: "Lendo o destino do replay…",
+    save: "Salvar destino",
+    saved: "Destino do replay salvo. Vale para o próximo replay desta live."
   },
   /** Por que um botao da sala ao vivo esta desligado para quem so escreve na Comunicacao (docs/30 §2.6). */
   blocked: {
@@ -838,9 +864,10 @@ export type WebinarPermissions = { canPublish: boolean; canWrite: boolean };
 /**
  * Acoes que chegam em outra fase: aparecem desligadas com "em breve" (docs/30 §2.8), nunca somem em silencio.
  * Fase 2b: Abrir o console, Encerrar live e Ver relatório passaram a valer. Fase 3: Abrir a sala leva ao console da
- * sessao (a Sessao de pratica da Live ao vivo; na Live gravada, o console da fase 2). Fica so o replay como aula.
+ * sessao (a Sessao de pratica da Live ao vivo; na Live gravada, o console da fase 2). Desde 13/11/2026 o Publicar replay
+ * tambem vale (docs/30 §6.8): a lista ficou vazia, e o mecanismo continua para a proxima acao que chegar depois.
  */
-export const WEBINAR_SOON_ACTIONS: readonly WebinarAction[] = ["publish_replay"];
+export const WEBINAR_SOON_ACTIONS: readonly WebinarAction[] = [];
 
 /** Acoes que so navegam (o menu e o topo abrem outra tela em vez de chamar uma Server Action). */
 export const WEBINAR_LINK_ACTIONS: readonly WebinarAction[] = ["open", "open_room", "open_console", "view_report"];
@@ -871,7 +898,7 @@ export function webinarActionHref(action: WebinarAction, id: string, kind?: Webi
   }
 }
 
-const PUBLISH_ACTIONS: readonly WebinarAction[] = ["publish", "cancel", "delete", "end", "open_room", "archive", "unarchive"];
+const PUBLISH_ACTIONS: readonly WebinarAction[] = ["publish", "cancel", "delete", "end", "open_room", "archive", "unarchive", "publish_replay"];
 
 /**
  * Por que a acao aparece desligada (docs/30 §2.6): quem so escreve na Comunicacao ve os botoes da sala que pedem
@@ -1036,16 +1063,16 @@ export function webinarRowShortcut(item: { id: string; kind: WebinarKind; situat
 }
 
 /**
- * Cancelar, Arquivar, Excluir e o Encerrar live da Live gravada pedem confirmacao; o da Live ao vivo so leva ao console.
- * Desarquivar nao (ele so desfaz o Arquivar).
+ * Cancelar, Arquivar, Excluir, Publicar replay e o Encerrar live da Live gravada pedem confirmacao; o da Live ao vivo so
+ * leva ao console. Desarquivar nao (ele so desfaz o Arquivar).
  */
 export function webinarActionNeedsConfirm(action: WebinarAction, kind?: WebinarKind | null) {
-  return action === "cancel" || action === "archive" || action === "delete" || (action === "end" && kind !== "live");
+  return action === "cancel" || action === "archive" || action === "delete" || action === "publish_replay" || (action === "end" && kind !== "live");
 }
 
 export type WebinarConfirmCopy = { confirmLabel: string; description: string; destructive: boolean; title: string };
 
-export type WebinarConfirmableAction = "archive" | "cancel" | "delete" | "end";
+export type WebinarConfirmableAction = "archive" | "cancel" | "delete" | "end" | "publish_replay";
 
 export function webinarActionConfirm(action: WebinarConfirmableAction, target: { registeredCount: number; situation?: WebinarSituation; title: string }): WebinarConfirmCopy {
   const title = target.title.trim() || WEBINAR_ADMIN_COPY.preview.titlePlaceholder;
@@ -1083,6 +1110,15 @@ export function webinarActionConfirm(action: WebinarConfirmableAction, target: {
       description: WEBINAR_ADMIN_COPY.confirm.end.description,
       destructive: true,
       title: WEBINAR_ADMIN_COPY.confirm.end.title(title)
+    };
+  }
+
+  if (action === "publish_replay") {
+    return {
+      confirmLabel: WEBINAR_ADMIN_COPY.confirm.publishReplay.confirmLabel,
+      description: WEBINAR_ADMIN_COPY.confirm.publishReplay.description,
+      destructive: false,
+      title: WEBINAR_ADMIN_COPY.confirm.publishReplay.title(title)
     };
   }
 
@@ -1411,7 +1447,9 @@ export function webinarDraftOf(source: WebinarDraft): WebinarDraft {
     reminderTexts: { ...source.reminderTexts },
     reminders: { ...source.reminders },
     replayDaysOnHome: source.replayDaysOnHome,
-    replayLessonTarget: source.replayLessonTarget ? { ...source.replayLessonTarget } : null,
+    // O destino (produto, modulo e publicar sozinho) vai junto: a proxima live da serie cai no mesmo curso. O titulo
+    // da aula nao: a copia leva o titulo do novo webinario, senao duas aulas nasceriam com o mesmo nome.
+    replayLessonTarget: source.replayLessonTarget ? { ...source.replayLessonTarget, title: null } : null,
     roomSettings: { ...source.roomSettings },
     scheduledAt: source.scheduledAt,
     sessions: source.sessions.map(canonicalSession),

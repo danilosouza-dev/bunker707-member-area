@@ -43,7 +43,8 @@ import { JitCard, type JitCardProps } from "./jit/jit-card";
 // Cards do editor do webinario que nao dependem do estado do editor alem do rascunho (docs/30 §2.2): Sessoes,
 // Quem pode, Vaga e lembretes, Avisar, Sala, Qualidade, Gravacao e Publicar replay como aula. O card Dados fica
 // no editor (precisa do envio da capa e da equipe). Cada campo tem id "webinar-<campo>" para o foco do erro. Fase 4e:
-// o card Sessoes termina com o "Comeca quando voce entra" (jit/jit-card.tsx), que salva as proprias regras.
+// o card Sessoes termina com o "Comeca quando voce entra" (jit/jit-card.tsx), que salva as proprias regras. O card
+// Publicar replay como aula mora em replay-lesson-card.tsx (ele le os modulos do produto por uma Server Action).
 
 export type CardProps = {
   disabled: boolean;
@@ -818,75 +819,6 @@ export function RecordingCard({ disabled, draft, liveRoomReady, liveSession, onC
         <p className="text-xs leading-5 text-[var(--text-tertiary)]" data-live-room-missing="" role="note">
           {view.roomMissingNote}
         </p>
-      ) : null}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------------------------------------
- * Publicar replay como aula
- * ---------------------------------------------------------------------------------------------- */
-
-export function ReplayLessonCard({ disabled, draft, errorFor, onBlur, onChange, pickerItems }: CardProps & { pickerItems: readonly ProductPickerItem[] }) {
-  const target = draft.replayLessonTarget;
-
-  return (
-    <div className="flex min-w-0 flex-col gap-4">
-      <AdminSwitch
-        checked={target !== null}
-        disabled={disabled}
-        id="webinar-replayLesson"
-        label={copy.replayLesson}
-        onCheckedChange={(checked) => onChange({ replayLessonTarget: checked ? { autoPublish: false, moduleId: null, productId: "", title: null } : null })}
-      />
-      {target ? (
-        <>
-          <AdminField error={errorFor("replayLessonTarget.productId")} id="webinar-replayLessonTarget-productId" label={copy.product}>
-            <ProductPicker
-              disabled={disabled}
-              error={errorFor("replayLessonTarget.productId")}
-              id="webinar-replayLessonTarget-productId"
-              items={pickerItems}
-              mode="single"
-              onChange={(ids) => {
-                onChange({ replayLessonTarget: { ...target, productId: ids[0] ?? "" } });
-                onBlur("replayLessonTarget.productId");
-              }}
-              value={target.productId ? [target.productId] : []}
-            />
-          </AdminField>
-          <AdminField error={errorFor("replayLessonTarget.moduleId")} hint={copy.replayLessonModuleHint} id="webinar-replayLessonTarget-moduleId" label={copy.replayLessonModule} optional>
-            <input
-              className={adminInputClass}
-              disabled={disabled}
-              id="webinar-replayLessonTarget-moduleId"
-              maxLength={240}
-              onBlur={() => onBlur("replayLessonTarget.moduleId")}
-              onChange={(event) => onChange({ replayLessonTarget: { ...target, moduleId: event.target.value } })}
-              type="text"
-              value={target.moduleId ?? ""}
-            />
-          </AdminField>
-          <AdminField error={errorFor("replayLessonTarget.title")} id="webinar-replayLessonTarget-title" label={copy.replayLessonTitle} optional>
-            <input
-              className={adminInputClass}
-              disabled={disabled}
-              id="webinar-replayLessonTarget-title"
-              maxLength={WEBINAR_EDITOR_LIMITS.title}
-              onBlur={() => onBlur("replayLessonTarget.title")}
-              onChange={(event) => onChange({ replayLessonTarget: { ...target, title: event.target.value } })}
-              type="text"
-              value={target.title ?? ""}
-            />
-          </AdminField>
-          <AdminSwitch
-            checked={target.autoPublish}
-            disabled={disabled}
-            id="webinar-replayLessonTarget-autoPublish"
-            label={copy.replayAutoPublish}
-            onCheckedChange={(autoPublish) => onChange({ replayLessonTarget: { ...target, autoPublish } })}
-          />
-        </>
       ) : null}
     </div>
   );

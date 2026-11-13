@@ -124,7 +124,7 @@ test("situacoes: rotulo, tom e os botoes do topo de §2.3; sem messaging.publish
   assert.deepEqual(vm.webinarActionsFor("scheduled", writeOnly), ["open", "save", "open_room", "duplicate"]);
   assert.deepEqual(vm.webinarActionsFor("in_progress", writeOnly), ["open", "open_console", "duplicate"]);
   assert.deepEqual(vm.webinarActionsFor("ended", both), ["open", "view_report", "publish_replay", "duplicate", "archive"]);
-  assert.deepEqual(vm.webinarActionsFor("ended", writeOnly), ["open", "view_report", "publish_replay", "duplicate"], "sem messaging.publish nao arquiva");
+  assert.deepEqual(vm.webinarActionsFor("ended", writeOnly), ["open", "view_report", "duplicate"], "sem messaging.publish nao arquiva nem publica o replay como aula");
   assert.deepEqual(vm.webinarActionsFor("cancelled", both), ["open", "duplicate", "archive"]);
   // O arquivado: Excluir so sem dados de aluno (deletable, lido no servidor); com dados (ou sem a leitura), nunca.
   assert.deepEqual(vm.webinarActionsFor("archived", both), ["open", "view_report", "unarchive", "duplicate"]);
@@ -169,10 +169,16 @@ test("menu '…' (§2.1): Abrir, Abrir a sala, Duplicar, Cancelar e Excluir (so 
   assert.deepEqual(rows("ended"), [
     ["open", "Abrir", false, false, false],
     ["view_report", "Ver relatório", false, false, false],
-    ["publish_replay", "Publicar replay", false, false, true],
+    ["publish_replay", "Publicar replay", false, false, false],
     ["duplicate", "Duplicar", false, false, false],
     ["archive", "Arquivar", false, false, false]
   ]);
+  assert.deepEqual(
+    vm.webinarMenuEntries("ended", both).find((entry) => entry.action === "publish_replay"),
+    { action: "publish_replay", blocked: null, destructive: false, display: "Publicar replay", label: "Publicar replay", separated: false, soon: false },
+    "Publicar replay vale desde 13/11/2026: sem 'em breve' no texto"
+  );
+  assert.deepEqual(rows("ended", writeOnly).map((row) => row[0]), ["open", "view_report", "duplicate"], "sem messaging.publish o Publicar replay nao aparece");
   // O arquivado (docs/30 §2.3, 10/11/2026): Desarquivar e, sem dados de aluno, Excluir separado no fim.
   const arquivado = (deletable) => vm.webinarMenuEntries("archived", both, [], "live", { deletable }).map((entry) => [entry.action, entry.label, entry.destructive, entry.separated]);
   assert.deepEqual(arquivado(true), [
@@ -183,7 +189,7 @@ test("menu '…' (§2.1): Abrir, Abrir a sala, Duplicar, Cancelar e Excluir (so 
     ["delete", "Excluir", true, true]
   ]);
   assert.deepEqual(arquivado(false).map(([action]) => action), ["open", "view_report", "duplicate", "unarchive"]);
-  assert.deepEqual([...vm.WEBINAR_SOON_ACTIONS], ["publish_replay"]);
+  assert.deepEqual([...vm.WEBINAR_SOON_ACTIONS], []);
   assert.deepEqual([...vm.WEBINAR_LINK_ACTIONS], ["open", "open_room", "open_console", "view_report"]);
   assert.equal(vm.webinarActionHref("open_console", "abc"), "/admin/comunicacao/webinarios/abc/sala");
   assert.equal(vm.webinarActionHref("open_room", "abc"), "/admin/comunicacao/webinarios/abc/sala", "Abrir a sala leva ao console");
