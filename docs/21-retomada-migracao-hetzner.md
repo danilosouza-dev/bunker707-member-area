@@ -1290,12 +1290,24 @@ Correcao na branch `claude/sweet-davinci-jzrysr`: a saude perguntada por dentro 
 livre depois da primeira gravacao) e a maquina de mentira dos testes respondendo como a de verdade. Detalhes no
 `docs/30` §6.7 e no `docs/20` §8B.5.
 
-Pendente: o primeiro `jibri-up` de verdade com a correcao. O app pede o `jibri-up` sempre da `main` (`INFRA_REF` em
-`src/server/webinars/recorder-dispatch.ts`), entao o **Preparar gravacao** do console so usa a correcao depois da
-promocao para a `main`; antes disso, o `jibri-up` pode ser disparado a mao desta branch, com o ok do produtor
-(EUR 0,13 por hora). Ate 13/11 nenhum `jibri-up` tinha chegado ao `ready`: o Gravar, o arquivo, o `finalize.sh`, a
-Bunny e o `uploaded` ainda nao rodaram de verdade.
+**Teste real com a correcao (13/11/2026, com o ok do produtor no chat)**, na mesma sessao, com o `jibri-up` disparado a
+mao da branch `claude/sweet-davinci-jzrysr` e o produtor no console da producao:
 
+| Hora (UTC) | O que | Resultado |
+|---|---|---|
+| 13:55 | `jibri-up` da branch | maquina cpx42 em fsn1; a saude respondeu `HEALTHY` na primeira pergunta, 6 s depois de o container subir |
+| 13:59 | aviso `ready` | o app respondeu 200 ("Gravacao pronta"), 3 min 14 s depois do disparo; o Gravar do console passou a valer |
+| 14:00 | Gravar, pelo console | arquivo de 150 s e 4,0 MB (gravador em 1920x1080) |
+| 14:03 | `finalize.sh` | enviado para a Bunny na primeira tentativa e o app avisado (`uploaded`, 200) |
+| 14:04 | `jibri-down` pedido pelo proprio app | conferiu a marca `.uploaded`, apagou a maquina, refez a 5222 do C e avisou `gone` (200); 0,1 h de maquina |
+
+Foi a primeira gravacao de verdade de ponta a ponta. O que ainda nao foi medido: uma live longa (o tamanho do arquivo
+em 1080p e o tempo do envio para a Bunny), o Gravar de novo na mesma live e o Gravar automaticamente pelo tick.
+
+O app pede o `jibri-up` sempre da `main` (`INFRA_REF` em `src/server/webinars/recorder-dispatch.ts`): o **Preparar
+gravacao** do console so usa a correcao depois da promocao para a `main`, sem `deploy-membros` (o script roda do
+repositorio, nao do app). No mesmo dia, as 14:09, um Preparar gravacao de outra live (sessao `fc44b4e4-...`), ainda com o
+script da `main` antiga, falhou do mesmo jeito: a maquina foi apagada as 14:17 e o app recebeu `unavailable`.
 
 ## 11. Servidor do Emissor de licencas: `bunker707-licencas` (10/11/2026)
 
