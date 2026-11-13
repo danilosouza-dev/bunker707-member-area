@@ -1,6 +1,6 @@
-// Frases das pessoas que comentam e da pergunta simulada (docs/30 §2.2, §2.4, §2.7 e D75 a D78; docs/31 §13.1; pedido
-// do produtor de 11/11/2026): a lista "Pessoas que comentam" do webinario (no card Roteiro do editor e na entrada
-// Roteiro do console), o formulario da pessoa (Nome, Foto (opcional), Aparece como), a escolha de "Quem comenta" em
+// Frases das pessoas que comentam e da pergunta simulada (docs/30 §2.2, §2.4, §2.7, D75 a D78, D115 e D117; docs/31
+// §13.1 e §18; pedidos do produtor de 11 e 13/11/2026): a lista "Pessoas que comentam" da escola (no card Roteiro do
+// editor e na entrada Roteiro do console, numa linha com as fotos e o total, que abre para gerenciar), o formulario da pessoa (Nome, Foto (opcional), Aparece como), a escolha de "Quem comenta" em
 // cada comentario, o "Comentar como {nome}" que repete a pessoa, o "Tipo" (Comentário ou Pergunta), o selo "Simulada"
 // da pergunta no console (nunca na sala), os avisos e os erros. Entram em WEBINAR_COPY.pessoas e passam pela
 // PROIBIDAS_WEBINARIO (tests/webinarios-frases.test.mjs). Nunca a palavra "personagem" na tela (o teste confere): o nome
@@ -9,8 +9,18 @@
 export const PESSOAS_COPY = {
   /** A lista, no editor e no console. */
   titulo: "Pessoas que comentam",
-  descricao: "Crie cada pessoa uma vez e escolha quem comenta em cada comentário. A lista é deste webinário e vale no editor e no console.",
+  descricao: "Crie cada pessoa uma vez e escolha quem comenta em cada comentário. A lista é da escola: as mesmas pessoas aparecem em todos os webinários, no editor e no console.",
   vazia: "Nenhuma pessoa na lista ainda.",
+  /** A linha da lista fechada (D117): o total da escola, ao lado das primeiras fotos. */
+  resumo: (total: number) => (total === 1 ? "1 pessoa na lista da escola" : `${total} pessoas na lista da escola`),
+  /** As fotos que nao cabem na linha. */
+  maisFotos: (total: number) => `mais ${total}`,
+  gerenciar: "Gerenciar pessoas",
+  fecharLista: "Fechar a lista",
+  /** A busca da lista, a partir de 7 pessoas. */
+  buscar: "Buscar pessoa",
+  buscarDica: "Nome da pessoa",
+  buscaVazia: (busca: string) => `Nenhuma pessoa com “${busca}”.`,
   novaPessoa: "Nova pessoa",
   editarPessoa: "Editar pessoa",
   editar: "Editar",
@@ -19,23 +29,21 @@ export const PESSOAS_COPY = {
   removerDe: (nome: string) => `Remover ${nome}`,
   /** Repetir a pessoa: abre o Novo comentário com ela escolhida. */
   comentarComo: (nome: string) => `Comentar como ${nome}`,
-  /** Quantos comentarios do roteiro usam a pessoa (a linha da lista). */
-  usos: (total: number) => (total === 0 ? "Nenhum comentário do roteiro" : total === 1 ? "1 comentário do roteiro" : `${total} comentários do roteiro`),
+  /** Quantos comentarios deste roteiro usam a pessoa (a linha da lista; a lista e da escola, o numero e deste webinario). */
+  usos: (total: number) => (total === 0 ? "Nenhum comentário neste roteiro" : total === 1 ? "1 comentário neste roteiro" : `${total} comentários neste roteiro`),
   /** O formulario da pessoa. */
   salvarPessoa: "Salvar pessoa",
   adicionarPessoa: "Adicionar à lista",
   cancelar: "Cancelar",
-  /** Editar a pessoa troca o nome, a foto e o papel em todos os comentarios do roteiro dela; o que a turma viu fica. */
-  editarDica: "Muda o nome, a foto e o Aparece como em todos os comentários do roteiro desta pessoa. O que a turma já viu não muda.",
+  /** Editar a pessoa troca o nome, a foto e o papel em todos os comentarios dela, de todos os webinarios; o que a turma viu fica. */
+  editarDica: "Muda o nome, a foto e o Aparece como em todos os comentários desta pessoa, em todos os webinários. O que a turma já viu não muda.",
   /** A confirmacao do Remover. */
   confirmarRemover: {
     titulo: (nome: string) => `Remover ${nome} da lista?`,
     texto: (total: number) =>
-      total === 0
-        ? "Nenhum comentário do roteiro usa esta pessoa."
-        : total === 1
-          ? "1 comentário do roteiro usa esta pessoa. Ele continua com o nome e a foto de agora, fora da lista."
-          : `${total} comentários do roteiro usam esta pessoa. Eles continuam com o nome e a foto de agora, fora da lista.`,
+      total === 0 ? "Nenhum comentário deste roteiro usa esta pessoa." : total === 1 ? "1 comentário deste roteiro usa esta pessoa." : `${total} comentários deste roteiro usam esta pessoa.`,
+    /** A lista e da escola (D115): remover vale para todos os webinarios. */
+    escola: "Ela sai da lista de todos os webinários. Os comentários que a usam continuam com o nome e a foto de agora, fora da lista.",
     visto: "O que a turma já viu não muda.",
     botao: "Remover da lista"
   },

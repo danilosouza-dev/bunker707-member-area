@@ -22,6 +22,11 @@
 //   sem espacos nas pontas, sem caixa); o nome repetido volta como erro no campo Nome (personaDraftErrors). A parte pura
 //   do Novo comentário do console tambem mora aqui: a pessoa escolhida ou nova, o Tipo (Comentário ou Pergunta, a
 //   pergunta simulada que entra na aba Perguntas) e o repetir, que mantem a pessoa e limpa o texto (commentFormAfterSend).
+// - A lista da escola (pedido do produtor de 13/11/2026; docs/30 D115; migracao 202611180001): a lista deixou de ser de
+//   cada webinario e passou a ser uma so da escola. Toda pessoa criada aparece em qualquer webinario; o nome e unico na
+//   escola (o mesmo personaNameKey, agora com o indice unico do banco so pelo nome); `webinarId` e so a origem (o
+//   webinario em que a pessoa foi criada), nula quando ele foi excluido. Editar a pessoa troca a copia dos itens dela em
+//   todos os roteiros.
 //
 // Sem "server-only", imports relativos: tests/webinarios-roteiro-ao-vivo.test.mjs e tests/webinarios-pessoas.test.mjs
 // carregam direto pelo Node.
@@ -76,7 +81,7 @@ export function samePersonaName(a: string, b: string): boolean {
  * As pessoas que comentam (11/11/2026, D75 a D78)
  * ---------------------------------------------------------------------------------------------- */
 
-/** Uma pessoa da lista do webinario (webinar_personas). */
+/** Uma pessoa da lista da escola (webinar_personas; D115). */
 export type WebinarPersona = {
   /** A foto: so o caminho da nossa pasta (isPersonaAvatarPath); nula, as iniciais. */
   avatarPath: string | null;
@@ -85,7 +90,8 @@ export type WebinarPersona = {
   name: string;
   role: PersonaRole;
   updatedAt: string;
-  webinarId: string;
+  /** So a origem: o webinario em que a pessoa foi criada (nula quando ele foi excluido; D115). */
+  webinarId: string | null;
 };
 
 /**
@@ -164,6 +170,20 @@ export function personaUsage(items: readonly { personaId?: string | null }[], pe
 /** A lista na ordem da tela: pelo nome, sem caixa (pt-BR). */
 export function sortPersonas<T extends Pick<WebinarPersona, "name">>(personas: readonly T[]): T[] {
   return [...personas].sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
+}
+
+/** A busca da lista de pessoas aparece a partir de quantas pessoas (docs/30 D117). */
+export const PERSONA_SEARCH_FROM = 7;
+
+/** O texto da busca (a lista de pessoas e o roteiro): sem acento, sem caixa e sem espacos sobrando. */
+export function personaSearchKey(value: string): string {
+  return value.normalize("NFD").replace(/\p{M}+/gu, "").replace(/\s+/g, " ").trim().toLocaleLowerCase("pt-BR");
+}
+
+/** Algum dos textos tem a busca, sem acento nem caixa (a busca vazia acha todos). */
+export function matchesPersonaSearch(texts: readonly (string | null | undefined)[], query: string): boolean {
+  const key = personaSearchKey(query);
+  return key.length === 0 || texts.some((text) => personaSearchKey(text ?? "").includes(key));
 }
 
 /* ------------------------------------------------------------------------------------------------

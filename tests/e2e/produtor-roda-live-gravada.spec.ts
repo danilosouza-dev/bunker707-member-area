@@ -70,7 +70,12 @@ test.describe("produtor", () => {
     await previa.getByRole("button", { exact: true, name: "Importar" }).click();
     await expect(page.getByText("2 mensagens entraram no roteiro.")).toBeVisible();
     await expect(roteiro.getByText(/2 entram sozinhas/)).toBeVisible();
-    await expect(roteiro.locator("[data-script-row='0'] textarea")).toHaveValue("Boa noite, turma!");
+    // As linhas fechadas (docs/30 D116): o comeco do texto na linha; abrir mostra o campo com a mensagem inteira.
+    const primeira = roteiro.locator("[data-script-row='0']");
+    await expect(primeira.locator("[data-script-row-text]")).toHaveText("Boa noite, turma!");
+    await primeira.locator("[data-script-row-toggle]").click();
+    await expect(primeira.locator("[data-script-row-toggle]")).toHaveAttribute("aria-expanded", "true");
+    await expect(primeira.locator("textarea")).toHaveValue("Boa noite, turma!");
 
     const enquetes = page.getByRole("region", { name: "Enquetes" });
     await enquetes.getByRole("button", { name: "Adicionar enquete" }).click();

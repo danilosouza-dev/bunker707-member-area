@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import test from "node:test";
 import { actionStubs } from "./support/admin-action-stubs.mjs";
-import { MIN, SESSION, WEBINAR, bancoFalso, escola, iso } from "./support/webinarios-sala-banco.mjs";
+import { MIN, OTHER_WEBINAR, SESSION, WEBINAR, bancoFalso, escola, iso } from "./support/webinarios-sala-banco.mjs";
 
 // As pessoas que comentam e a pergunta simulada (pedido do produtor de 11/11/2026; docs/30 D75 a D78; docs/18 §2.1 e
 // §2.2), sem banco: o banco falso das rotas da Sala com a escola de mentira virada Live ao vivo no ar, a permissao e a
@@ -20,8 +20,11 @@ import { MIN, SESSION, WEBINAR, bancoFalso, escola, iso } from "./support/webina
 //   vale, a resposta dele no fio nao; o console com a lista de pessoas, a pergunta com `simulated` e o chat sem a
 //   mensagem do item Pergunta;
 // - as correcoes da revisao v8: importar o CSV liga e cria as pessoas (e a corrida de duas importacoes reaproveita a
-//   que entrou; achado 3); a lista com mais de 1.000 pessoas vem inteira no Salvar, na edicao e no Duplicar, e a pessoa
-//   que a leitura nao trouxe e buscada pelo id (achado 4).
+//   que entrou; achado 3); a lista com mais de 1.000 pessoas vem inteira no Salvar e na edicao, e a pessoa que a leitura
+//   nao trouxe e buscada pelo id (achado 4);
+// - a lista da escola (pedido do produtor de 13/11/2026; docs/30 D115): a pessoa criada noutro webinario aparece aqui,
+//   o nome dela e recusado aqui, o roteiro, o Novo comentário e a importacao usam a pessoa de outro webinario, e remover
+//   daqui tira de todos (pelo webinario de onde a equipe remove, que confere o arquivado).
 
 process.env.NEXT_PUBLIC_SITE_URL = "https://membros.exemplo.test";
 process.env.NEXT_PUBLIC_SUPABASE_URL = "https://projeto.supabase.co";
@@ -316,15 +319,21 @@ test("editar a pessoa: o nome, a foto e o papel vao para todos os itens do rotei
 
 test("remover a pessoa: os itens dela ficam com a copia e sem a ligacao; a auditoria conta quantos eram", async () => {
   const db = usar();
-  const removida = ok(await personaActions.deletePersona({ id: ADRIANO }));
+  db.tables.webinars.find((row) => row.id === WEBINAR).status = "archived";
+  assert.equal((await personaActions.deletePersona({ id: ADRIANO, webinarId: WEBINAR })).status, 409, "do arquivado, so de leitura");
+  assert.equal(db.tables.webinar_personas.length, 1, "nada saiu");
+  db.tables.webinars.find((row) => row.id === WEBINAR).status = "published";
+  assert.equal((await personaActions.deletePersona({ id: ADRIANO })).status, 400, "sem o webinario de onde a equipe remove");
+  const removida = ok(await personaActions.deletePersona({ id: ADRIANO, webinarId: WEBINAR }));
   assert.deepEqual(removida, { id: ADRIANO, items: 3 });
   assert.equal(db.tables.webinar_personas.length, 0);
   for (const id of [ITENS.dele, ITENS.tambem, ITENS.pergunta]) {
     const linha = linhaDoItem(db, id);
     assert.deepEqual([linha.persona_id, linha.persona_name, linha.persona_avatar_path], [null, "Adriano Souza", FOTO], id);
   }
-  assert.deepEqual(audits(db, "webinar.persona_removed")[0].metadata, { items: 3, persona_id: ADRIANO });
-  assert.equal((await personaActions.deletePersona({ id: ADRIANO })).status, 404, "de novo: ja saiu");
+  const [auditoria] = audits(db, "webinar.persona_removed");
+  assert.deepEqual([auditoria.entity_id, auditoria.metadata], [WEBINAR, { items: 3, persona_id: ADRIANO }]);
+  assert.equal((await personaActions.deletePersona({ id: ADRIANO, webinarId: WEBINAR })).status, 404, "de novo: ja saiu");
 });
 
 /* ------------------------------------------------------------------------------------------------
@@ -525,10 +534,10 @@ function comMilPessoas() {
   return { ZULEICA, tables };
 }
 
-test("revisao v8, achado 4: a lista com mais de 1.000 pessoas vem inteira; o Salvar roteiro nao solta o item da 1.005a, a edicao dela nao volta 404 e o Duplicar copia todas", async () => {
+test("revisao v8, achado 4: a lista com mais de 1.000 pessoas vem inteira; o Salvar roteiro nao solta o item da 1.005a e a edicao dela nao volta 404", async () => {
   const { ZULEICA, tables } = comMilPessoas();
   const db = usar(tables);
-  const lista = await personaStore.listPersonas(db, WEBINAR);
+  const lista = await personaStore.listPersonas(db);
   assert.equal(lista.personas.length, 1006, "o Adriano, as 1.004 e a Zuleica, apesar do teto de 1.000 do PostgREST");
   assert.equal(lista.personas.at(-1).id, ZULEICA);
 
@@ -545,11 +554,58 @@ test("revisao v8, achado 4: a lista com mais de 1.000 pessoas vem inteira; o Sal
   const repetida = await personaActions.savePersona({ avatarPath: null, name: "ZULEICA  torres", role: "student", webinarId: WEBINAR });
   assert.deepEqual([repetida.status, repetida.fieldErrors?.name?.[0]], [400, PESSOAS.erros.nomeRepetido]);
 
-  // O Duplicar copia a lista inteira.
-  const COPIA = "cccccccc-0000-4000-8000-0000000000ff";
-  const mapa = await personaStore.copyPersonasToWebinar(db, { fromWebinarId: WEBINAR, toWebinarId: COPIA, userId: EQUIPE });
-  assert.equal(db.tables.webinar_personas.filter((row) => row.webinar_id === COPIA).length, 1006);
-  assert.equal(mapa.size, 1006);
+  // O Duplicar nao copia mais a lista (D115): ela e da escola, e a copia ja enxerga todas.
+  assert.equal(personaStore.copyPersonasToWebinar, undefined);
+});
+
+test("D115 a lista da escola: a pessoa criada noutro webinario aparece aqui; o nome dela e recusado aqui; o roteiro, o Novo comentário e a importacao a usam; editar troca a copia nos dois roteiros", async () => {
+  const tables = cenario();
+  const BIA = "eeeeeeee-0000-4000-8000-0000000000b9";
+  const DO_OUTRO = "dddddddd-0000-4000-8000-0000000000c9";
+  tables.webinar_personas.push({ avatar_path: OUTRA_FOTO, created_at: iso(Date.now() - 30 * MIN), created_by: null, id: BIA, name: "Bia Costa", role: "team", updated_at: iso(Date.now() - 30 * MIN), webinar_id: OTHER_WEBINAR });
+  tables.webinar_chat_script_items.push(item(DO_OUTRO, { persona_avatar_path: OUTRA_FOTO, persona_id: BIA, persona_name: "Bia Costa", persona_role: "team", position: 0, webinar_id: OTHER_WEBINAR }));
+  const db = usar(tables);
+
+  // A lista e uma so: a Bia, criada na outra live, aparece aqui (no editor e no console).
+  const lista = await personaStore.listPersonas(db);
+  assert.deepEqual(lista.personas.map((entry) => [entry.name, entry.webinarId]), [["Adriano Souza", WEBINAR], ["Bia Costa", OTHER_WEBINAR]]);
+  const retrato = await consoleQueries.loadConsoleSnapshot(db, { kind: "live", now: new Date(), session: db.tables.webinar_sessions.find((row) => row.id === SESSION) });
+  assert.deepEqual(retrato.personas.personas.map((entry) => entry.name), ["Adriano Souza", "Bia Costa"], "o console desta live tambem ve a Bia");
+
+  // O nome dela e da escola: repetido aqui volta no campo Nome, e a pessoa nova guarda esta live como origem.
+  const repetida = await personaActions.savePersona({ avatarPath: null, name: "BIA  costa", role: "student", webinarId: WEBINAR });
+  assert.deepEqual([repetida.status, repetida.fieldErrors?.name?.[0]], [400, PESSOAS.erros.nomeRepetido]);
+  const nova = ok(await personaActions.savePersona({ avatarPath: null, name: "Caio D.", role: "student", webinarId: WEBINAR }));
+  assert.equal(db.tables.webinar_personas.find((row) => row.id === nova.persona.id).webinar_id, WEBINAR, "a origem");
+
+  // O roteiro desta live liga o item a Bia, com a copia dela.
+  const base = { body: "Bem-vindos!", kind: "message", offsetMs: 2 * MIN, phrase: null, phraseDelayMs: 0, status: "draft", triggerKind: "at_offset" };
+  const salvo = ok(await scriptActions.saveScriptItems({ items: [{ ...base, personaId: BIA, personaName: "Bia Costa", personaRole: "team" }], loadedIds: [], webinarId: WEBINAR }));
+  const daBia = salvo.items.find((entry) => entry.body === "Bem-vindos!");
+  assert.deepEqual([daBia.personaId, daBia.personaName, daBia.personaRole, daBia.personaAvatarPath], [BIA, "Bia Costa", "team", OUTRA_FOTO]);
+
+  // O Novo comentário do console desta live com a Bia (antes: "Essa pessoa nao esta mais na lista").
+  const enviado = ok(await scriptActions.sendScriptedComment({ body: "Oi, turma", kind: "message", personaId: BIA, personaName: "Bia Costa", sessionId: SESSION }));
+  assert.deepEqual([enviado.created, enviado.persona.id], [false, BIA]);
+
+  // A importacao do CSV liga a linha com o nome dela a Bia, sem criar outra.
+  const csv = "Tempo;Nome;Papel;Mensagem\n5;bia costa;Aluno;Cheguei!";
+  const importado = ok(await scriptActions.importScriptCsv({ csv, replace: false, webinarId: WEBINAR }));
+  assert.equal(importado.items.find((entry) => entry.body === "Cheguei!").personaId, BIA);
+  assert.equal(db.tables.webinar_personas.filter((row) => row.name_key === "bia costa" || /bia costa/i.test(row.name)).length, 1, "uma Bia so");
+
+  // Editar a Bia daqui troca a copia nos roteiros das duas lives.
+  const editada = ok(await personaActions.savePersona({ avatarPath: null, id: BIA, name: "Bia C.", role: "team", webinarId: WEBINAR }));
+  assert.ok(editada.items >= 3, "o item da outra live e os dois desta");
+  for (const row of db.tables.webinar_chat_script_items.filter((entry) => entry.persona_id === BIA)) {
+    assert.deepEqual([row.persona_name, row.persona_avatar_path], ["Bia C.", null], row.webinar_id);
+  }
+  assert.ok(db.tables.webinar_chat_script_items.some((entry) => entry.persona_id === BIA && entry.webinar_id === OTHER_WEBINAR), "a outra live tambem");
+
+  // Remover daqui tira de todos: o item da outra live fica com a copia, fora da lista.
+  ok(await personaActions.deletePersona({ id: BIA, webinarId: WEBINAR }));
+  const doOutro = linhaDoItem(db, DO_OUTRO);
+  assert.deepEqual([doOutro.persona_id, doOutro.persona_name], [null, "Bia C."]);
 });
 
 test("revisao v8, achado 4: a pessoa que a leitura da lista nao trouxe (entrou depois dela) e buscada pelo id, nunca solta o item", async () => {

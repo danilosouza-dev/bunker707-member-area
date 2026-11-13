@@ -2,8 +2,10 @@ import "server-only";
 
 // As escritas das pessoas que comentam e da pergunta simulada (pedido do produtor de 11/11/2026; docs/30 D75 a D78;
 // migracao 202611140001), que as Server Actions do roteiro (script-actions.ts), as da lista (persona-actions.ts) e o
-// tick da live (live-script-tick.ts) dividem. Tudo pela service role, com as conferencias do servidor (o nome unico no
-// webinario antes do indice unico do banco, a pessoa do mesmo webinario) e as frases da migracao pendente:
+// tick da live (live-script-tick.ts) dividem. Tudo pela service role, com as conferencias do servidor (o nome unico na
+// lista antes do indice unico do banco) e as frases da migracao pendente. Desde 13/11/2026 (docs/30 D115; migracao
+// 202611180001) a lista e da escola: toda pessoa vale em qualquer webinario, e o webinario de cada escrita fica so como
+// a origem da pessoa nova:
 // - commentPersona: a pessoa de um comentario do console. Com `personaId`, a da lista (a copia dela: o nome, o papel e
 //   a foto); sem ela, a pessoa nova, que entra na lista (D76: "a nova entra na lista ao enviar ou guardar"). No banco
 //   sem a 202611140001 nao ha lista: o comentario segue com o Nome, o papel e a foto enviados, como antes, sem pessoa;
@@ -65,8 +67,8 @@ export async function withPersonaTable<T>(work: () => Promise<T>, message: strin
 export type CommentPersona = { avatarPath: string | null; id: string | null; name: string; role: PersonaRole };
 
 /**
- * A pessoa de um comentario do console (D76). Com `personaId`, a da lista deste webinario (a que sumiu ou e de outro
- * webinario: erro no campo); sem ela, a nova pessoa (o nome repetido: erro no campo Nome), que entra na lista. No banco
+ * A pessoa de um comentario do console (D76). Com `personaId`, a da lista da escola (a que sumiu: erro no campo); sem
+ * ela, a nova pessoa (o nome repetido: erro no campo Nome), que entra na lista com este webinario de origem. No banco
  * sem a lista, a copia enviada, sem pessoa (`listed` nulo e `id` nulo). `created`: a pessoa entrou na lista agora;
  * `listed`: a pessoa da lista (a escolhida ou a nova).
  */
@@ -76,7 +78,7 @@ export async function commentPersona(
 ): Promise<{ created: boolean; listed: WebinarPersona | null; persona: CommentPersona }> {
   if (input.personaId) {
     const row = await withPersonaTable(() => fetchPersonaRow(db, input.personaId as string));
-    if (!row || row.webinar_id !== input.webinarId) {
+    if (!row) {
       throw new WebinarFieldError("personaId", PERSONA_MISSING_MESSAGE);
     }
     const listed = personaFromRow(row);
@@ -84,7 +86,7 @@ export async function commentPersona(
   }
 
   const name = Array.from(personaCleanName(input.name)).slice(0, CHAT_LIMITS.personaName).join("");
-  const list = await listPersonas(db, input.webinarId);
+  const list = await listPersonas(db);
   if (!list.available) {
     return { created: false, listed: null, persona: { avatarPath: input.avatarPath, id: null, name, role: input.role } };
   }
@@ -100,15 +102,15 @@ export async function commentPersona(
 }
 
 /**
- * Cria ou edita uma pessoa da lista (D75): o nome unico no webinario (a conferencia aqui e o indice unico do banco), a
- * foto so da nossa pasta (o schema) e, na edicao, a copia nova em todos os itens do roteiro dela. Devolve a pessoa,
- * se e nova e quantos itens mudaram.
+ * Cria ou edita uma pessoa da lista da escola (D75 e D115): o nome unico na escola (a conferencia aqui e o indice unico
+ * do banco), a foto so da nossa pasta (o schema) e, na edicao, a copia nova em todos os itens do roteiro dela, de todos
+ * os webinarios. A pessoa nova guarda o webinario de origem. Devolve a pessoa, se e nova e quantos itens mudaram.
  */
 export async function savePersonaRow(
   db: WebinarsDb,
   input: { avatarPath: string | null; id: string | null; name: string; role: PersonaRole; userId: string; webinarId: string }
 ): Promise<{ created: boolean; items: number; persona: WebinarPersona }> {
-  const list = await listPersonas(db, input.webinarId);
+  const list = await listPersonas(db);
   if (!list.available) {
     throw new WebinarError(PERSONAS_MIGRATION_MESSAGE, 409);
   }
@@ -142,8 +144,9 @@ export async function savePersonaRow(
 }
 
 /**
- * Tira a pessoa da lista (D75): os itens do roteiro dela perdem a ligacao e ficam com a copia (o nome e a foto de agora).
- * Devolve a pessoa tirada e quantos itens a usavam; nula quando ela nao existe mais.
+ * Tira a pessoa da lista da escola (D75 e D115): os itens do roteiro dela, de todos os webinarios, perdem a ligacao e
+ * ficam com a copia (o nome e a foto de agora). Devolve a pessoa tirada e quantos itens a usavam; nula quando ela nao
+ * existe mais.
  */
 export async function removePersonaRow(db: WebinarsDb, id: string): Promise<{ items: number; persona: WebinarPersona } | null> {
   const row = await withPersonaTable(() => fetchPersonaRow(db, id));
@@ -163,17 +166,18 @@ const IMPORT_PERSONAS_BATCH = 500;
 
 /**
  * As pessoas das linhas de um CSV importado (correcao da revisao v8, achado 3): cada nome (pelo nome comparavel,
- * personaNameKey) vira a pessoa da lista com o mesmo nome, e os que faltam entram na lista com o papel da primeira linha
- * deles e sem foto. As novas vao em lotes; a corrida com outra importacao (o indice unico (webinar_id, name_key) recusa o
- * lote) grava uma por vez, e o nome que outra importacao ja gravou e reaproveitado (relido no fim). Devolve as pessoas
- * pelo nome comparavel e quantas entraram agora; no banco sem a 202611140001, `available` falso (sem lista, como antes).
+ * personaNameKey) vira a pessoa da lista da escola com o mesmo nome (D115: a criada em outro webinario tambem), e os que
+ * faltam entram na lista com o papel da primeira linha deles, sem foto e com este webinario de origem. As novas vao em
+ * lotes; a corrida com outra importacao (o indice unico do nome recusa o lote) grava uma por vez, e o nome que outra
+ * importacao ja gravou e reaproveitado (relido no fim). Devolve as pessoas pelo nome comparavel e quantas entraram
+ * agora; no banco sem a 202611140001, `available` falso (sem lista, como antes).
  */
 export async function importPersonas(
   db: WebinarsDb,
   input: { names: readonly { name: string; role: PersonaRole }[]; userId: string; webinarId: string }
 ): Promise<{ available: boolean; byKey: Map<string, WebinarPersona>; created: number }> {
   const byKey = new Map<string, WebinarPersona>();
-  const list = await listPersonas(db, input.webinarId);
+  const list = await listPersonas(db);
   if (!list.available) {
     return { available: false, byKey, created: 0 };
   }
@@ -215,7 +219,7 @@ export async function importPersonas(
     }
   }
   if (raced) {
-    for (const persona of (await listPersonas(db, input.webinarId)).personas) {
+    for (const persona of (await listPersonas(db)).personas) {
       const key = personaNameKey(persona.name);
       if (!byKey.has(key)) {
         byKey.set(key, persona);

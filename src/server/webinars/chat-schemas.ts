@@ -289,7 +289,8 @@ export type ScriptCommentInput = z.input<typeof scriptCommentSchema>;
 
 /**
  * Uma pessoa da lista "Pessoas que comentam" (11/11/2026, D75): o Nome (1 a 60, sem espacos sobrando), a Foto (so o
- * caminho da nossa pasta) e o Aparece como; com `id`, a edicao. O nome repetido no webinario e conferido no servidor.
+ * caminho da nossa pasta) e o Aparece como; com `id`, a edicao. O nome repetido na escola (a lista e uma so desde
+ * 13/11/2026, D115) e conferido no servidor; `webinarId` e o webinario de onde a equipe mexe (a origem da pessoa nova).
  */
 export const savePersonaSchema = z.object({
   avatarPath: personaAvatarPathSchema.nullable().default(null),
@@ -303,8 +304,11 @@ export const savePersonaSchema = z.object({
 });
 export type SavePersonaInput = z.input<typeof savePersonaSchema>;
 
-/** Remover uma pessoa da lista (os comentarios do roteiro dela ficam com a copia). */
-export const deletePersonaSchema = z.object({ id: uuidSchema });
+/**
+ * Remover uma pessoa da lista da escola (os comentarios do roteiro dela ficam com a copia); `webinarId` e o webinario de
+ * onde a equipe remove (D115).
+ */
+export const deletePersonaSchema = z.object({ id: uuidSchema, webinarId: uuidSchema });
 
 /**
  * A foto de quem comenta como o navegador manda (data URL WebP ja reduzido a 512 px e ate 100 KB): o teto do texto e o

@@ -154,6 +154,22 @@ export const WEBINAR_ADMIN_COPY = {
     importTruncated: "O arquivo tinha mais linhas que o limite; só as primeiras 5.000 entraram.",
     noRecording: "Cole o endereço do vídeo da Bunny no card Dados e salve antes de enviar a transcrição.",
     remove: "Remover mensagem",
+    /** As linhas fechadas (docs/30 D116): o que cada uma mostra antes de abrir. */
+    row: {
+      /** O numero da linha para o leitor de tela (o aberto ou fechado vem do aria-expanded). */
+      label: (index: number) => `Mensagem ${index}`,
+      manual: "Botão",
+      noPerson: "Sem pessoa",
+      noText: "Sem texto",
+      phrase: "Frase"
+    },
+    /** A busca do roteiro, a partir de 9 mensagens (docs/30 D116). */
+    search: {
+      count: (shown: number, total: number) => `Mostrando ${shown} de ${total} mensagens.`,
+      empty: (query: string) => `Nenhuma mensagem com “${query}”.`,
+      label: "Buscar no roteiro",
+      placeholder: "Nome ou texto da mensagem"
+    },
     resolve: "Resolver frases",
     resolved: (ready: number, unresolved: number) => `${ready} ${ready === 1 ? "frase achada" : "frases achadas"} na transcrição; ${unresolved} ${unresolved === 1 ? "não achada" : "não achadas"}.`,
     roles: { student: "Aluno", team: "Equipe" },

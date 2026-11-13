@@ -161,7 +161,7 @@ test("o aviso de migracao pendente dos webinarios aponta a migracao mais nova qu
   // depois desta (202610300002 a 202610300007, docs/21 §9.10) e a do Co-apresentador no chat depois delas (202611010001,
   // docs/21 §9.11), a do fio das Perguntas depois (202611100001, docs/21 §9.12), a da Na tela depois (202611100002, docs/21
   // §9.13), a das pessoas que comentam (202611140001) e a dos participantes simulados depois (202611140002, docs/21
-  // §9.14 e §9.15) a da rodada v9 (202611150001, docs/21 §9.16) a da rodada v10 (202611160001, docs/21 §9.17) e a da rodada v11 por ultimo (202611170001, docs/21 §9.18): o aviso aponta a mais nova, e aplicar ate ela inclui esta.
+  // §9.14 e §9.15) a da rodada v9 (202611150001, docs/21 §9.16) a da rodada v10 (202611160001, docs/21 §9.17), a da rodada v11 (202611170001, docs/21 §9.18) e a das pessoas da escola por ultimo (202611180001, docs/21 §9.21): o aviso aponta a mais nova, e aplicar ate ela inclui esta.
   const dir = new URL("supabase/migrations/", root);
   const newest = readdirSync(dir)
     .filter((name) => name.endsWith(".sql"))
@@ -170,7 +170,7 @@ test("o aviso de migracao pendente dos webinarios aponta a migracao mais nova qu
     .at(-1);
   const appMigration = read("src/server/webinars/db.ts").match(/WEBINARS_MIGRATION = "(\d+)"/)?.[1];
 
-  assert.equal(newest, "202611170001_webinars_v11.sql");
+  assert.equal(newest, "202611180001_webinars_pessoas_da_escola.sql");
   assert.equal(appMigration, newest.slice(0, 12), "WEBINARS_MIGRATION = o prefixo da migracao mais nova dos webinarios");
   assert.ok(appMigration >= "202610300001", "aplicar ate a do aviso inclui esta");
   assert.match(read("src/server/webinars/rows.ts"), /\baudience_restricts\b/, "a coluna desta migracao e lida pelo app");

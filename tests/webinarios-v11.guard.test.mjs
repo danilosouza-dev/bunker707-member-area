@@ -10,8 +10,8 @@ import { assertOnlyAdds, assertSections, assertServiceRoleOnly, cumulativeHash, 
 // - uma secao MCP, idempotente, so acrescenta (nenhum drop): uma tabela nova, so do service_role, com tres indices;
 //   nenhuma coluna nova nas tabelas que ja existem (as listas que o app sempre le nao mudam);
 // - a tabela some com a sessao, a pergunta, a resposta do fio e a conta; uma curtida por pessoa em cada alvo;
-// - as colunas que o app le existem na tabela, e o aviso de migracao pendente aponta esta (QUESTION_LIKES_MIGRATION),
-//   que e a mais nova dos webinarios (WEBINARS_MIGRATION).
+// - as colunas que o app le existem na tabela, e o aviso de migracao pendente aponta esta (QUESTION_LIKES_MIGRATION);
+//   WEBINARS_MIGRATION e esta ou uma mais nova (desde 13/11/2026, a 202611180001 das pessoas da escola).
 
 const MIGRATION = "supabase/migrations/202611170001_webinars_v11.sql";
 const likes = await import("../src/server/webinars/question-likes-model.ts");
@@ -68,12 +68,12 @@ test("as colunas que o app le existem na tabela; a leitura e tolerante e a escri
   assert.match(leitura, /if \(isPendingMigrationError\(failure\)\) \{\s*return \[\];/);
 });
 
-test("o aviso de migracao pendente aponta esta, e WEBINARS_MIGRATION e esta (a mais nova dos webinarios)", () => {
+test("o aviso de migracao pendente aponta esta, e WEBINARS_MIGRATION e esta ou uma mais nova", () => {
   assert.equal(likes.QUESTION_LIKES_MIGRATION, "202611170001");
-  assert.match(dbSource, /export const WEBINARS_MIGRATION = "202611170001";/);
+  // Desde 13/11/2026 a mais nova e a 202611180001 (as pessoas que comentam da escola, D115); a guarda dela confere o
+  // arquivo e o aviso geral.
+  assert.ok((dbSource.match(/export const WEBINARS_MIGRATION = "(\d+)";/)?.[1] ?? "") >= "202611170001", "o aviso geral aponta esta ou uma mais nova");
   for (const file of ["src/server/webinars/room-actions.ts", "src/server/webinars/room-writes.ts"]) {
     assert.match(read(file), /migracaoPendente\(QUESTION_LIKES_MIGRATION\)/, `${file}: curtir sem a migracao responde 409 com o aviso desta`);
   }
-  const webinarFiles = migrationFiles().filter((name) => /webinar/.test(name));
-  assert.equal(webinarFiles.at(-1), "202611170001_webinars_v11.sql", "nenhuma migracao de webinario mais nova sem o aviso atualizado");
 });

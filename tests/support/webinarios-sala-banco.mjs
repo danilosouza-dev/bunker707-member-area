@@ -24,8 +24,9 @@ export const iso = (time) => new Date(time).toISOString();
 
 export const UNIQUE = {
   webinar_chat_consents: [["user_id"]],
-  // O indice unico (webinar_id, name_key) da 202611140001: name_key e a coluna gerada (webinar_persona_name_key).
-  webinar_personas: [["webinar_id", "name_key"]],
+  // O indice unico do nome na escola (name_key) da 202611180001 (D115; o (webinar_id, name_key) da 202611140001 continua
+  // e nunca recusa nada que este aceite): name_key e a coluna gerada (webinar_persona_name_key).
+  webinar_personas: [["name_key"]],
   webinar_poll_answers: [["poll_id", "user_id"]],
   webinar_presence_samples: [["session_id", "user_id", "bucket"]],
   webinar_question_votes: [["question_id", "user_id"]]

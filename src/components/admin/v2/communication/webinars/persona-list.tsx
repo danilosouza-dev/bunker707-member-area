@@ -1,6 +1,6 @@
 "use client";
 
-import { MessageSquarePlus, Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, MessageSquarePlus, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { useId, useState, type RefObject } from "react";
 import { RoomCommentAvatar } from "@/components/member/webinars/room/room-comment";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,16 @@ import type { ActionResult } from "@/lib/action-result";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
 import { CHAT_LIMITS, type PersonaRole } from "@/server/webinars/model";
-import { PERSONAS_MIGRATION_ID, personaAvatarUrl, personaDraftErrors, sortPersonas, type PersonaDraft, type WebinarPersona } from "@/server/webinars/persona-model";
+import {
+  PERSONAS_MIGRATION_ID,
+  PERSONA_SEARCH_FROM,
+  matchesPersonaSearch,
+  personaAvatarUrl,
+  personaDraftErrors,
+  sortPersonas,
+  type PersonaDraft,
+  type WebinarPersona
+} from "@/server/webinars/persona-model";
 import type { UploadedPersonaPhoto } from "@/server/webinars/script-actions";
 import { AdminField, PillGroup, adminInputClass, fieldDescribedBy } from "../../form";
 import { ConfirmDialog } from "../../settings/kit";
@@ -18,11 +27,14 @@ import { PersonaPhotoField } from "./persona-photo-field";
 // Roteiro do editor e a entrada Roteiro do console dividem:
 // - PersonaForm: a pessoa (Nome, Foto (opcional) e Aparece como), para criar ou editar; o nome repetido na lista volta
 //   no campo Nome antes de enviar (personaDraftErrors) e de novo pelo servidor; enquanto a foto sobe, o salvar espera;
-// - PersonaList: a lista "Pessoas que comentam" do webinario, cada pessoa com a foto ou as iniciais, o nome, o Aparece
-//   como, quantos comentarios do roteiro a usam, e os botoes Editar e Remover (no console, tambem "Comentar como
-//   {nome}", que repete a pessoa no Novo comentário); "Nova pessoa" abre o formulario no fim; Remover pede confirmacao
-//   dizendo quantos comentarios do roteiro usam a pessoa (eles ficam com a copia, fora da lista). No banco sem a lista,
-//   so a frase da migracao;
+// - PersonaList: a lista "Pessoas que comentam" da escola (desde 13/11/2026 uma so para todo webinario, docs/30 D115),
+//   fechada numa linha com as primeiras fotos, o total e "Gerenciar pessoas" (D117: com 30 ou 100 pessoas, a lista
+//   aberta tomava a pagina). Aberta: a busca a partir de 7 pessoas (sem acento nem caixa), cada pessoa com a foto ou as
+//   iniciais, o nome, o Aparece como, quantos comentarios deste roteiro a usam, e os botoes Editar e Remover (no
+//   console, tambem "Comentar como {nome}", que repete a pessoa no Novo comentário), numa caixa com rolagem propria;
+//   "Nova pessoa" abre o formulario no fim (vazia, a linha fechada ja tem "Nova pessoa"); Remover pede confirmacao
+//   dizendo quantos comentarios deste roteiro usam a pessoa e que ela sai da lista de todos os webinarios (os
+//   comentarios ficam com a copia, fora da lista). No banco sem a lista, so a frase da migracao;
 // - PersonaPicker: o "Quem comenta" de um comentario: a escolha de uma pessoa da lista (o seletor nativo, com a foto ou
 //   as iniciais da escolhida ao lado), a opcao "Criar nova pessoa" e, no item ligado a ninguem, o nome que ele guarda
 //   "(fora da lista)". Nenhuma frase escrita aqui (WEBINAR_COPY.pessoas e WEBINAR_COPY.naTela.comentarios).
@@ -166,9 +178,13 @@ export type PersonaListProps = {
   busy?: boolean;
   /** O portal do console para a confirmacao (o dialogo fica dentro do console em tela cheia). */
   container?: RefObject<HTMLElement | null> | null;
-  /** O formulario aberto ao desenhar ("nova" ou o id da pessoa; o teste de tela). */
+  /** O formulario aberto ao desenhar ("nova" ou o id da pessoa; o teste de tela). A lista abre junto. */
   initialForm?: string | null;
-  /** A pessoa com a confirmacao do Remover aberta ao desenhar (o teste de tela). */
+  /** A lista aberta ao desenhar (o teste de tela). */
+  initialOpen?: boolean;
+  /** A busca ja escrita ao desenhar (o teste de tela). */
+  initialQuery?: string;
+  /** A pessoa com a confirmacao do Remover aberta ao desenhar (o teste de tela). A lista abre junto. */
   initialRemoving?: string | null;
   /** O banco tem a lista (a 202611140001); sem ela, so a frase da migracao. */
   available: boolean;
@@ -183,16 +199,25 @@ export type PersonaListProps = {
   readOnly?: boolean;
   /** O titulo "Pessoas que comentam" (o console ja o tem no cartao). */
   showTitle?: boolean;
-  /** Quantos comentarios do roteiro usam cada pessoa (pelo id). */
+  /** Quantos comentarios deste roteiro usam cada pessoa (pelo id). */
   usage: Readonly<Record<string, number>>;
 };
 
-/** A lista "Pessoas que comentam" do webinario (o editor e o console). */
+/** Quantas fotos a linha da lista fechada mostra antes do "mais N". */
+const SUMMARY_PHOTOS = 5;
+
+/**
+ * A lista "Pessoas que comentam" da escola (o editor e o console; D115 e D117): fechada, uma linha com as primeiras fotos,
+ * o total e Gerenciar pessoas (vazia, Nova pessoa); aberta, a busca (a partir de 7 pessoas), as pessoas numa caixa com
+ * rolagem propria e Nova pessoa no fim.
+ */
 export function PersonaList({
   available,
   busy = false,
   container = null,
   initialForm = null,
+  initialOpen = false,
+  initialQuery = "",
   initialRemoving = null,
   onCommentAs,
   onDelete,
@@ -204,11 +229,16 @@ export function PersonaList({
   showTitle = true,
   usage
 }: PersonaListProps) {
+  const listId = `persona-list-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const [form, setForm] = useState<string | null>(initialForm);
+  const [open, setOpen] = useState(initialOpen || initialForm !== null || initialRemoving !== null);
+  const [query, setQuery] = useState(initialQuery);
   const [removing, setRemoving] = useState<WebinarPersona | null>(() => personas.find((persona) => persona.id === initialRemoving) ?? null);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const sorted = sortPersonas(personas);
+  const shown = sorted.filter((persona) => matchesPersonaSearch([persona.name], query));
   const locked = busy || readOnly;
+  const hidden = Math.max(0, sorted.length - SUMMARY_PHOTOS);
 
   if (!available) {
     return (
@@ -226,85 +256,146 @@ export function PersonaList({
     return result;
   }
 
+  function toggle() {
+    if (open) {
+      setForm(null);
+    }
+    setOpen(!open);
+  }
+
   return (
-    <div className="flex min-w-0 flex-col gap-3" data-persona-list="">
+    <div className="flex min-w-0 flex-col gap-3" data-persona-panel="" data-persona-panel-open={open ? "true" : "false"}>
       <div className="flex min-w-0 flex-col gap-0.5">
         {showTitle ? <p className="text-sm leading-6 font-semibold text-[var(--text-primary)]">{PESSOAS.titulo}</p> : null}
         <p className="text-xs leading-5 text-[var(--text-secondary)]">{PESSOAS.descricao}</p>
       </div>
-      {sorted.length === 0 ? (
-        <p className="text-[13px] leading-5 text-[var(--text-secondary)]" data-persona-list-empty="">
-          {PESSOAS.vazia}
-        </p>
-      ) : (
-        <ul className="flex min-w-0 flex-col gap-2">
-          {sorted.map((persona) =>
-            form === persona.id ? (
-              <li key={persona.id}>
-                <PersonaForm busy={busy} editing={persona} onCancel={() => setForm(null)} onSave={save} onUpload={onUpload} origin={origin} personas={personas} />
-              </li>
-            ) : (
-              <li className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-[var(--border-subtle)] px-3 py-2" data-persona={persona.id} key={persona.id}>
+      {/* A linha da lista fechada: as primeiras fotos, o total da escola e o botao que abre a lista. */}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2" data-persona-summary="">
+        {sorted.length > 0 ? (
+          <span aria-hidden="true" className="flex shrink-0 items-center" data-persona-summary-photos="">
+            {sorted.slice(0, SUMMARY_PHOTOS).map((persona, index) => (
+              <span className={cn("rounded-full ring-2 ring-[var(--surface-1)]", index > 0 && "-ml-1.5")} key={persona.id}>
                 <PersonaAvatar origin={origin} persona={persona} />
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm leading-5 font-medium text-[var(--text-primary)]">{persona.name}</span>
-                  <span className="text-xs leading-5 text-[var(--text-secondary)]">
-                    {COMENTARIOS.apareceComo} {COMENTARIOS.papeis[persona.role]} · {PESSOAS.usos(usage[persona.id] ?? 0)}
-                  </span>
-                </div>
-                <div className="flex min-w-0 flex-wrap items-center gap-1">
-                  {onCommentAs ? (
-                    <Button className="h-8! px-2 text-[13px]" data-persona-comment-as="" disabled={busy} onClick={() => onCommentAs(persona)} type="button" variant="secondary">
-                      <MessageSquarePlus aria-hidden="true" className="size-4" />
-                      {PESSOAS.comentarComo(persona.name)}
-                    </Button>
-                  ) : null}
-                  {readOnly ? null : (
-                    <>
-                      <Button aria-label={PESSOAS.editarDe(persona.name)} className="h-8! px-2 text-[13px]" data-persona-edit="" disabled={locked} onClick={() => setForm(persona.id)} type="button" variant="ghost">
-                        <Pencil aria-hidden="true" className="size-4" />
-                        {PESSOAS.editar}
-                      </Button>
-                      <Button
-                        aria-label={PESSOAS.removerDe(persona.name)}
-                        className="h-8! px-2 text-[13px] text-[var(--text-secondary)]"
-                        data-persona-remove=""
-                        disabled={locked}
-                        onClick={() => {
-                          setRemoveError(null);
-                          setRemoving(persona);
-                        }}
-                        type="button"
-                        variant="ghost"
-                      >
-                        <Trash2 aria-hidden="true" className="size-4" />
-                        {PESSOAS.remover}
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </li>
-            )
-          )}
-        </ul>
-      )}
-      {form === "nova" ? (
-        <PersonaForm busy={busy} editing={null} onCancel={() => setForm(null)} onSave={save} onUpload={onUpload} origin={origin} personas={personas} />
-      ) : readOnly ? null : (
-        <div>
-          <Button className={cn("h-8! px-2 text-[13px]")} data-persona-new="" disabled={locked || form !== null} onClick={() => setForm("nova")} type="button" variant="secondary">
-            <Plus aria-hidden="true" className="size-4" />
-            {PESSOAS.novaPessoa}
+              </span>
+            ))}
+            {hidden > 0 ? <span className="ml-1.5 text-xs leading-5 text-[var(--text-secondary)]">{PESSOAS.maisFotos(hidden)}</span> : null}
+          </span>
+        ) : null}
+        <span className="min-w-0 flex-1 text-[13px] leading-5 text-[var(--text-secondary)]" data-persona-summary-count="">
+          {sorted.length === 0 ? PESSOAS.vazia : PESSOAS.resumo(sorted.length)}
+        </span>
+        {sorted.length === 0 && !open ? (
+          readOnly ? null : (
+            <Button
+              className="h-8! px-2 text-[13px]"
+              data-persona-new=""
+              disabled={locked}
+              onClick={() => {
+                setOpen(true);
+                setForm("nova");
+              }}
+              type="button"
+              variant="secondary"
+            >
+              <Plus aria-hidden="true" className="size-4" />
+              {PESSOAS.novaPessoa}
+            </Button>
+          )
+        ) : (
+          <Button aria-controls={listId} aria-expanded={open} className="h-8! px-2 text-[13px]" data-persona-toggle="" onClick={toggle} type="button" variant="secondary">
+            {open ? <ChevronUp aria-hidden="true" className="size-4" /> : <ChevronDown aria-hidden="true" className="size-4" />}
+            {open ? PESSOAS.fecharLista : PESSOAS.gerenciar}
           </Button>
+        )}
+      </div>
+
+      {open ? (
+        <div className="flex min-w-0 flex-col gap-3" data-persona-list="" id={listId}>
+          {sorted.length >= PERSONA_SEARCH_FROM ? (
+            <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
+              {PESSOAS.buscar}
+              <span className="relative flex min-w-0 items-center">
+                <Search aria-hidden="true" className="pointer-events-none absolute left-3 size-4 text-[var(--text-tertiary)]" />
+                <input className={cn(adminInputClass, "pl-9")} data-persona-search="" onChange={(event) => setQuery(event.target.value)} placeholder={PESSOAS.buscarDica} type="search" value={query} />
+              </span>
+            </label>
+          ) : null}
+          {sorted.length > 0 && shown.length === 0 ? (
+            <p className="text-[13px] leading-5 text-[var(--text-secondary)]" data-persona-search-empty="" role="status">
+              {PESSOAS.buscaVazia(query.trim())}
+            </p>
+          ) : null}
+          {shown.length > 0 ? (
+            <ul className="flex max-h-[min(50vh,420px)] min-w-0 flex-col gap-2 overflow-y-auto" data-persona-rows="">
+              {shown.map((persona) =>
+                form === persona.id ? (
+                  <li key={persona.id}>
+                    <PersonaForm busy={busy} editing={persona} onCancel={() => setForm(null)} onSave={save} onUpload={onUpload} origin={origin} personas={personas} />
+                  </li>
+                ) : (
+                  <li className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-[var(--border-subtle)] px-3 py-2" data-persona={persona.id} key={persona.id}>
+                    <PersonaAvatar origin={origin} persona={persona} />
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate text-sm leading-5 font-medium text-[var(--text-primary)]">{persona.name}</span>
+                      <span className="text-xs leading-5 text-[var(--text-secondary)]">
+                        {COMENTARIOS.apareceComo} {COMENTARIOS.papeis[persona.role]} · {PESSOAS.usos(usage[persona.id] ?? 0)}
+                      </span>
+                    </div>
+                    <div className="flex min-w-0 flex-wrap items-center gap-1">
+                      {onCommentAs ? (
+                        <Button className="h-8! px-2 text-[13px]" data-persona-comment-as="" disabled={busy} onClick={() => onCommentAs(persona)} type="button" variant="secondary">
+                          <MessageSquarePlus aria-hidden="true" className="size-4" />
+                          {PESSOAS.comentarComo(persona.name)}
+                        </Button>
+                      ) : null}
+                      {readOnly ? null : (
+                        <>
+                          <Button aria-label={PESSOAS.editarDe(persona.name)} className="h-8! px-2 text-[13px]" data-persona-edit="" disabled={locked} onClick={() => setForm(persona.id)} type="button" variant="ghost">
+                            <Pencil aria-hidden="true" className="size-4" />
+                            {PESSOAS.editar}
+                          </Button>
+                          <Button
+                            aria-label={PESSOAS.removerDe(persona.name)}
+                            className="h-8! px-2 text-[13px] text-[var(--text-secondary)]"
+                            data-persona-remove=""
+                            disabled={locked}
+                            onClick={() => {
+                              setRemoveError(null);
+                              setRemoving(persona);
+                            }}
+                            type="button"
+                            variant="ghost"
+                          >
+                            <Trash2 aria-hidden="true" className="size-4" />
+                            {PESSOAS.remover}
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </li>
+                )
+              )}
+            </ul>
+          ) : null}
+          {form === "nova" ? (
+            <PersonaForm busy={busy} editing={null} onCancel={() => setForm(null)} onSave={save} onUpload={onUpload} origin={origin} personas={personas} />
+          ) : readOnly ? null : (
+            <div>
+              <Button className="h-8! px-2 text-[13px]" data-persona-new="" disabled={locked || form !== null} onClick={() => setForm("nova")} type="button" variant="secondary">
+                <Plus aria-hidden="true" className="size-4" />
+                {PESSOAS.novaPessoa}
+              </Button>
+            </div>
+          )}
         </div>
-      )}
+      ) : null}
 
       <ConfirmDialog
         busy={busy}
         cancelLabel={PESSOAS.cancelar}
         confirmLabel={PESSOAS.confirmarRemover.botao}
         container={container ?? undefined}
-        description={removing ? `${PESSOAS.confirmarRemover.texto(usage[removing.id] ?? 0)} ${PESSOAS.confirmarRemover.visto}` : undefined}
+        description={removing ? `${PESSOAS.confirmarRemover.texto(usage[removing.id] ?? 0)} ${PESSOAS.confirmarRemover.escola} ${PESSOAS.confirmarRemover.visto}` : undefined}
         destructive
         onConfirm={() => {
           const target = removing;
@@ -323,8 +414,8 @@ export function PersonaList({
             }
           });
         }}
-        onOpenChange={(open) => {
-          if (!open) {
+        onOpenChange={(next) => {
+          if (!next) {
             setRemoving(null);
             setRemoveError(null);
           }
