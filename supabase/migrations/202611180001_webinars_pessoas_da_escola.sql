@@ -18,7 +18,8 @@
 --   elas). O indice antigo (webinar_id, name_key) continua (a 202611140001 o usa no preenchimento) e nunca recusa nada
 --   que o novo aceite;
 -- - a lista fica parada enquanto junta (lock da tabela na secao 2, a mesma transacao do indice): nenhuma pessoa nova
---   entra entre juntar e criar o indice;
+--   entra entre juntar e criar o indice. A secao 2 inteira e um bloco `do $$` (um comando so, que junta tudo ou nada):
+--   o CLI do Supabase aplica cada comando fora de uma transacao, e o lock table pede uma;
 -- - os unicos `drop` sao o `drop not null` da origem e o da chave estrangeira trocada; o unico `delete` e o das
 --   repetidas. Nada de truncate, create policy nem alter policy; a tabela continua so do service_role. Duas secoes,
 --   cada uma pelo MCP do Supabase (execute_sql, uma por chamada, na ordem, as duas comecando com
@@ -60,68 +61,74 @@ comment on column public.webinar_personas.webinar_id is 'O webinario em que a pe
 
 set lock_timeout = '5s';
 
--- A lista parada ate o fim da transacao: nenhuma pessoa nova entre juntar e criar o indice.
-lock table public.webinar_personas in share row exclusive mode;
+-- Tudo num bloco so: o CLI do Supabase (o db push da producao e o db start dos testes) aplica cada comando fora de uma
+-- transacao, e o lock table so vale dentro de uma. O bloco e um comando so: junta tudo ou nada.
+do $$
+begin
+  -- A lista parada ate o fim da transacao: nenhuma pessoa nova entre juntar e criar o indice.
+  lock table public.webinar_personas in share row exclusive mode;
 
--- A foto: a que fica, sem foto, recebe a mais recente das repetidas que tem foto.
-with ranked as (
-  select p.id, p.avatar_path, p.updated_at, p.created_at,
-    first_value(p.id) over (partition by p.name_key order by p.updated_at desc, p.created_at desc, p.id) as survivor_id
-  from public.webinar_personas p
-),
-photo as (
-  select distinct on (r.survivor_id) r.survivor_id, r.avatar_path
+  -- A foto: a que fica, sem foto, recebe a mais recente das repetidas que tem foto.
+  with ranked as (
+    select p.id, p.avatar_path, p.updated_at, p.created_at,
+      first_value(p.id) over (partition by p.name_key order by p.updated_at desc, p.created_at desc, p.id) as survivor_id
+    from public.webinar_personas p
+  ),
+  photo as (
+    select distinct on (r.survivor_id) r.survivor_id, r.avatar_path
+    from ranked r
+    where r.avatar_path is not null
+    order by r.survivor_id, r.updated_at desc, r.created_at desc, r.id
+  )
+  update public.webinar_personas s
+  set avatar_path = photo.avatar_path
+  from photo
+  where s.id = photo.survivor_id
+    and s.avatar_path is null;
+
+  -- Os itens do roteiro das repetidas passam para a que fica.
+  with ranked as (
+    select p.id,
+      first_value(p.id) over (partition by p.name_key order by p.updated_at desc, p.created_at desc, p.id) as survivor_id
+    from public.webinar_personas p
+  )
+  update public.webinar_chat_script_items i
+  set persona_id = r.survivor_id
   from ranked r
-  where r.avatar_path is not null
-  order by r.survivor_id, r.updated_at desc, r.created_at desc, r.id
-)
-update public.webinar_personas s
-set avatar_path = photo.avatar_path
-from photo
-where s.id = photo.survivor_id
-  and s.avatar_path is null;
+  where i.persona_id = r.id
+    and r.id <> r.survivor_id;
 
--- Os itens do roteiro das repetidas passam para a que fica.
-with ranked as (
-  select p.id,
-    first_value(p.id) over (partition by p.name_key order by p.updated_at desc, p.created_at desc, p.id) as survivor_id
+  -- As perguntas simuladas das repetidas tambem (so a ligacao: a copia gravada nelas e o que a turma viu).
+  with ranked as (
+    select p.id,
+      first_value(p.id) over (partition by p.name_key order by p.updated_at desc, p.created_at desc, p.id) as survivor_id
+    from public.webinar_personas p
+  )
+  update public.webinar_questions q
+  set persona_id = r.survivor_id
+  from ranked r
+  where q.persona_id = r.id
+    and r.id <> r.survivor_id;
+
+  -- A pessoa e a fonte (D75): o item ligado fica com a copia dela (o nome, o papel e a foto).
+  update public.webinar_chat_script_items i
+  set persona_name = p.name, persona_role = p.role, persona_avatar_path = p.avatar_path
   from public.webinar_personas p
-)
-update public.webinar_chat_script_items i
-set persona_id = r.survivor_id
-from ranked r
-where i.persona_id = r.id
-  and r.id <> r.survivor_id;
+  where i.persona_id = p.id
+    and (i.persona_name, i.persona_role, i.persona_avatar_path) is distinct from (p.name, p.role, p.avatar_path);
 
--- As perguntas simuladas das repetidas tambem (so a ligacao: a copia gravada nelas e o que a turma viu).
-with ranked as (
-  select p.id,
-    first_value(p.id) over (partition by p.name_key order by p.updated_at desc, p.created_at desc, p.id) as survivor_id
-  from public.webinar_personas p
-)
-update public.webinar_questions q
-set persona_id = r.survivor_id
-from ranked r
-where q.persona_id = r.id
-  and r.id <> r.survivor_id;
+  -- As repetidas saem: nada mais aponta para elas.
+  with ranked as (
+    select p.id,
+      first_value(p.id) over (partition by p.name_key order by p.updated_at desc, p.created_at desc, p.id) as survivor_id
+    from public.webinar_personas p
+  )
+  delete from public.webinar_personas p
+  using ranked r
+  where p.id = r.id
+    and r.id <> r.survivor_id;
 
--- A pessoa e a fonte (D75): o item ligado fica com a copia dela (o nome, o papel e a foto).
-update public.webinar_chat_script_items i
-set persona_name = p.name, persona_role = p.role, persona_avatar_path = p.avatar_path
-from public.webinar_personas p
-where i.persona_id = p.id
-  and (i.persona_name, i.persona_role, i.persona_avatar_path) is distinct from (p.name, p.role, p.avatar_path);
-
--- As repetidas saem: nada mais aponta para elas.
-with ranked as (
-  select p.id,
-    first_value(p.id) over (partition by p.name_key order by p.updated_at desc, p.created_at desc, p.id) as survivor_id
-  from public.webinar_personas p
-)
-delete from public.webinar_personas p
-using ranked r
-where p.id = r.id
-  and r.id <> r.survivor_id;
-
--- O nome unico na escola.
-create unique index if not exists webinar_personas_school_name_idx on public.webinar_personas (name_key);
+  -- O nome unico na escola.
+  create unique index if not exists webinar_personas_school_name_idx on public.webinar_personas (name_key);
+end;
+$$;

@@ -1264,7 +1264,13 @@ select (select count(*) from pg_indexes where schemaname = 'public' and indexnam
 select count(*) from (select name_key from public.webinar_personas group by name_key having count(*) > 1) as repetidas; -- 0
 ```
 
-Estado em 13/11/2026: escrita e rodada duas vezes seguidas num Postgres 16 só com as tabelas que ela toca (três
+**A seção 2 é um bloco `do $$` só**: o CLI do Supabase (o `db push` do `migrate.sh` e o `db start` dos testes) aplica
+cada comando fora de uma transação, e o `lock table` que segura a lista enquanto junta só vale dentro de uma. A primeira
+versão tinha os comandos soltos; o CI da PR #186 pegou o erro (`LOCK TABLE can only be used in transaction blocks`) e o
+bloco resolveu: um comando só, que junta tudo ou nada. Pelo SQL Editor ou pelo `execute_sql`, a seção também vai inteira.
+
+Estado em 13/11/2026: escrita e rodada duas vezes seguidas num Postgres 16 só com as tabelas que ela toca, comando por
+comando e sem transação, como o CLI aplica (três
 "Adriano Souza" em webinários diferentes, uma sem foto e a mais nova: ficou uma pessoa, a mais nova, com a foto mais
 recente das outras; os itens das três lives passaram para ela com a cópia; a pergunta simulada também; a segunda vez
 não mudou nada; excluir o webinário de origem deixou a pessoa com a origem nula). A integração
