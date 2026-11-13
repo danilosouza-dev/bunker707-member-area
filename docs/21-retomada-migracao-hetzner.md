@@ -1287,6 +1287,28 @@ Pendente:
 3. Decidir, depois de algumas voltas, se a Storage Box continua (EUR 4,00 por mes) ou vai (os snapshots ficam).
 
 
+### 10.2 Execucao de 13/11/2026: o servidor de marketing ligado para o produtor conhecer o Mautic
+
+Com o ok do produtor no chat (13/11/2026: quer comecar a testar e usar o Mautic), depois de saber o custo (cerca de
+EUR 0,01 por hora; a etapa nao sobe sozinha num tipo mais caro):
+
+| Hora (UTC) | Etapa | Resultado |
+|---|---|---|
+| 12:24 a 12:26 | `restaurar` com `PAPEIS=marketing` (da `main`, execucao 129) | `bunker707-marketing` de volta do snapshot em cerca de 1 min; smoke verde: `/s/login` 200, `/mtc.js` 200, instalador fechado (403), `mautic-db` e `mautic` saudaveis, cron e worker rodando; commit no servidor `e7c7854` |
+
+O servidor de marketing fica **ligado** ate o produtor decidir guardar de novo (`snapshot` com
+`CONFIRMAR=apagar PAPEIS=marketing`). A senha do administrador e do produtor: ele a define pelo "Esqueci a senha" em
+`https://marketing.bunker707.com.br/s/login` (`docs/20` §8A.2).
+
+**Achado no mesmo dia, fora deste trabalho**: as 12:15 UTC uma etapa `jibri-up` pedida pelo app (sessao
+`a4fe4402-0a34-48b8-885c-d1ad95a18956`, execucao 128) falhou no passo 5: "O Jibri nao ficou HEALTHY em 5 min". O log do
+proprio gravador mostra o contrario do que a mensagem sugere: ele conectou no servidor C, autenticou, entrou na sala
+dos gravadores e respondeu `healthStatus=HEALTHY` ao healthcheck do container a cada 15 s; os pedidos do script (a
+cada 5 s, do host, em `127.0.0.1:2222`) nunca chegaram a ele. A limpeza funcionou: a maquina (cpx42) foi apagada e o
+app foi avisado (`state=unavailable`). Causa ainda nao encontrada; investigar pede um `jibri-up` com
+`MANTER_SE_FALHAR=1` e o ok do produtor (a maquina custa cerca de EUR 0,13 por hora).
+
+
 ## 11. Servidor do Emissor de licencas: `bunker707-licencas` (10/11/2026)
 
 **Decisao do produtor (10/11/2026, `docs/32` D39):** o Emissor e o Painel de licencas rodam num servidor so deles desde
