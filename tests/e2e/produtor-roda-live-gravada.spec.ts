@@ -174,8 +174,12 @@ test.describe("produtor", () => {
     await page.getByRole("button", { exact: true, name: WEBINAR_COPY.consoleV2.atualizar }).click();
     await expect(listaEscondida.getByText(nova)).toBeAttached({ timeout: 15_000 });
 
-    // De volta ao Chat: quem estava no fim volta ao fim, com a nova na vista.
-    await page.getByRole("tab", { exact: true, name: "Chat" }).click();
+    // Desde a rodada v12 (docs/30 D106) a aba Chat diz que chegou mensagem com ele fora da tela ("Chat 1").
+    const abaChat = page.locator("#console-tabbtn-chat");
+    await expect(abaChat).toHaveText("Chat 1");
+    // De volta ao Chat: quem estava no fim volta ao fim, com a nova na vista, e o numero some.
+    await abaChat.click();
+    await expect(abaChat).toHaveText("Chat");
     await expect(chat.getByText(nova)).toBeInViewport();
     expect(await chat.evaluate((lista) => lista.scrollTop + lista.clientHeight >= lista.scrollHeight - 1), "a lista no fim").toBe(true);
   });
