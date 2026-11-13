@@ -201,17 +201,15 @@ export function anonymousDisplayName(userId: string, webinarId: string): string 
   return `Aluno ${anonymousNumber(userId, webinarId)}`;
 }
 
-/** O que se sabe de quem escreveu, para a foto: a foto do perfil e se o aceite do chat esta em dia (author-photos.ts). */
-export type AuthorPhoto = { avatarUrl: string | null; consentCurrent: boolean };
+/** O que se sabe de quem escreveu, para a foto: a foto do perfil (author-photos.ts). */
+export type AuthorPhoto = { avatarUrl: string | null };
 
 /**
- * A foto do perfil que acompanha o que a pessoa escreveu na sala (docs/30 §8.5, aceite versao 2, decisao do produtor de
- * 10/11/2026): a da equipe sempre (e quem apresenta a live); a do aluno so com o aceite em dia (o texto da versao 2 diz
- * que a foto aparece para os outros alunos; quem aceitou a versao 1, ou aceitou com um modo antigo, fica com as
- * iniciais ate aceitar de novo) e nunca no que foi escrito como anonimo (a pergunta Anonima, ou o nome "Aluno {n}" de
- * quem participava como anonimo: a foto diria quem e). A equipe, no console, ve a foto do aluno sem depender do aceite
- * (ela ja ve o perfil no admin), mas nunca no anonimo. O Assistente nao tem pessoa. Sem foto, nulo: a tela desenha as
- * iniciais. Legado: desde 10/11/2026 (D64) nada novo e escrito como anonimo; a parte do anonimo vale para as linhas de
+ * A foto do perfil que acompanha o que a pessoa escreveu na sala (docs/30 §8.5; D62 de 10/11/2026, mudado pelo D115 de
+ * 13/11/2026): quem enviou a foto pelo Perfil aparece com ela, sempre, para a turma e para a equipe, com ou sem o aceite
+ * do chat; as iniciais so para quem nao tem foto. Nunca no que foi escrito como anonimo (a pergunta Anonima, ou o nome
+ * "Aluno {n}" de quem participava como anonimo: a foto diria quem e). O Assistente nao tem pessoa. Sem foto, nulo: a
+ * tela desenha as iniciais. Legado: desde 10/11/2026 (D64) nada novo e escrito como anonimo; a parte do anonimo vale para as linhas de
  * antes, que continuam com a promessa da epoca. O roteiro (adendo de 10/11/2026, R9, que muda o D62 so nisto): a
  * mensagem `scripted` mostra a foto de quem comenta quando a equipe pos uma (`personaAvatarUrl`, montada pela origem do
  * nosso Supabase); sem ela, as iniciais, para a turma e para a equipe.
@@ -225,6 +223,7 @@ export function authorPhotoUrl(input: {
   personaAvatarUrl?: string | null;
   photo: AuthorPhoto | null | undefined;
   source: ChatSource;
+  /** Quem olha (a turma ou a equipe no console): desde o D115 a foto e a mesma para os dois. */
   viewer: "student" | "team";
   webinarId: string;
 }): string | null {
@@ -242,7 +241,7 @@ export function authorPhotoUrl(input: {
   if ((input.source !== "audience" && input.source !== "original") || input.displayName === anonymousDisplayName(input.authorUserId, input.webinarId)) {
     return null;
   }
-  return input.viewer === "team" || input.photo?.consentCurrent ? url : null;
+  return url;
 }
 
 /**

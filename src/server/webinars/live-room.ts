@@ -6,7 +6,8 @@
 // messaging.write; nunca vindo do navegador). O aluno so entra na espera ou no ar e nunca removido (409 kicked) nem
 // banido (409 banned); a equipe tambem na Sessao de pratica (agendada). Sem WEBINAR_MEET_DOMAIN ou WEBINAR_JWT_SECRET:
 // 503 meet_unconfigured e a sala mostra "em breve". O nome no token e sempre o primeiro nome + inicial do sobrenome
-// (D64: nunca um apelido nem "Aluno {n}"), nunca o e-mail; sem avatar (dado pessoal a menos). O token
+// (D64: nunca um apelido nem "Aluno {n}"), nunca o e-mail; a foto enviada pelo Perfil vai sempre que existir (D115,
+// 13/11/2026: a miniatura de quem esta com a camera desligada mostra a foto, e as iniciais so sem ela). O token
 // nunca e guardado nem escrito em log; webinar_joined (so do aluno) sai uma vez por abertura (renovar o token nao
 // grava). Os sinais do iframe viram student_events so com codigos (roomEventRecord), no relogio do chat da live
 // (sessionOffsetMs).
@@ -92,6 +93,7 @@ export function liveTokenName(input: { grant: Pick<RoomGrant, "role">; identity:
   }
   return studentDisplayName(identity);
 }
+
 
 /* ------------------------------------------------------------------------------------------------
  * webinar_joined: uma vez por abertura
@@ -221,7 +223,9 @@ export async function issueJoinToken(input: IssueJoinTokenInput): Promise<IssueJ
     nowMs,
     room,
     secret: env.secret,
-    user: { id: userId, name: liveTokenName({ grant, identity }) }
+    // A foto do Perfil (roomPhotoUrl: so o arquivo enviado pela plataforma; um endereco de fora vira nulo), sempre que
+    // existir (D115). O mod_bunker_presence_guard do Prosody repassa aos outros so esta foto, a do token.
+    user: { avatarUrl: identity.avatarUrl, id: userId, name: liveTokenName({ grant, identity }) }
   };
   const expiresAtMs = Number(jitsiTokenClaims(tokenInput).exp) * 1000;
   const jwt = signJitsiToken(tokenInput);

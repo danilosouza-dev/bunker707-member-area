@@ -315,12 +315,12 @@ export async function postStudentChat(input: PostChatInput): Promise<PostChatRes
     questionId = question.id;
   }
 
-  // A minha mensagem ja sai com a minha foto (o aceite esta em dia: acabou de ser conferido ou gravado).
+  // A minha mensagem ja sai com a minha foto (D115: a foto do Perfil, sem depender do aceite).
   const message = chatMessageFromRow(row);
   const avatarUrl = authorPhotoUrl({
     authorUserId: userId,
     displayName: message.displayName,
-    photo: { avatarUrl: identity.avatarUrl, consentCurrent: true },
+    photo: { avatarUrl: identity.avatarUrl },
     source: "audience",
     viewer: "student",
     webinarId: webinar.id
@@ -512,7 +512,7 @@ export async function askStudentQuestion(input: AskQuestionInput): Promise<Quest
     anonymous: asked.anonymous,
     authorUserId: userId,
     displayName: asked.displayName,
-    photo: { avatarUrl: identity.avatarUrl, consentCurrent: true },
+    photo: { avatarUrl: identity.avatarUrl },
     source: "audience",
     viewer: "student",
     webinarId: webinar.id
@@ -588,7 +588,7 @@ export async function replyStudentQuestion(input: { body: Omit<QuestionReplyPost
     anonymous: inserted.anonymous,
     authorUserId: userId,
     displayName: inserted.displayName,
-    photo: { avatarUrl: identity.avatarUrl, consentCurrent: true },
+    photo: { avatarUrl: identity.avatarUrl },
     source: "audience",
     viewer: "student",
     webinarId: webinar.id

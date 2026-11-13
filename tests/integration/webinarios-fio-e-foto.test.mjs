@@ -6,12 +6,12 @@ import { LIVE_GRAVADA_NO_AR_DE_TESTE, limparWebinarios, seedEscolaDeTeste, seedL
 
 // A foto do perfil na sala e o fio das Perguntas (docs/30 §1.3, §2.4 e §8.5; decisoes do produtor de 10/11/2026) contra
 // o banco LOCAL de verdade, com a migracao 202611100001 aplicada:
-// - a foto: a minha mensagem ja sai com a minha foto; o outro aluno ve a foto de quem aceitou o texto de agora (versao
-//   2, que cita a foto) e as iniciais de quem aceitou o de antes; a mensagem da equipe leva a foto de quem escreveu; o
-//   console ve a foto do aluno sem depender do aceite;
+// - a foto (D115, 13/11/2026): a minha mensagem ja sai com a minha foto; o outro aluno ve a foto de quem a enviou pelo
+//   Perfil, com ou sem o aceite do chat (antes do D115, quem aceitou o texto de antes ficava com as iniciais); a
+//   mensagem da equipe leva a foto de quem escreveu; o console ve a mesma foto;
 // - sem anonimato e sem apelido (D64, 10/11/2026): o pedido de uma pagina antiga que ainda pede anonimo e recusado
 //   com 400 e nada e gravado; o aceite antigo com modo anonimo ou apelido, mesmo na versao de agora, conta como sem
-//   aceite (sem foto para os outros, 409 nas escritas) ate o aluno aceitar de novo, e ai grava first_name_initial;
+//   aceite (409 nas escritas; a foto aparece assim mesmo, D115) ate o aluno aceitar de novo, e ai grava first_name_initial;
 // - legado (linhas de antes de 10/11/2026, postas direto no banco): a mensagem gravada como "Aluno {n}" e a pergunta
 //   gravada como anonima continuam sem foto, nem para a equipe, e a resposta de quem perguntou herda o nome gravado;
 // - o fio: so quem perguntou responde (403 para o outro aluno) e so depois da resposta da equipe (409 antes); a
@@ -128,7 +128,7 @@ after(async () => {
   clearAuthorPhotoCache();
 });
 
-test("1. a foto no chat: a minha ja sai com a foto; o outro aluno ve a de quem aceitou o texto de agora; a pagina antiga que pede anonimo e recusada; a mensagem anonima de antes (legado) nunca leva foto; a equipe leva a dela", async () => {
+test("1. a foto no chat: a minha ja sai com a foto; o outro aluno ve a foto do Perfil de quem escreveu, com ou sem o aceite de agora (D115); a pagina antiga que pede anonimo e recusada; a mensagem anonima de antes (legado) nunca leva foto; a equipe leva a dela", async () => {
   actAs(aluna);
   const antes = await json(await sessionRoute.GET(pedido(`session?sessao=${sessaoId}`), contexto));
   assert.equal(antes.body.data.me.avatarUrl, FOTO.aluna, "a minha foto vai para o campo de escrever");
@@ -176,10 +176,10 @@ test("1. a foto no chat: a minha ja sai com a foto; o outro aluno ve a de quem a
   assert.equal(porTexto(paraOutro, "Bem-vindos!").avatarUrl, FOTO.produtor, "a equipe com a foto dela");
 
   const paraAluna = await chatDe(aluna);
-  assert.equal(porTexto(paraAluna, "Cheguei").avatarUrl, null, "quem aceitou o texto de antes fica com as iniciais para os outros alunos");
+  assert.equal(porTexto(paraAluna, "Cheguei").avatarUrl, FOTO.outro, "quem aceitou o texto de antes aparece com a foto do Perfil (D115)");
   assert.equal(porTexto(paraAluna, "Pergunto sem aparecer").avatarUrl, null, "a anonima de antes sem foto ate para quem escreveu");
 
-  // O console: a equipe ve a foto do aluno sem depender do aceite, mas nunca no anonimo.
+  // O console: a mesma foto, nunca no anonimo.
   const console_ = await retrato();
   assert.equal(porTexto(console_.messages, "Cheguei").avatarUrl, FOTO.outro);
   assert.equal(porTexto(console_.messages, "Oi, pessoal!").avatarUrl, FOTO.aluna);
@@ -187,7 +187,7 @@ test("1. a foto no chat: a minha ja sai com a foto; o outro aluno ve a de quem a
   assert.equal(porTexto(console_.messages, "Bem-vindos!").avatarUrl, FOTO.produtor);
 });
 
-test("1b. D64, o aceite antigo com anonimo ou apelido na versao de agora conta como sem aceite: sem foto para os outros, consented falso, 409 nas escritas; aceitar de novo grava first_name_initial sem apelido e a foto aparece", async () => {
+test("1b. D64, o aceite antigo com anonimo ou apelido na versao de agora conta como sem aceite: consented falso, 409 nas escritas, e a foto do Perfil aparece assim mesmo (D115); aceitar de novo grava first_name_initial sem apelido", async () => {
   for (const [modo, apelido] of [
     ["anonymous", null],
     ["nickname", "Apelido Antigo"]
@@ -200,7 +200,7 @@ test("1b. D64, o aceite antigo com anonimo ou apelido na versao de agora conta c
     clearAuthorPhotoCache();
 
     const porTexto = (lista, texto) => lista.find((item) => item.body === texto);
-    assert.equal(porTexto(await chatDe(aluna), "Cheguei").avatarUrl, null, `${modo}: sem o aceite em dia, a foto nao aparece para os outros alunos`);
+    assert.equal(porTexto(await chatDe(aluna), "Cheguei").avatarUrl, FOTO.outro, `${modo}: sem o aceite em dia, a foto do Perfil aparece para os outros alunos (D115)`);
     actAs(outro);
     const sessao = await json(await sessionRoute.GET(pedido(`session?sessao=${sessaoId}`), contexto));
     // Sem aceite, a caixa do aceite de novo; o proprio nome e a propria foto ja vem para o avatar do campo (D82), nunca o
@@ -228,7 +228,7 @@ test("1b. D64, o aceite antigo com anonimo ou apelido na versao de agora conta c
     const depois = unwrap(await db.from("webinar_chat_consents").select("consent_version, display_mode, nickname, revoked_at").eq("user_id", outro.id).single(), "Lendo o aceite depois");
     assert.deepEqual(depois, { consent_version: CHAT_CONSENT_VERSION, display_mode: "first_name_initial", nickname: null, revoked_at: null });
     const paraAluna = await chatDe(aluna);
-    assert.equal(porTexto(paraAluna, `Aceitei de novo (${modo})`).avatarUrl, FOTO.outro, `${modo}: com o aceite de agora, a foto aparece para os outros alunos`);
+    assert.equal(porTexto(paraAluna, `Aceitei de novo (${modo})`).avatarUrl, FOTO.outro, `${modo}: com o aceite de agora, a mesma foto para os outros alunos`);
     assert.equal(porTexto(paraAluna, `Sem aceitar (${modo})`), undefined, "a recusada nao foi gravada");
     resetRoomLimits();
   }
