@@ -1295,13 +1295,16 @@ EUR 0,01 por hora; a etapa nao sobe sozinha num tipo mais caro):
 | Hora (UTC) | Etapa | Resultado |
 |---|---|---|
 | 12:24 a 12:26 | `restaurar` com `PAPEIS=marketing` (da `main`, execucao 129) | `bunker707-marketing` de volta do snapshot em cerca de 1 min; smoke verde: `/s/login` 200, `/mtc.js` 200, instalador fechado (403), `mautic-db` e `mautic` saudaveis, cron e worker rodando; commit no servidor `e7c7854` |
+| 12:48 a 12:50 | `snapshot` com `CONFIRMAR=apagar PAPEIS=marketing` (da `main`, execucao 131), a pedido do produtor depois de entrar e conhecer o Mautic | backup novo as 12:49:28; desligado pelo sistema; snapshot `455754313` (3,13 GB) pronto; servidor e DNS apagados; o snapshot mais velho (`451736382`) saiu, ficam os 2 mais novos |
 
-O servidor de marketing fica **ligado** ate o produtor decidir guardar de novo (`snapshot` com
-`CONFIRMAR=apagar PAPEIS=marketing`). A senha do administrador e do produtor: ele a define pelo "Esqueci a senha" em
-`https://marketing.bunker707.com.br/s/login` (`docs/20` §8A.2).
+O servidor de marketing ficou ligado cerca de 26 minutos e voltou a ficar **guardado**. O produtor entrou e definiu a
+propria senha (pelo "Esqueci a senha", `docs/20` §8A.2): ela esta no snapshot novo. Estado ao fim: 6 snapshots
+protegidos (dois de cada papel), 24,19 GB, cerca de EUR 0,35 por mes. Para usar de novo: `restaurar` com
+`PAPEIS=marketing`, com o ok do produtor.
 
 **Achado no mesmo dia, fora deste trabalho**: as 12:15 UTC uma etapa `jibri-up` pedida pelo app (sessao
-`a4fe4402-0a34-48b8-885c-d1ad95a18956`, execucao 128) falhou no passo 5: "O Jibri nao ficou HEALTHY em 5 min". O log do
+`a4fe4402-0a34-48b8-885c-d1ad95a18956`, execucao 128) falhou no passo 5: "O Jibri nao ficou HEALTHY em 5 min"; as 12:34
+outra `jibri-up` (execucao 130) falhou do mesmo jeito, em 8 minutos. O log do
 proprio gravador mostra o contrario do que a mensagem sugere: ele conectou no servidor C, autenticou, entrou na sala
 dos gravadores e respondeu `healthStatus=HEALTHY` ao healthcheck do container a cada 15 s; os pedidos do script (a
 cada 5 s, do host, em `127.0.0.1:2222`) nunca chegaram a ele. A limpeza funcionou: a maquina (cpx42) foi apagada e o
