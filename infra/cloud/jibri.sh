@@ -30,7 +30,12 @@ case "$action" in up|down|exec) ;; *) die "uso: jibri.sh up|down|exec" ;; esac
 JIBRI_FALLBACK_TYPES="${JIBRI_FALLBACK_TYPES:-ccx23 cpx32}"
 JIBRI_RECORDING_RESOLUTION="${JIBRI_RECORDING_RESOLUTION:-1920x1080}"
 JITSI_DIR="$REPO_ROOT/infra/jitsi"
+# A saude e perguntada DENTRO do container. O Jibri so escuta a API HTTP no 127.0.0.1 do proprio container (o padrao
+# dele: jibri.api.http.external-api-host = "127.0.0.1", e a imagem nao tem variavel para mudar), entao uma porta
+# publicada no host nunca responde. Em 13/11/2026 o jibri-up perguntava pelo host: o gravador ficava HEALTHY em 3 s,
+# a espera nao via, desistia em 5 min e apagava a maquina (duas vezes no mesmo dia, o app recebeu `unavailable`).
 HEALTH_URL="http://127.0.0.1:2222/jibri/api/v1.0/health"
+HEALTH_CMD="docker compose exec -T jibri curl -fsS --max-time 5 '$HEALTH_URL'"
 
 valid_sessao() {
     printf '%s' "$1" | grep -qE '^[a-z0-9][a-z0-9-]{3,47}$' || die "SESSAO invalida: '$1' (o id da sessao: letras minusculas, numeros e hifens, de 4 a 48 caracteres)."
@@ -208,11 +213,15 @@ up() {
     rsh "$target" "cd '$JIBRI_REMOTE_DIR' && docker compose up -d"
     local healthy="" i out=""
     for i in $(seq 60); do
-        out=$(rsh "$target" "curl -fsS --max-time 5 '$HEALTH_URL' 2>/dev/null" || true)
+        out=$(rsh "$target" "cd '$JIBRI_REMOTE_DIR' && $HEALTH_CMD 2>/dev/null" || true)
         case "$out" in *HEALTHY*) healthy=1; break ;; esac
         sleep 5
     done
     if [ -z "$healthy" ]; then
+        # O que a pergunta respondeu por ultimo e o estado do container: sem isso a falha so mostrava o log do Jibri, que
+        # em 13/11/2026 dizia HEALTHY o tempo todo e nao explicava por que a espera nao via.
+        echo "  ultima resposta da saude: $(printf '%s' "${out:-(vazia)}" | tr -d '\n' | cut -c1-200)"
+        rsh "$target" "cd '$JIBRI_REMOTE_DIR' && docker compose ps --format '  {{.Name}}  {{.State}}  {{.Health}}'" || true
         rsh "$target" "cd '$JIBRI_REMOTE_DIR' && docker compose logs --no-color --tail 60 jibri" || true
         die "O Jibri nao ficou HEALTHY em 5 min. Conferir: a 5222 do $MEET_NAME aberta para $ip (firewall e ufw), as senhas do Jibri iguais as do .env do C, e (com MANTER_SE_FALHAR=1) 'exec-jibri' com 'bash jibri-status.sh'."
     fi

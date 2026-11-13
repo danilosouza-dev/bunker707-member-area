@@ -55,6 +55,33 @@ test("jibri-up troca a conexao SSH depois do cloud-init (o grupo docker passa a 
   assert.equal(regras5222(conta.hz()).length, 1, "a 5222 do C aberta para o gravador vivo");
 });
 
+// 13/11/2026: dois jibri-up seguidos criaram a maquina, o Jibri ficou HEALTHY em 3 s (o log dele mostrava), e a espera
+// desistiu em 5 min e apagou tudo. O Jibri so escuta a API no 127.0.0.1 do proprio container, e a espera perguntava pelo
+// host. A maquina de mentira responde como a de verdade: so quem pergunta por dentro do container recebe a saude.
+test("jibri-up pergunta a saude por dentro do container (docker compose exec), na pasta do gravador; pelo host a porta nunca responde", { skip }, () => {
+  const conta = contaComOC();
+  const result = conta.runScript("jibri.sh", envDoGravador(), ["up"]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const calls = conta.calls();
+  const alvo = `deploy@${conta.hz().servers.find((s) => s.name === GRAVADOR).public_net.ipv4.ip}`;
+  const perguntas = calls.filter((c) => c.tool === "ssh" && c.target === alvo && c.command.includes("/jibri/api/v1.0/health"));
+  assert.equal(perguntas.length, 1, "saudavel na primeira pergunta: uma so, sem esperar os 5 min");
+  assert.match(perguntas[0].command, /^cd '\/opt\/jibri' && docker compose exec -T jibri curl -fsS --max-time 5 'http:\/\/127\.0\.0\.1:2222\/jibri\/api\/v1\.0\/health'/);
+  assert.match(result.stdout, /saude: .*HEALTHY/);
+  assert.deepEqual(avisos(calls), ["ready"]);
+});
+
+test("jibri-up sem saude: a falha mostra a ultima resposta da pergunta e o estado do container antes do log do Jibri", { skip }, () => {
+  const conta = contaComOC();
+  const result = conta.runScript("jibri.sh", envDoGravador({ SSH_SHIM_UNHEALTHY: "1" }), ["up"]);
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /ultima resposta da saude: \(vazia\)/);
+  const calls = conta.calls();
+  const estado = sshIndex(calls, (c) => c.command.includes("docker compose ps --format"));
+  const registro = sshIndex(calls, (c) => c.command.includes("docker compose logs --no-color --tail 60 jibri"));
+  assert.ok(estado >= 0 && estado < registro, `o estado do container sai antes do log (${[estado, registro]})`);
+});
+
 test("jibri-up que falha depois de criar a maquina (Jibri sem saude, Docker sem resposta): apaga a maquina e o firewall dela, tira a 5222 do C e avisa unavailable", { skip }, () => {
   for (const [motivo, falha] of [["sem saude em 5 min", { SSH_SHIM_UNHEALTHY: "1" }], ["Docker sem resposta para o deploy", { SSH_SHIM_NO_DOCKER: "1" }], ["docker compose up recusado", { SSH_SHIM_COMPOSE_FAIL: "1" }]]) {
     const conta = contaComOC();

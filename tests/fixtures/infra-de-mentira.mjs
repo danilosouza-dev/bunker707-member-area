@@ -179,7 +179,10 @@ if (command.includes(".deployed-commit")) { console.log(process.env.SSH_SHIM_COM
 if (command.includes("docker info")) process.exit(flagOn("SSH_SHIM_NO_DOCKER") ? 1 : 0);
 if (command.includes("docker compose up -d") && flagOn("SSH_SHIM_COMPOSE_FAIL")) { process.stderr.write("permission denied while trying to connect to the docker API at unix:///var/run/docker.sock\n"); process.exit(1); }
 if (command.includes("/jibri/api/v1.0/health")) {
-  if (flagOn("SSH_SHIM_UNHEALTHY")) process.exit(7);
+  // Como na maquina de verdade: o Jibri so escuta a API no 127.0.0.1 do proprio container, entao o curl do host nao
+  // conecta (codigo 7); a saude so responde a quem pergunta por dentro, com docker compose exec (13/11/2026).
+  const porDentro = /docker compose (-f \S+ )?exec -T jibri curl /.test(command);
+  if (flagOn("SSH_SHIM_UNHEALTHY") || !porDentro) process.exit(7);
   console.log('{"status":{"busyStatus":"IDLE","health":{"healthStatus":"HEALTHY"}}}'); process.exit(0);
 }
 if (command.includes("-name '*.mp4'")) { if (process.env.SSH_SHIM_PENDING_MP4) console.log(process.env.SSH_SHIM_PENDING_MP4); process.exit(0); }

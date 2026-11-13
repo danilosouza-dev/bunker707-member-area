@@ -1271,6 +1271,31 @@ Pendente:
 2. (Corrigido em 04/11/2026.) O gravador que falha no meio do `jibri-up` e ficava ligado: a causa (SSH reaproveitado sem o grupo `docker`), a limpeza na falha e a devolucao do preparo abandonado pelo job (`docs/30` §6.7, `docs/20` §8B.5).
 3. Decidir, depois de algumas voltas, se a Storage Box continua (EUR 4,00 por mes) ou vai (os snapshots ficam).
 
+### 10.2 O gravador que nunca ficava pronto (13/11/2026)
+
+O produtor abriu uma live para testar a gravacao e o console ficou em "Preparando" ate cair na reserva. O que os
+registros do workflow mostram (sessao `a4fe4402-...`, as duas da `main` em `e801382`):
+
+| Hora (UTC) | Etapa | Resultado |
+|---|---|---|
+| 12:15 | `jibri-up` (pedido pelo app) | maquina cpx42 criada em fsn1 em 15 s, cloud-init em 1 min 45 s, o Jibri entrou na sala interna do Jicofo e respondeu `HEALTHY` 3 s depois de subir; a espera do passo 5 nao viu, desistiu em 5 min, apagou a maquina e avisou `unavailable` (12:23) |
+| 12:24 | `restaurar` | sem relacao com a falha |
+| 12:34 | `jibri-up` (pedido de novo) | igual: `HEALTHY` em 3 s no registro do Jibri, a espera desistiu, maquina apagada, `unavailable` (12:42) |
+
+Causa: o Jibri so escuta a API de saude no `127.0.0.1` do proprio container e a espera perguntava pela porta publicada
+na maquina. Nenhuma maquina ficou ligada: a limpeza de 04/11 apagou as duas, cada uma com cerca de 8 min de vida (a Hetzner
+cobra a hora comecada; o registro mostra EUR 0,1314 por hora do cpx42).
+Correcao na branch `claude/sweet-davinci-jzrysr`: a saude perguntada por dentro do container (`jibri.sh`,
+`jibri-status.sh`), nenhuma porta publicada, `JIBRI_SINGLE_USE_MODE=false` (com `0` o gravador nao voltaria a ficar
+livre depois da primeira gravacao) e a maquina de mentira dos testes respondendo como a de verdade. Detalhes no
+`docs/30` §6.7 e no `docs/20` §8B.5.
+
+Pendente: o primeiro `jibri-up` de verdade com a correcao. O app pede o `jibri-up` sempre da `main` (`INFRA_REF` em
+`src/server/webinars/recorder-dispatch.ts`), entao o **Preparar gravacao** do console so usa a correcao depois da
+promocao para a `main`; antes disso, o `jibri-up` pode ser disparado a mao desta branch, com o ok do produtor
+(EUR 0,13 por hora). Ate 13/11 nenhum `jibri-up` tinha chegado ao `ready`: o Gravar, o arquivo, o `finalize.sh`, a
+Bunny e o `uploaded` ainda nao rodaram de verdade.
+
 
 ## 11. Servidor do Emissor de licencas: `bunker707-licencas` (10/11/2026)
 

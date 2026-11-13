@@ -426,7 +426,7 @@ test("licenca e atribuicao ficam no repositorio, nao na tela: LICENSE-jitsi (Apa
   assert.match(plugin, /^-- Copia versionada de resources\/prosody-plugins\/mod_token_affiliation\.lua do Jitsi Meet/m);
 });
 
-test("compose do Jibri: um container, mesma tag, 2 GB de shm, 1080p a 30 quadros, finalize.sh montado e saude so em 127.0.0.1", () => {
+test("compose do Jibri: um container, mesma tag, 2 GB de shm, 1080p a 30 quadros, finalize.sh montado e a saude perguntada por dentro do container, sem porta publicada", () => {
   const services = composeServices(jibriCompose);
   assert.deepEqual([...services.keys()], ["jibri"]);
   const jibri = services.get("jibri");
@@ -438,10 +438,21 @@ test("compose do Jibri: um container, mesma tag, 2 GB de shm, 1080p a 30 quadros
   assert.match(jibri, /JIBRI_RECORDING_DIR: "\/storage\/recordings"/);
   assert.match(jibri, /JIBRI_RECORDING_RESOLUTION: "\$\{JIBRI_RECORDING_RESOLUTION:-1920x1080\}"/, "gravacao em 1080p (D26)");
   assert.match(jibri, /JIBRI_RECORDING_FRAMERATE: "\$\{JIBRI_RECORDING_FRAMERATE:-30\}"/);
-  assert.match(jibri, /JIBRI_SINGLE_USE_MODE: "\$\{JIBRI_SINGLE_USE_MODE:-0\}"/, "o host pode parar e gravar de novo na mesma live");
+  // false, nunca 0: a imagem escreve o valor cru em `single-use-mode = ...` do jibri.conf, o Jibri le a chave como
+  // booleano so quando a primeira gravacao termina, e com 0 a leitura falha e ele nao volta a ficar livre.
+  assert.match(jibri, /JIBRI_SINGLE_USE_MODE: "\$\{JIBRI_SINGLE_USE_MODE:-false\}"/, "o host pode parar e gravar de novo na mesma live");
+  assert.match(jibriEnvExample, /^JIBRI_SINGLE_USE_MODE=false$/m, "false ou true, nunca 0 ou 1");
   assert.match(jibri, /XMPP_SERVER: "\$\{XMPP_SERVER\}"/, "o servidor C entra pelo .env (IPv4 publico)");
-  const ports = [...jibri.matchAll(/^\s+- "([^"]+)"\s*$/gm)].map((m) => m[1]).filter((p) => /:\d+\}?"?$/.test(p) || /\}:\$\{/.test(p));
-  assert.deepEqual(ports, ["${JIBRI_HEALTH_BIND:-127.0.0.1}:${JIBRI_HTTP_API_EXTERNAL_PORT:-2222}:${JIBRI_HTTP_API_EXTERNAL_PORT:-2222}"], "so a API de saude, em 127.0.0.1");
+  // A saude e sempre perguntada dentro do container: o Jibri so escuta a API no 127.0.0.1 dele, entao uma porta
+  // publicada no host nunca responde (13/11/2026: o jibri-up desistia de um gravador saudavel).
+  assert.doesNotMatch(jibri, /^\s+ports:\s*$/m, "nenhuma porta publicada: a do host nunca respondia");
+  assert.doesNotMatch(jibriCompose + jibriEnvExample, /JIBRI_HEALTH_BIND/, "a variavel da porta publicada saiu junto");
+  assert.match(jibri, /test: \["CMD-SHELL", "curl -fsS http:\/\/127\.0\.0\.1:\$\{JIBRI_HTTP_API_EXTERNAL_PORT:-2222\}\/jibri\/api\/v1\.0\/health \| grep -q HEALTHY"\]/, "o healthcheck roda dentro do container");
+  assert.match(jibriSource, /^HEALTH_CMD="docker compose exec -T jibri curl -fsS --max-time 5 '\$HEALTH_URL'"$/m, "o jibri-up pergunta por dentro do container");
+  assert.match(jibriSource, /out=\$\(rsh "\$target" "cd '\$JIBRI_REMOTE_DIR' && \$HEALTH_CMD 2>\/dev\/null" \|\| true\)/);
+  assert.doesNotMatch(jibriSource, /rsh "\$target" "curl [^"]*HEALTH_URL/, "nunca o curl do host");
+  const jibriStatusSource = read(join(jitsiDir, "scripts", "jibri-status.sh"));
+  assert.match(jibriStatusSource, /health=\$\(docker compose -f "\$compose_file" exec -T jibri curl -fsS --max-time 10 "http:\/\/127\.0\.0\.1:\$port\/jibri\/api\/v1\.0\/health" 2>\/dev\/null \|\| true\)/, "o jibri-status.sh tambem");
   for (const key of ["SESSAO", "WEBINAR_RECORDER_WEBHOOK_URL", "WEBINAR_RECORDER_WEBHOOK_SECRET", "BUNNY_LIBRARY_ID", "BUNNY_API_KEY"]) {
     assert.match(jibri, new RegExp(`${key}: "\\$\\{${key}\\}"`), `${key} chega ao finalize.sh pelo ambiente do container`);
   }
