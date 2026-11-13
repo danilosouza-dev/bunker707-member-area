@@ -5,6 +5,8 @@
 # Mostra o container, a saude pela API HTTP do Jibri (127.0.0.1:2222/jibri/api/v1.0/health: ocupado ou
 # livre, saudavel ou nao), as gravacoes na maquina (MP4 e as marcas .uploaded / .failed do finalize.sh) e o
 # fim do finalize.log. Sai com erro se o Jibri nao estiver HEALTHY. Nunca imprime o .env.
+# A saude e perguntada DENTRO do container (docker compose exec): o Jibri so escuta a API no 127.0.0.1 do proprio
+# container, entao o curl do host nunca recebe resposta (13/11/2026, infra/cloud/jibri.sh).
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -euo pipefail
@@ -23,8 +25,8 @@ rec_dir="$base/volumes/storage/jibri/recordings"
 echo "==> Container"
 docker compose -f "$compose_file" ps --format '  {{.Name}}  {{.State}}  {{.Health}}  {{.Image}}' 2>/dev/null || echo "  (o compose nao respondeu)"
 
-echo "==> Saude (http://127.0.0.1:$port/jibri/api/v1.0/health)"
-health=$(curl -fsS --max-time 10 "http://127.0.0.1:$port/jibri/api/v1.0/health" 2>/dev/null || true)
+echo "==> Saude (dentro do container: http://127.0.0.1:$port/jibri/api/v1.0/health)"
+health=$(docker compose -f "$compose_file" exec -T jibri curl -fsS --max-time 10 "http://127.0.0.1:$port/jibri/api/v1.0/health" 2>/dev/null || true)
 busy=$(printf '%s' "$health" | sed -n 's/.*"busyStatus" *: *"\([A-Z_]*\)".*/\1/p')
 state=$(printf '%s' "$health" | sed -n 's/.*"healthStatus" *: *"\([A-Z_]*\)".*/\1/p')
 echo "  ocupado: ${busy:-?}   saude: ${state:-?}"
