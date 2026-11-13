@@ -39,8 +39,11 @@ export type ConsolePanelProps = {
   className: string;
   /** Com palco (a live), o X a partir de lg; sem palco, o painel nunca fecha. */
   closable: boolean;
-  /** Os numeros das abas (consoleTabCounts): as perguntas abertas e as maos levantadas; e o que esta na tela (a Na tela). */
-  counts: { maos: number; perguntas: number; tela?: number };
+  /**
+   * Os numeros das abas (consoleTabCounts): as perguntas abertas e as maos levantadas; o que esta na tela (a Na tela);
+   * e as mensagens novas do Chat enquanto ele nao esta na tela (D106: so na aba, nunca no cabecalho do proprio Chat).
+   */
+  counts: { chat?: number; maos: number; perguntas: number; tela?: number };
   /** As entradas do ⋯ desta sessao (consoleMoreEntriesFor), na ordem. */
   entries: readonly ConsoleMoreEntry[];
   /** O conteudo de cada entrada do ⋯. */
@@ -92,7 +95,12 @@ export function ConsolePanel({ className, closable, counts, entries, more, motio
           onSelect={(value) => onView({ tab: value })}
           open={open}
           tab={tab}
-          tabs={tabs.map((value) => ({ count: value === "perguntas" ? counts.perguntas : value === "maos" ? counts.maos : undefined, label: copy.abas[value], value }))}
+          tabs={tabs.map((value) => ({
+            // O Chat so leva numero com mensagens novas ("Chat 3"); as Perguntas e as Mãos sempre ("Perguntas 0").
+            count: value === "perguntas" ? counts.perguntas : value === "maos" ? counts.maos : value === "chat" && (counts.chat ?? 0) > 0 ? counts.chat : undefined,
+            label: copy.abas[value],
+            value
+          }))}
         />
         <ConsoleMoreMenu chosen={chosen} entries={entries} onChoose={(entry) => onView({ more: entry })} />
       </div>

@@ -1195,6 +1195,20 @@ terminou com sucesso. O visual novo dos cartões e dos diálogos do motor no ar 
 por quem fez a rodada: fica com o teste do produtor na `dev`. Uma mudança nova na folha pede outro `deploy-meet`, com
 outro ok do produtor.
 
+### 9.19 Rodada v12 dos webinários: sem migração (12/11/2026)
+
+A rodada v12 (`docs/30` D105 a D107; `docs/31` §17) não tem migração e não muda a folha do servidor de vídeo:
+
+- as miniaturas sem o **Embaixo** (D105) são só código da página;
+- o número de mensagens novas no **Chat** do console (D106) sai do retrato que o console já lê;
+- a chave **Mostrar quantas pessoas estão na sala** no console (D107) grava a mesma chave `showPresentCount` de
+  `webinars.room_settings` que o card **Sala** do editor já gravava (rodada v11, sem coluna nova).
+
+**Antes do merge na `dev`**: nada a aplicar no SQL Editor. **Produção (Hetzner)**: nada manual. **O servidor de vídeo**:
+nenhuma etapa `deploy-meet` é necessária para esta rodada.
+
+`WEBINARS_MIGRATION` continua apontando a `202611170001` (§9.18), a mais nova dos webinários.
+
 ## 10. Producao guardada em snapshot (03/11/2026)
 
 **Decisao do produtor (03/11/2026, no chat):** a producao na Hetzner so serve para a equipe testar; ninguem de fora a

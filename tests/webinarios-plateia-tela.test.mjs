@@ -178,16 +178,20 @@ test("o topo do console: os presentes sao o botao que abre os participantes simu
   assert.match(semControle, /<span class="tabular-nums" data-console-present="">1 presente · pico 1 · \+300 simulados<\/span>/);
 });
 
-test("a fiacao do console: o selo do palco e o do topo abrem a Presença com o controle no alto e o foco no titulo; o Aplicar vai por saveSimulatedAudience", () => {
+test("a fiacao do console: o selo do palco e o do topo abrem a Presença com a chave do numero de pessoas e o controle no alto e o foco no titulo; o Aplicar vai por saveSimulatedAudience", () => {
   const consoleSource = source("src/components/admin/v2/communication/webinars/session-console/session-console.tsx");
-  assert.equal(count(consoleSource, /onPresent=\{audience \? openAudience : undefined\}/g), 2, "o topo e o palco");
-  assert.match(consoleSource, /setPanelView\(\{ more: "presenca" \}\);[\s\S]*?document\.getElementById\(AUDIENCE_TITLE_ID\)/);
+  // Desde a rodada v12 (docs/30 D107) o selo abre a Presença sempre que ela existe; com participantes simulados, o nome
+  // do botao e o foco continuam neles.
+  assert.equal(count(consoleSource, /onPresent=\{presentOpens \? openAudience : undefined\}/g), 2, "o topo e o palco");
+  assert.match(consoleSource, /const presentOpenLabel = presentLabel \? \(audience \? plateiaCopy\.abrirControle\(presentLabel\) : v2Copy\.numeroDePessoas\.abrirPresenca\(presentLabel\)\) : undefined;/);
+  assert.match(consoleSource, /setPanelView\(\{ more: "presenca" \}\);[\s\S]*?document\.getElementById\(AUDIENCE_TITLE_ID\), document\.getElementById\(CONSOLE_PRESENT_COUNT_ID\)/);
   assert.match(consoleSource, /consoleMoreEntriesFor\(\{ audience: audience !== null,/);
   // Sem frase nem caixa no pedido (D86); desde a rodada v9, o pedido leva o "Variar sozinho" junto do numero (D90).
   assert.match(consoleSource, /saveSimulatedAudience\(\{ extra: input\.extra, sessionId, source: "console", vary: input\.vary \}\)/);
   assert.match(consoleSource, /<SimulationAudienceControl[\s\S]*?link=\{\{ href: `\$\{webinarAdminHref\(webinar\.id\)\}#webinar-card-simulacao`, label: plateiaCopy\.verNoEditor \}\}[\s\S]*?titleId=\{AUDIENCE_TITLE_ID\}/);
   const presenca = consoleSource.slice(consoleSource.indexOf("presenca:"), consoleSource.indexOf("tela:", consoleSource.indexOf("presenca:")));
   assert.ok(presenca.indexOf("<SimulationAudienceControl") < presenca.indexOf("<ConsolePresencePanel"), "os participantes simulados no alto da Presença");
+  assert.ok(presenca.indexOf("<ConsolePresentCount") < presenca.indexOf("<SimulationAudienceControl"), "antes deles, a chave do numero de pessoas");
   const stage = source("src/components/admin/v2/communication/webinars/session-console/console-stage.tsx");
   assert.match(stage, /className=\{cn\("pointer-events-auto rounded-full", ROOM_FOCUS\)\}\s*data-console-audience-open="stage"/, "a pilula do palco recebe o toque");
   const page = source("src/app/admin/(v2)/comunicacao/webinarios/[id]/sala/page.tsx");

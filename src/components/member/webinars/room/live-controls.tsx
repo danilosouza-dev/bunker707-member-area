@@ -97,10 +97,6 @@ export type LiveControlsProps = {
   /** O menu da Visão do vídeo aberto (pela sala: nunca junto com Reagir ou Configurações). */
   /** A escolha guardada das miniaturas. */
   thumbs?: RoomThumbs;
-  /** "Recarregar o vídeo agora" do menu das miniaturas (docs/30 D96). */
-  onReloadVideo?: () => void;
-  /** A troca entre Lateral e Embaixo que espera o video carregar de novo e nao sai sozinha. */
-  thumbsWait?: "locked" | "manual" | null;
   viewMenuOpen?: boolean;
   /** O que o video mostra agora (o ultimo tileViewChanged do motor): o nome do botao da Visão do vídeo. */
   viewShown?: RoomView;
@@ -209,12 +205,10 @@ export function LiveControls(props: LiveControlsProps) {
             key={item}
             onChoose={props.onView}
             onOpenChange={props.onViewMenu}
-            onReloadVideo={props.onReloadVideo}
             onThumbs={props.onThumbs}
             open={props.viewMenuOpen ?? false}
             shown={props.viewShown ?? "stage"}
             thumbs={props.thumbs}
-            thumbsWait={props.thumbsWait}
           />
         ) : null;
       case "settings":

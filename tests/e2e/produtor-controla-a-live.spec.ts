@@ -737,7 +737,7 @@ test.describe("produtor", () => {
     expect((await sessaoAoVivoNoBanco()).status).toBe("live");
   });
 
-  test("a coluna de miniaturas do Apresentador fica com o motor (docs/31 V2-A5): a 1280 px, com o iframe abaixo de 1013 px, o console do host nunca manda toggleFilmStrip, e os presentes em cima a direita descontam a coluna", async ({ page }) => {
+  test("a coluna de miniaturas do Apresentador fica com o motor (docs/31 V2-A5): a 1280 px, com o iframe abaixo de 1013 px, o console do host nunca manda toggleFilmStrip, e os presentes em cima a direita descontam a coluna; as miniaturas so tem Lateral e Esconder, por comando, sem recarregar o video (docs/30 D105)", async ({ page }) => {
     // A 1280 px o painel tem 360 px: o iframe fica com cerca de 872 px, abaixo dos 1013 px que a coluna pede.
     await page.setViewportSize({ height: 720, width: 1280 });
     const sala = await abrirConsole(page);
@@ -761,28 +761,27 @@ test.describe("produtor", () => {
     expect((await sala.comandos()).filter((item) => item.comando === "toggleFilmStrip")).toEqual([]);
     expect(await sala.montagens(), "o mesmo iframe").toBe(1);
 
-    // Embaixo (docs/30 D96): com o microfone, a camera e a tela de quem apresenta desligados, o console recarrega so o
-    // video, sozinho, e o video novo monta com a fileira embaixo; a base do palco sobe a altura dela.
+    // As miniaturas do console (rodada v12, docs/30 D105): so Lateral e Esconder. O Embaixo saiu, e com ele a recarga do
+    // video: nenhuma escolha tira quem apresenta da sala de video.
     const miniaturas = WEBINAR_COPY.salaV2.visao.miniaturas;
     await barraDe(page).getByRole("button", { exact: true, name: WEBINAR_COPY.consoleV2.visao.palcoParaTodos }).click();
-    await page.getByRole("menuitemradio", { exact: true, name: miniaturas.opcoes.bottom }).click();
-    await expect.poll(() => sala.montagens(), { timeout: 20_000 }).toBe(2);
-    // Quem esta no console saiu da sala de video antes de o video recarregar (D98: sem isso aparecia duas vezes): o
-    // pedido de saida foi para o video de antes (os comandos da sala falsa sao por montagem).
-    const saiuAntes = await page.evaluate((indice) => {
-      const sala = (window as unknown as { __salaFalsa?: { montagens: { comandos: { comando: string }[] }[] } }).__salaFalsa;
-      return sala?.montagens[indice]?.comandos.some((item) => item.comando === "hangup") ?? false;
-    }, 0);
-    expect(saiuAntes, "o hangup no video de antes").toBe(true);
-    await expect(palco.locator("[data-live-stage-reloading]")).toHaveText(miniaturas.mudando);
+    const grupo = page.getByRole("group", { name: miniaturas.rotulo });
+    await expect(grupo.getByRole("menuitemradio")).toHaveText([miniaturas.opcoes.side, miniaturas.opcoes.hidden]);
+    await expect(page.getByRole("menuitemradio", { exact: true, name: "Embaixo" })).toHaveCount(0);
+    // Esconder e Lateral de volta: por comando, no mesmo iframe.
+    let antes = (await sala.comandos()).length;
+    await grupo.getByRole("menuitemradio", { exact: true, name: miniaturas.opcoes.hidden }).click();
+    await sala.esperarComando("toggleFilmStrip", { depoisDe: antes });
+    await sala.disparar("filmstripDisplayChanged", { visible: false });
+    await barraDe(page).getByRole("button", { exact: true, name: WEBINAR_COPY.consoleV2.visao.palcoParaTodos }).click();
+    antes = (await sala.comandos()).length;
+    await page.getByRole("menuitemradio", { exact: true, name: miniaturas.opcoes.side }).click();
+    await sala.esperarComando("toggleFilmStrip", { depoisDe: antes });
+    await sala.disparar("filmstripDisplayChanged", { visible: true });
+    expect((await sala.comandos()).some((item) => item.comando === "hangup"), "nenhum hangup").toBe(false);
+    expect(await sala.montagens(), "o video nunca recarregou").toBe(1);
     await expect(palco.locator("[data-live-stage-left]")).toHaveCount(0);
-    const comFileira = await entrarComoApresentador(sala);
-    await expect(palco.locator("[data-live-stage-reloading]")).toHaveCount(0);
-    expect(comFileira.interfaceConfigOverwrite.VERTICAL_FILMSTRIP, "a fileira embaixo").toBe(false);
-    await expect.poll(() => palco.evaluate((elemento) => (elemento as HTMLElement).style.getPropertyValue("--room-video-bottom").trim())).toBe("144px");
-    await page.waitForTimeout(1_000);
-    expect(await sala.montagens(), "uma recarga so").toBe(2);
-    // A escolha e de quem esta no console: volta para Lateral, para os testes seguintes.
+    // A escolha e de quem esta no console: volta ao padrao, para os testes seguintes.
     await page.evaluate(() => window.localStorage.removeItem("bunker707:webinar-console-miniaturas"));
   });
 

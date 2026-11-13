@@ -7,7 +7,6 @@ import { ROOM_SETTINGS_POPOVER, RoomBar, RoomBarButton, RoomPanelToggle } from "
 import type { ConsoleBarItem } from "@/components/member/webinars/room/room-layout-model";
 import { RoomButton } from "@/components/member/webinars/room/room-ui";
 import { RoomViewMenu } from "@/components/member/webinars/room/room-view-menu";
-import { consoleThumbsReload } from "./live-room-panel";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { RoomThumbs } from "@/lib/webinar-room-prefs";
 import { cn } from "@/lib/utils";
@@ -86,10 +85,6 @@ export function ConsoleBar({ busyKey, canPublish, handle, handsCount, live: snap
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const { joined, room } = handle;
-  // A troca entre Lateral e Embaixo (docs/30 D96): com o microfone, a camera e a tela desligados o palco recarrega o
-  // video sozinho (console-stage.tsx); com algo no ar, o menu avisa e oferece Recarregar o vídeo agora.
-  const thumbsReload = consoleThumbsReload(handle, thumbs);
-  const thumbsWait = thumbsReload === "auto" ? null : thumbsReload;
   const notice = lobbyNotice({ lobby: handle.lobby, roomLocked: snapshot.roomLocked, status: session.status });
   const items = consoleBarItemsFor({ controls: handle.controls, knocking: room.knocking.length, lobbyNotice: notice, meetConfigured: handle.meetConfigured, role: handle.role, screenShare: handle.screenShare });
   const open = session.status === "waiting" || session.status === "live";
@@ -259,14 +254,12 @@ export function ConsoleBar({ busyKey, canPublish, handle, handsCount, live: snap
               }
               setViewMenuOpen(next);
             }}
-            onReloadVideo={handle.reloadVideo}
             onThumbs={onThumbs}
             open={viewMenuOpen}
             shown={room.viewShown}
             thumbs={thumbs}
             // Para quem apresenta, o Esconder sai tambem da gravacao (o seguir a visao leva ao gravador).
             thumbsNote={handle.role === "host" && thumbs === "hidden" ? WEBINAR_COPY.salaV2.visao.miniaturas.escondidasNaGravacao : null}
-            thumbsWait={thumbsWait}
           />
         );
       case "settings":

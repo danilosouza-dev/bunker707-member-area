@@ -61,11 +61,6 @@ export const LIVE_ROOM_RULES = {
   reconnectBaseMs: 2_000,
   /** Sem a entrada confirmada depois disto, a montagem conta como queda. */
   joinTimeoutMs: 30_000,
-  /**
-   * A troca das miniaturas pede a saida da sala de video antes de trocar o iframe (docs/30 D98): sem o aviso da saida
-   * depois disto, a troca segue assim mesmo.
-   */
-  reloadLeaveMs: 3_000,
   /** As ultimas mensagens em pilulas sobre o palco com o painel do chat fechado (docs/31 V2-8, tambem no computador). */
   overlayMessages: 2,
   /**
@@ -1454,15 +1449,16 @@ export function columnWanted(input: { frameWidth: number; row?: boolean; thumbs?
   return input.frameWidth >= (input.row ? FILMSTRIP_ROW_MIN_FRAME : FILMSTRIP_COLUMN_MIN_FRAME);
 }
 
-/* As miniaturas onde a pessoa escolheu (rodada v9, pedido do produtor de 12/11/2026; docs/30 D91). */
+/*
+ * As miniaturas onde a pessoa escolheu (rodada v9, pedido do produtor de 12/11/2026; docs/30 D91). Desde a rodada v12
+ * (docs/30 D105) a escolha e so Lateral ou Esconder, as duas por comando: a opcao Embaixo saiu porque o motor so troca
+ * coluna por fileira montando o video de novo, e isso tirava a pessoa da sala de video por alguns segundos. O que
+ * fica abaixo sobre a fileira e so a leitura do iframe montado com o layout `stage_bottom` do motor (docs/31 §3), que
+ * a sala nao pede mais.
+ */
 
 /** A menor largura do iframe em que a fileira de miniaturas embaixo aparece (abaixo dela, so o video grande). */
 export const FILMSTRIP_ROW_MIN_FRAME = 640;
-
-/** O layout que o iframe pede ao motor na montagem: a fileira embaixo so com "Embaixo"; senao, o Palco com a coluna. */
-export function thumbsLayout(thumbs: RoomThumbs): "stage" | "stage_bottom" {
-  return thumbs === "bottom" ? "stage_bottom" : "stage";
-}
 
 /**
  * O iframe de agora foi montado com a fileira embaixo? Lido do interfaceConfigOverwrite da montagem
@@ -1473,44 +1469,11 @@ export function mountedThumbsRow(mounted: Readonly<Record<string, unknown>> | nu
 }
 
 /**
- * A escolha so vale com o video carregado de novo: o motor decide coluna ou fileira na montagem, entao trocar entre
- * Lateral e Embaixo com o video ja na tela pede outra carga (thumbsReloadMode diz quem a faz). Esconder nunca espera (e
- * por comando), e sem iframe nao ha o que esperar (a proxima montagem ja leva a escolha).
- */
-export function thumbsPending(input: { row: boolean | null; thumbs: RoomThumbs }): boolean {
-  if (input.row === null || input.thumbs === "hidden") {
-    return false;
-  }
-  return (input.thumbs === "bottom") !== input.row;
-}
-
-/**
  * O toggleFilmStrip so quando o que a sala quer difere do que o motor mostra (o ultimo filmstripDisplayChanged): o
  * comando inverte a coluna, entao manda-lo com os dois iguais a tiraria (ou poria) por engano.
  */
 export function filmstripStep(input: { visible: boolean; wanted: boolean }): "toggle" | null {
   return input.wanted === input.visible ? null : "toggle";
-}
-
-/**
- * Quem recarrega o video para a troca entre Lateral e Embaixo valer (teste do produtor de 12/11/2026: "quando eu coloco
- * fileira embaixo, ela não funciona"; docs/30 D96). Nulo: nada a recarregar (sem troca pendente, ou fora da sala: a
- * proxima montagem ja leva a escolha).
- * - "auto": a pagina recarrega o video sozinha, na hora. So quando nada da pessoa esta no ar (o microfone, a camera e
- *   a tela desligados): ela sai e volta em segundos sem ninguem perceber.
- * - "manual": com algo dela no ar, recarregar desligaria o microfone e a camera no meio da fala; o menu avisa e
- *   oferece "Recarregar o vídeo agora".
- * - "locked": com a sala trancada (a sala de espera ligada), recarregar mandaria o aluno para a sala de espera; a
- *   troca fica para a proxima entrada. Quem apresenta nunca passa por ela (`locked` falso no console).
- */
-export function thumbsReloadMode(input: { joined: boolean; locked: boolean; onAir: boolean; pending: boolean }): "auto" | "locked" | "manual" | null {
-  if (!input.pending || !input.joined) {
-    return null;
-  }
-  if (input.locked) {
-    return "locked";
-  }
-  return input.onAir ? "manual" : "auto";
 }
 
 /**

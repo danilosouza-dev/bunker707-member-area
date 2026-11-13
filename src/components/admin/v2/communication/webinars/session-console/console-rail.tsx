@@ -14,7 +14,8 @@ import { useConsolePortal } from "./console-shell";
 // O trilho a direita do console (docs/31 §10), o RoomRail da sala com as abas e as entradas do console: so com palco (a
 // live) e so a partir de lg, uma coluna de 48 px a 16 px da borda direita, depois do painel. Cada item e um botao de
 // 48 x 64: o quadrado de 48 com raio 8 e o icone de 24, e o rotulo 10/16 embaixo (600 no item aberto). Os itens sao as
-// abas (Chat, Perguntas com o numero das abertas no contador vermelho, Mãos com o das maos levantadas, Pessoas) e
+// abas (Chat com o numero das mensagens novas de outras pessoas enquanto ele nao esta na tela, rodada v12, D106;
+// Perguntas com o numero das abertas no contador vermelho, Mãos com o das maos levantadas, Pessoas) e
 // depois as entradas da sessao (Na tela, Enquetes, Atendimento, Presença, Gravação; na gravada, Roteiro e Oferta), todos na tela
 // quando a altura do trilho comporta (ajuste do produtor de 10/11/2026). Numa janela baixa, o trilho mede a propria
 // altura (no navegador, antes de pintar e a cada mudanca) e o ultimo lugar vira o Mais, com o menu dos que nao couberam
@@ -49,8 +50,11 @@ const LABEL = "-mx-3 block max-w-[72px] truncate text-center text-[10px] leading
 /** Um item do trilho: a aba ou a entrada, pela chave (que da o id e o data-console-rail). */
 type RailItem = { count: number; key: ConsoleMoreEntry | ConsoleTab; label: string; view: ConsolePanelView };
 
-/** O numero do item para o leitor de tela: as maos levantadas, o que esta na tela (a Na tela) ou as perguntas abertas. */
+/** O numero do item para o leitor de tela: as mensagens novas, as maos levantadas, o que esta na tela (a Na tela) ou as perguntas abertas. */
 function railCountLabel(key: ConsoleMoreEntry | ConsoleTab, count: number): string {
+  if (key === "chat") {
+    return copy.trilho.mensagensNovas(count);
+  }
   return key === "maos" ? copy.trilho.maos(count) : key === "tela" ? WEBINAR_COPY.naTela.console.contador(count) : copy.trilho.abertas(count);
 }
 
@@ -77,8 +81,11 @@ export function visibleConsoleTabControl(doc: Document, key: ConsoleMoreEntry | 
 
 export type ConsoleRailProps = {
   className: string;
-  /** Os numeros das abas (consoleTabCounts): as perguntas abertas e as maos levantadas; e o que esta na tela (a Na tela). */
-  counts: { maos: number; perguntas: number; tela?: number };
+  /**
+   * Os numeros das abas (consoleTabCounts): as perguntas abertas e as maos levantadas; o que esta na tela (a Na tela);
+   * e as mensagens novas do Chat enquanto ele nao esta na tela (consoleChatNewCount, D106).
+   */
+  counts: { chat?: number; maos: number; perguntas: number; tela?: number };
   /** As entradas desta sessao (consoleMoreEntriesFor), na ordem, depois das abas. */
   entries: readonly ConsoleMoreEntry[];
   /** A altura do trilho antes da medida (o teste de tela); sem ela, todos os itens ate o navegador medir. */
@@ -116,7 +123,7 @@ export function ConsoleRail({ className, counts, entries, initialAvailable = nul
   }, []);
 
   const items: RailItem[] = [
-    ...tabs.map((tab) => ({ count: tab === "perguntas" ? counts.perguntas : tab === "maos" ? counts.maos : 0, key: tab, label: copy.abas[tab], view: { tab } })),
+    ...tabs.map((tab) => ({ count: tab === "perguntas" ? counts.perguntas : tab === "maos" ? counts.maos : tab === "chat" ? (counts.chat ?? 0) : 0, key: tab, label: copy.abas[tab], view: { tab } })),
     ...entries.map((more) => ({ count: more === "tela" ? (counts.tela ?? 0) : 0, key: more, label: copy.entradas[more], view: { more } }))
   ];
   const fit = consoleRailFit({ available, count: items.length });

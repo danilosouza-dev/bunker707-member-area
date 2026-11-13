@@ -42,7 +42,6 @@ import {
   screenBlocksRoom,
   stageColumnShown,
   stageRowShown,
-  thumbsLayout,
   stageNames,
   usesOurBar,
   viewMenuFocusLost,
@@ -327,6 +326,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const [cinemaOn, setCinemaOn] = useState(false);
   const [local, setLocal] = useState<LocalState>(NO_LOCAL);
   const [heartbeatPresent, setHeartbeatPresent] = useState<number | null>(null);
+  /** O ultimo sinal de 15 s disse que a equipe escondeu o numero de pessoas (nulo antes dele): vale sobre a sessao. */
+  const [heartbeatHidden, setHeartbeatHidden] = useState<boolean | null>(null);
   const reducedMotion = useRoomReducedMotion();
   const cinemaPreferred = useSyncExternalStore(subscribeNothing, readCinemaPreferred, () => false);
   const isIOS = useSyncExternalStore(subscribeNothing, readIOS, () => false);
@@ -335,11 +336,12 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const geometry = useStageGeometry(frameRef);
   const desktop = useSyncExternalStore(subscribeDesktop, readDesktop, () => false);
   const [theme, setTheme] = useRoomTheme();
-  // Onde a pessoa quer as miniaturas (rodada v9, docs/30 D91): Lateral, Embaixo ou Esconder, guardado no navegador.
+  // Onde a pessoa quer as miniaturas (rodada v9, docs/30 D91): Lateral ou Esconder (o Embaixo saiu na rodada v12, D105),
+  // guardado no navegador. As duas valem por comando, sem recarregar o video.
   const [thumbs, setThumbs] = useRoomThumbs();
-  // O tema e o layout que o iframe recebe na proxima montagem (os guardados ja valem no primeiro Entrar na sala): a
-  // fileira embaixo so com "Embaixo"; senao, o Palco com a coluna.
-  const look = useMemo<LiveEmbedLook>(() => ({ layout: thumbsLayout(thumbs), theme }), [theme, thumbs]);
+  // O tema que o iframe recebe na proxima montagem (o guardado ja vale no primeiro Entrar na sala), sempre no Palco com
+  // a coluna.
+  const look = useMemo<LiveEmbedLook>(() => ({ layout: "stage", theme }), [theme]);
 
   const info = liveInfoOf(session);
   const status = local.ended ? "ended" : info.status;
@@ -629,6 +631,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     onAccessLost: () => setLocal((previous) => (previous.unavailable ? previous : { ...previous, unavailable: true })),
     onAnswer: (answer) => {
       setHeartbeatPresent(answer.presentNow);
+      setHeartbeatHidden(typeof answer.presentHidden === "boolean" ? answer.presentHidden : null);
       if (answer.ended) {
         setLocal((previous) => (previous.ended ? previous : { ...previous, ended: true }));
       }
@@ -686,7 +689,10 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   // O numero de quem assiste some com a live encerrada; no palco ele e o selo ao lado do selo do momento (docs/31 §11.5).
   // Com a Simulacao (R7), o real mais a parte simulada daquele instante, como na gravada (o selo e a aba Participantes).
   // A equipe pode esconder dos alunos quantas pessoas estao na sala (docs/30 D102): sem numero no palco, no titulo e na aba.
-  const presentShown = phase === "ended" || session.presentHidden === true ? null : simulation.displayCount(presentNow, simulationOffsetMs);
+  // A chave muda tambem pelo console com a live no ar (D107): o ultimo sinal de 15 s diz se o numero esta escondido; antes
+  // dele (ou com o servidor de antes), a sessao.
+  const presentHidden = heartbeatHidden ?? session.presentHidden === true;
+  const presentShown = phase === "ended" || presentHidden ? null : simulation.displayCount(presentNow, simulationOffsetMs);
   const presentBadge = roomPresentBadge(presentShown);
   const metaLine = roomDateLine({ durationMinutes: session.webinar.durationMinutes, kind: "live", presenterName, scheduledAt: session.session.scheduledAt }).join(" · ");
   const mobileLine = roomMobileLine(presenterName);
@@ -1210,7 +1216,6 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               onEnter={room.enter}
               onRetry={room.retryNow}
               readOnly={readOnly}
-              reloading={room.reloading}
               replayHref={replayHref}
               screen={screen}
               sessionId={sessionId}
@@ -1312,7 +1317,6 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               onTogglePanel={togglePanel}
               onToggleReactions={toggleReactions}
               onToggleSettings={toggleSettings}
-              onReloadVideo={room.reloadVideo}
               onThumbs={setThumbs}
               onView={room.setView}
               onViewMenu={setViewMenu}
@@ -1339,7 +1343,6 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               soundOn={room.soundOn}
               videoOn={room.signals.videoOn}
               thumbs={thumbs}
-              thumbsWait={room.thumbsWait}
               viewMenuOpen={viewMenuShown}
               viewShown={room.viewShown}
             />

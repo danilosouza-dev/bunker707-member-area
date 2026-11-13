@@ -552,6 +552,11 @@ export type ConsoleSnapshot = {
   presence?: ConsolePresence | null;
   presentNow: number;
   /**
+   * Os alunos veem quantas pessoas estao na sala (`webinars.room_settings.showPresentCount`, docs/30 D102), relido a
+   * cada retrato: a chave do console (rodada v12, D107) mostra o que esta gravado. Ausente no retrato de antes: ligado.
+   */
+  showPresentCount?: boolean;
+  /**
    * As pessoas que comentam do webinario (11/11/2026, D75): a mesma lista do card Roteiro do editor, que o Roteiro do
    * console cria, edita, remove e escolhe. So com o roteiro e nunca no Replay; ausente ou `available` falso (o banco sem
    * a 202611140001), o "Novo comentário" segue com o Nome digitado.

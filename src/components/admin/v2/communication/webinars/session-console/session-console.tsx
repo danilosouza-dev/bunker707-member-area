@@ -3,7 +3,6 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePanelMotion } from "@/components/member/webinars/room/use-panel-motion";
-import { thumbsLayout } from "@/components/member/webinars/room/live-room-model";
 import { useConsoleAnswerAuthor, useConsolePanelOpen, useConsoleTheme, useConsoleThumbs } from "@/components/member/webinars/room/use-room-prefs";
 import { Button } from "@/components/ui/button";
 import type { ActionResult } from "@/lib/action-result";
@@ -82,6 +81,7 @@ import {
   sendTeamMessage,
   setQuestionStatus,
   setSessionChatMode,
+  setShowPresentCount,
   unpinPoll
 } from "@/server/webinars/room-actions";
 import { sessionDurationMs } from "@/server/webinars/room-model";
@@ -110,7 +110,7 @@ import { ConsoleRail, visibleConsoleTabControl } from "./console-rail";
 import { ConsolePeopleTab } from "./console-people-tab";
 import type { ConsolePollFormInput } from "./console-poll-form";
 import { ConsolePolls } from "./console-polls";
-import { ConsolePresencePanel } from "./console-presence";
+import { CONSOLE_PRESENT_COUNT_ID, ConsolePresencePanel, ConsolePresentCount } from "./console-presence";
 import { ConsoleQuestions, type ConsoleLikeInput } from "./console-questions";
 import { ConsoleScreen, consoleScreenCount } from "./console-screen";
 import type { ScreenItemSaveInput } from "./console-screen-form";
@@ -126,6 +126,7 @@ import { LiveBarredList, LivePersonMenuItems, livePersonMenuGroups, type PersonA
 import { LiveRecorder } from "./live-recorder";
 import { useLiveRoom } from "./live-room-panel";
 import { useConsoleLeaveGuard } from "./use-console-leave-guard";
+import { useConsoleChatNews } from "./use-console-chat-news";
 import { clearMessageTranslations } from "@/server/webinars/translation-actions";
 
 // O console da sessao (docs/30 §2.4; fase 2b): o seletor de sessoes, a fase pelo relogio do servidor (skew medido
@@ -189,8 +190,11 @@ import { clearMessageTranslations } from "@/server/webinars/translation-actions"
 
 const copy = WEBINAR_ADMIN_COPY.console;
 const plateiaCopy = WEBINAR_COPY.simulacao.plateia;
+const v2Copy = WEBINAR_COPY.consoleV2;
 /** O titulo do controle dos participantes simulados (o selo dos presentes leva o foco a ele). */
 const AUDIENCE_TITLE_ID = "console-audience-title";
+/** Sem retrato, nenhuma mensagem (a mesma lista vazia a cada renderizacao). */
+const NO_CHAT_MESSAGES: readonly ConsoleMessage[] = [];
 const liveCopy = WEBINAR_COPY.consoleAoVivo;
 const naTelaCopy = WEBINAR_COPY.naTela.console;
 const comentariosCopy = WEBINAR_COPY.naTela.comentarios;
@@ -249,10 +253,10 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   /** A aba ou a entrada do ⋯ escolhida no painel, so na memoria da pagina (o Chat ao abrir). */
   const [panelView, setPanelView] = useState<ConsolePanelView>({ tab: "chat" });
   // O tema do console vai ao iframe na montagem (no hash, para o CSS da instancia); trocar depois nao remonta a sala.
-  // Onde quem esta no console quer as miniaturas (rodada v9, docs/30 D91), guardado no navegador; a fileira embaixo
-  // entra no iframe na proxima montagem, como o tema.
+  // Onde quem esta no console quer as miniaturas (rodada v9, docs/30 D91), guardado no navegador: Lateral ou Esconder
+  // (o Embaixo saiu na rodada v12, D105), as duas por comando.
   const [thumbs, setThumbs] = useConsoleThumbs();
-  const look = useMemo<LiveEmbedLook>(() => ({ layout: thumbsLayout(thumbs), theme }), [theme, thumbs]);
+  const look = useMemo<LiveEmbedLook>(() => ({ layout: "stage", theme }), [theme]);
   const session = snapshot?.session ?? null;
   const sessionId = session?.id ?? null;
   const webinar = data.webinar;
@@ -889,18 +893,26 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     );
   }
 
-  /** O selo dos presentes (no palco da live e no topo): abre a Presença e leva o foco ao titulo dos participantes simulados. */
+  /**
+   * O selo dos presentes (no palco da live e no topo): abre a Presença e leva o foco ao titulo dos participantes
+   * simulados; sem eles, a chave "Mostrar quantas pessoas estão na sala" (rodada v12, docs/30 D107).
+   */
   function openAudience() {
     setPanelOpen(true);
     setPanelView({ more: "presenca" });
     window.requestAnimationFrame(() => {
-      const title = document.getElementById(AUDIENCE_TITLE_ID);
-      if (title && title.getClientRects().length > 0) {
-        title.focus();
-        return;
-      }
-      visibleConsoleTabControl(document, "presenca")?.focus();
+      const target = [document.getElementById(AUDIENCE_TITLE_ID), document.getElementById(CONSOLE_PRESENT_COUNT_ID)].find((element) => element && element.getClientRects().length > 0);
+      (target ?? visibleConsoleTabControl(document, "presenca"))?.focus();
     });
+  }
+
+  /** A chave do numero de pessoas no console (D107): grava no webinario; o retrato seguinte traz o que ficou. */
+  function showPresentCountNow(shown: boolean) {
+    if (!sessionId) {
+      return;
+    }
+
+    void run("present-count", () => setShowPresentCount({ sessionId, shown }), () => adminToast.success(shown ? v2Copy.numeroDePessoas.mostrando : v2Copy.numeroDePessoas.escondido));
   }
 
   async function confirmBan() {
@@ -988,7 +1000,13 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   const audienceOffsetMs = session ? simulationClockMs(session, nowMs) : Number.NaN;
   const shownView = consolePanelViewOf({ entries, tabs, view: panelView });
   const screen = snapshot?.screen ?? { active: [], items: [], pending: false, stats: {} };
-  const counts = { ...consoleTabCounts({ hands: live ? handRows(room.room, live.people).length : 0, questions: snapshot?.questions ?? [] }), tela: consoleScreenCount({ active: screen.active, comment: screen.comment ?? null, pinnedMessageId: snapshot?.pinnedMessageId ?? null }) };
+  // As mensagens novas do Chat enquanto ele nao esta na tela (rodada v12, docs/30 D106): o numero no item Chat do trilho.
+  const chatNew = useConsoleChatNews({ chatShown: panelShown && "tab" in shownView && shownView.tab === "chat", messages: snapshot?.messages ?? NO_CHAT_MESSAGES, sessionId, viewerId: currentUserId });
+  const counts = {
+    ...consoleTabCounts({ hands: live ? handRows(room.room, live.people).length : 0, questions: snapshot?.questions ?? [] }),
+    chat: chatNew,
+    tela: consoleScreenCount({ active: screen.active, comment: screen.comment ?? null, pinnedMessageId: snapshot?.pinnedMessageId ?? null })
+  };
   // A mao que sobe avisa quem esta no console, com o desenho da area (rodada v11, docs/30 D99): "Ana M. levantou a
   // mão." com Ver fila, que abre a aba Mãos. Um aviso por vez (o mesmo id troca no lugar); com a aba Mãos na tela, nada.
   const handList = live ? handRows(room.room, live.people) : [];
@@ -1019,7 +1037,19 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   const screenComment = screen.comment ?? null;
   const stageLabels = [...stageKinds.map((kind) => WEBINAR_COPY.naTela.tipos[kind]), ...(screenComment ? [WEBINAR_COPY.naTela.tipoComentario[screenComment.source]] : [])];
   // R7: a parte simulada do contador vem separada no fim ("· +300 simulados"), so para a equipe.
-  const presentLabel = session ? consolePresenceBadge({ peak: snapshot?.presence?.peak?.present ?? null, presentNow: snapshot?.presentNow ?? 0, simulated: snapshot?.simulatedNow ?? null }) : null;
+  // Os alunos veem o numero de pessoas (docs/30 D102)? Desligado, o selo do console termina em "só a equipe vê" (D107).
+  const presentShown = snapshot?.showPresentCount !== false;
+  const presentLabel = session
+    ? consolePresenceBadge({
+        hiddenFromStudents: session.kind !== "replay" && !presentShown,
+        peak: snapshot?.presence?.peak?.present ?? null,
+        presentNow: snapshot?.presentNow ?? 0,
+        simulated: snapshot?.simulatedNow ?? null
+      })
+    : null;
+  // O selo abre a Presença sempre que ela existe: os participantes simulados (D79) ou, sem eles, a chave do numero.
+  const presentOpens = entries.includes("presenca");
+  const presentOpenLabel = presentLabel ? (audience ? plateiaCopy.abrirControle(presentLabel) : v2Copy.numeroDePessoas.abrirPresenca(presentLabel)) : undefined;
   // O nome do apresentador da pagina (o perfil de quem apresenta, lido no servidor) para o selo de outro moderador no
   // video grande, como o aluno ve (docs/31 V2-A25), em todo console, inclusive no do proprio Apresentador.
   const presenterName = live ? (webinar.presenterName ?? null) : null;
@@ -1125,7 +1155,8 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
       onRefresh={() => void refresh("click")}
       onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
       poll={poll}
-      onPresent={audience ? openAudience : undefined}
+      onPresent={presentOpens ? openAudience : undefined}
+      presentOpenLabel={presentOpenLabel}
       presentLabel={presentLabel}
       presentNarrowOnly={live !== null}
       reading={reading}
@@ -1158,7 +1189,8 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                   handsCount={counts.maos}
                   live={live}
                   onHands={() => openPanel({ tab: "maos" })}
-                  onPresent={audience ? openAudience : undefined}
+                  onPresent={presentOpens ? openAudience : undefined}
+                  presentOpenLabel={presentOpenLabel}
                   presentLabel={presentLabel}
                   presenterName={presenterName}
                   screenLabel={stageLabels.length > 0 ? naTelaCopy.pilulaPalco(stageLabels) : null}
@@ -1265,8 +1297,12 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                 // docs/30 §2.4: a Presenca (pico, mensagens por minuto, curva dos ultimos 30 min), pela visao do relatorio em cache;
                 // no alto, desde 11/11/2026 (D79), os participantes simulados (tambem antes do comeco, so com eles).
                 presenca:
-                  snapshot.presence || audience ? (
+                  session.kind !== "replay" || snapshot.presence ? (
                     <div className="flex min-w-0 flex-col gap-4">
+                      {/* A chave do numero de pessoas (rodada v12, docs/30 D107): a mesma do card Sala do editor. */}
+                      {session.kind !== "replay" ? (
+                        <ConsolePresentCount busy={busyKey === "present-count"} canAct={canAct && permissions.canWrite} onChange={showPresentCountNow} shown={presentShown} />
+                      ) : null}
                       {audience ? (
                         <SimulationAudienceControl
                           audience={audience}

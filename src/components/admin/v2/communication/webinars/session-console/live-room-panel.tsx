@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type Dispatch, type RefObject } from "react";
 import { useJitsiDevices, type UseJitsiDevices } from "@/components/webinars/use-jitsi-devices";
-import { LIVE_ROOM_RULES, mountedThumbsRow, onStageParticipantOf, thumbsPending, thumbsReloadMode } from "@/components/member/webinars/room/live-room-model";
-import type { RoomThumbs } from "@/lib/webinar-room-prefs";
+import { mountedThumbsRow, onStageParticipantOf } from "@/components/member/webinars/room/live-room-model";
 import { useJitsiMeet, type JitsiMeetApi, type JitsiStatus } from "@/components/webinars/use-jitsi-meet";
 import { deviceEnvironmentOf, deviceSectionReady, deviceSettingsFor, type DeviceKind, type DeviceOption, type DeviceSettings } from "@/lib/jitsi-device-settings";
 import {
@@ -190,10 +189,6 @@ export type LiveRoomHandle = {
   /** A sala de espera que a situacao pede agora (o que o console manda com toggleLobby). */
   lobby: boolean;
   meetConfigured: boolean;
-  /** Recarrega o video para a troca entre Lateral e Embaixo valer, saindo da sala de video antes (docs/30 D98). */
-  reloadVideo: () => void;
-  /** O video recarrega por causa da troca das miniaturas. */
-  reloading: boolean;
   retry: () => void;
   role: ConsoleRoomRole;
   room: LiveRoomState;
@@ -218,8 +213,8 @@ export type LiveRoomHandle = {
    */
   syncFilmstrip: (input: { visible: boolean; wanted: boolean }) => void;
   /**
-   * O iframe de agora foi montado com a fileira de miniaturas embaixo (rodada v9, docs/30 D91): verdadeiro, falso (a
-   * coluna) ou nulo sem iframe. O motor decide na montagem; a troca entre Lateral e Embaixo espera a proxima carga.
+   * O iframe de agora foi montado com a fileira de miniaturas embaixo (o layout `stage_bottom` do motor): verdadeiro,
+   * falso (a coluna) ou nulo sem iframe. Desde a rodada v12 (docs/30 D105) o console nunca pede esse layout.
    */
   thumbsRow: boolean | null;
   /** Liga ou desliga a sala de espera agora (so manda quando muda). */
@@ -227,15 +222,6 @@ export type LiveRoomHandle = {
   testing: boolean;
   tokenError: TokenState["error"];
 };
-
-/**
- * Quem recarrega o video do console para a troca entre Lateral e Embaixo valer (docs/30 D96; thumbsReloadMode): a
- * pagina sozinha quando o microfone, a camera e a tela de quem esta no console estao desligados; senao, a pessoa, pelo
- * menu. No console ninguem passa pela sala de espera.
- */
-export function consoleThumbsReload(handle: Pick<LiveRoomHandle, "audioOn" | "joined" | "sharing" | "thumbsRow" | "videoOn">, thumbs: RoomThumbs): "auto" | "locked" | "manual" | null {
-  return thumbsReloadMode({ joined: handle.joined, locked: false, onAir: handle.audioOn || handle.videoOn || handle.sharing, pending: thumbsPending({ row: handle.thumbsRow, thumbs }) });
-}
 
 type UseLiveRoomInput = {
   canPublish: boolean;
@@ -328,9 +314,6 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
   const signalFrameRef = useRef<JitsiMeetApi | null>(null);
   /** O `filmstripVisible` de quando o ultimo toggleFilmStrip saiu (nulo: nenhum esperando a resposta do motor). */
   const filmstripSentRef = useRef<boolean | null>(null);
-  /** A saida pedida pela troca das miniaturas ainda nao foi avisada pelo iframe (reloadVideo): quem a solta. */
-  const reloadLeftRef = useRef<(() => void) | null>(null);
-  const [reloading, setReloading] = useState(false);
   const sessionId = session?.id ?? null;
   const status = session?.status ?? "scheduled";
   const meetConfigured = enabled && live?.meetConfigured === true && token.error !== "meet_unconfigured";
@@ -567,8 +550,6 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
         setVideoOn(false);
         setAudioOn(false);
         setSharing(false);
-        // A saida pedida pela troca das miniaturas chegou: o iframe novo ja pode montar.
-        reloadLeftRef.current?.();
       }
       // Os papeis de quem ja estava (o participantJoined nao traz o papel) e de quem compartilha sem papel lido.
       if (name === "videoConferenceJoined" || name === "participantJoined") {
@@ -580,7 +561,6 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
       // microfone sozinho a desliga) e quem compartilha a tela (o vigia tambem le daqui quem ja compartilhava). Cada
       // resposta so vale deste iframe e desta entrada.
       if (name === "videoConferenceJoined") {
-        setReloading(false);
         readFrame(
           (frame) => frame.isAudioMuted?.(),
           (muted) => setAudioOn(muted === false)
@@ -810,28 +790,6 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
   const hasToken = token.reply !== null;
   const retry = useCallback(() => (hasToken ? meetRetry() : setTokenAttempt((attempt) => attempt + 1)), [hasToken, meetRetry]);
 
-  // A troca entre Lateral e Embaixo recarrega o video (docs/30 D96). Antes de trocar o iframe, quem esta no console sai
-  // da sala de video (teste do produtor de 12/11/2026, D98): sem isso o servidor de video guardava a entrada de antes por
-  // cerca de um minuto e a pessoa aparecia duas vezes nas miniaturas de todos. O `hangup` avisa a saida; se o iframe
-  // nao responder, o prazo solta a troca.
-  const reloadVideo = useCallback(() => {
-    if (reloadLeftRef.current) {
-      return;
-    }
-    setReloading(true);
-    let timer = 0;
-    const done = () => {
-      window.clearTimeout(timer);
-      reloadLeftRef.current = null;
-      meetRetry();
-    };
-    timer = window.setTimeout(done, LIVE_ROOM_RULES.reloadLeaveMs);
-    reloadLeftRef.current = done;
-    if (!command("hangup")) {
-      done();
-    }
-  }, [command, meetRetry]);
-
   // Depois de gravado (setSelfUnmute): vale ja neste console; desligado, fecha o microfone da turma (micCloseCommands).
   const applySelfUnmute = useCallback(
     (allowed: boolean) => {
@@ -885,9 +843,6 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
     joined,
     lobby: wantedLobby,
     meetConfigured,
-    reloadVideo,
-    // O video recarrega por causa da troca das miniaturas: o palco diz isso no lugar do "Entrar na sala" da saida.
-    reloading: reloading && meet.status !== "joined" && meet.status !== "failed",
     retry,
     role,
     room,

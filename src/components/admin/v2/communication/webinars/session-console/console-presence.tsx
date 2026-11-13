@@ -1,6 +1,7 @@
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { consolePresenceMinuteLabel, type ConsolePresence } from "@/server/webinars/console-presence-model";
-import { SectionCard } from "../../../settings/kit";
+import { WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
+import { AdminSwitch, SectionCard } from "../../../settings/kit";
 
 // O painel Presenca do console (docs/30 §2.4): presentes agora (o balde atual, do retrato de 5 s), o pico da sessao, as
 // mensagens de alunos no ultimo minuto (com a media da janela) e a curva dos ultimos 30 minutos em barras (um minuto por
@@ -21,6 +22,34 @@ function Stat({ detail, label, value }: { detail?: string | null; label: string;
       <dd className="text-lg leading-6 font-semibold text-[var(--text-primary)] tabular-nums">{value}</dd>
       {detail ? <dd className="text-xs leading-4 text-[var(--text-tertiary)]">{detail}</dd> : null}
     </div>
+  );
+}
+
+/** A chave do numero de pessoas (o foco vai a ela quando o selo dos presentes abre a Presença sem participantes simulados). */
+export const CONSOLE_PRESENT_COUNT_ID = "console-present-count";
+
+/**
+ * A chave "Mostrar quantas pessoas estão na sala" no console (rodada v12, docs/30 D107), no alto da entrada Presença:
+ * a mesma do card Sala do editor (D102), com o mesmo rotulo e a mesma frase. Ligada, o aluno ve o numero no topo da
+ * sala e na aba Participantes; desligada, o numero nem chega a sala dele, e o console continua mostrando. Vale para
+ * todas as sessoes do webinario. Enquanto grava, a chave espera (`busy`); sem poder agir (a sessao encerrada), desligada.
+ */
+export function ConsolePresentCount({ busy, canAct, onChange, shown }: { busy: boolean; canAct: boolean; onChange: (shown: boolean) => void; shown: boolean }) {
+  const texts = WEBINAR_COPY.consoleV2.numeroDePessoas;
+  return (
+    <SectionCard description={texts.descricao} title={texts.titulo} titleId="console-present-count-title">
+      <div data-console-present-count={shown ? "shown" : "hidden"}>
+        <AdminSwitch
+          checked={shown}
+          description={WEBINAR_ADMIN_COPY.fields.showPresentCountHint}
+          disabled={!canAct}
+          id={CONSOLE_PRESENT_COUNT_ID}
+          label={WEBINAR_ADMIN_COPY.fields.showPresentCount}
+          onCheckedChange={onChange}
+          pending={busy}
+        />
+      </div>
+    </SectionCard>
   );
 }
 

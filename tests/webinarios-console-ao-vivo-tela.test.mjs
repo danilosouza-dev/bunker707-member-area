@@ -80,7 +80,7 @@ export const clearMessageTranslations = fail;`,
 export const saveScreenItem = fail; export const archiveScreenItem = fail; export const uploadScreenImage = fail; export const showScreenItem = fail; export const hideScreenItem = fail; export const showScreenComment = fail; export const hideScreenComment = fail;`,
   "@/server/webinars/room-actions": `${fail}
 export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const pinPoll = fail; export const unpinPoll = fail; export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;
-export const createConsolePoll = fail; export const markQuestionSeen = fail; export const likeQuestionItem = fail;`
+export const createConsolePoll = fail; export const markQuestionSeen = fail; export const likeQuestionItem = fail; export const setShowPresentCount = fail;`
 };
 
 function withExtension(base) {
@@ -298,8 +298,10 @@ test("console V2 em tela cheia (docs/31 V2-13): a raiz com o tema, o topo com Tr
   assert.ok(top.length > 0, "o topo");
   // Os botoes de situacao no topo, na ordem: no ar, Trancar a sala e Encerrar live. O Trancar diz a acao no nome, sem
   // aria-pressed: "Destrancar a sala, pressionado" se lia como o contrario (V2-7).
+  // Antes deles, na linha do titulo, os presentes: desde a rodada v12 (docs/30 D107) sao o botao que abre a Presença.
   const nomes = Array.from(top.matchAll(/<button[^>]*>(?:<svg[\s\S]*?<\/svg>)?([^<]+)<\/button>/g)).map((match) => match[1]);
-  assert.deepEqual(nomes, [copy.trancar, copy.encerrarLive]);
+  assert.deepEqual(nomes, ["3 presentes", copy.trancar, copy.encerrarLive]);
+  assert.match(top, /<button aria-label="3 presentes\. Abrir a Presença"[^>]*data-console-audience-open="top"/);
   assert.match(top, new RegExp(`<button(?![^>]*aria-pressed)[^>]*>(?:<svg[\\s\\S]*?</svg>)?${escape(copy.trancar)}</button>`));
   // As pilulas do YouTube no topo (docs/31 §10): o Encerrar live na vermelha (o acento, como o Sair da sala), o Trancar
   // na tonal, as duas de 40 px e redondas; o Atualizar e o Tema nos circulos de 40 sem fundo, com a dica no lugar do title.
@@ -326,7 +328,7 @@ test("console V2 em tela cheia (docs/31 V2-13): a raiz com o tema, o topo com Tr
   // A agendada mostra Abrir a sala, Começar para todos e Trancar (a Sessão de prática tranca antes de abrir).
   const agendada = render(snapshot({ session: session({ startedAt: null, status: "scheduled" }) }));
   const topoAgendado = agendada.slice(agendada.indexOf('data-console-slot="top"'), agendada.indexOf("</header>"));
-  assert.deepEqual(Array.from(topoAgendado.matchAll(/<button[^>]*>(?:<svg[\s\S]*?<\/svg>)?([^<]+)<\/button>/g)).map((match) => match[1]), [copy.abrirSala, copy.comecarParaTodos, copy.trancar]);
+  assert.deepEqual(Array.from(topoAgendado.matchAll(/<button[^>]*>(?:<svg[\s\S]*?<\/svg>)?([^<]+)<\/button>/g)).map((match) => match[1]), ["3 presentes", copy.abrirSala, copy.comecarParaTodos, copy.trancar]);
 
   // O iframe no palco, dentro da coluna do palco; a barra de quem apresenta embaixo (o <nav> com o nome dela); os
   // controles de todos (na aba Pessoas) e os cards no painel com abas.
@@ -374,7 +376,8 @@ test("palco do console (docs/31 V2-4 e V2-13): Ao vivo e Gravando em cima a esqu
     assert.ok(direita.includes(topo) && esquerda.includes(topo), `os dois cantos com ${topo}`);
   }
   const presentes = (palco) => textOf(palco.slice(palco.indexOf(">", palco.indexOf('data-room-badge="present"')) + 1, palco.indexOf("</span>", palco.indexOf('data-room-badge="present"'))));
-  assert.match(stage, /data-room-badges="top-right"><span[^>]*data-room-badge="present"/);
+  // Os presentes do palco sao o botao que abre a Presença (a chave do numero de pessoas, docs/30 D107).
+  assert.match(stage, /data-room-badges="top-right"><button aria-label="3 presentes · pico 5\. Abrir a Presença"[^>]*data-console-audience-open="stage"[^>]*><span[^>]*data-room-badge="present"/);
   assert.equal(presentes(stage), "3 presentes · pico 5");
   // Antes de entrar no iframe nenhuma coluna na tela: os selos vao ate a borda.
   assert.match(markup, /data-console-slot="stage"[^>]*style="--room-video-bottom:0px;--room-video-right:0px"/);
@@ -386,7 +389,11 @@ test("palco do console (docs/31 V2-4 e V2-13): Ao vivo e Gravando em cima a esqu
   const top = markup.slice(markup.indexOf('data-console-slot="top"'), markup.indexOf("</header>"));
   assert.doesNotMatch(top, /data-console-clock/);
   // Os presentes vao na linha de baixo do titulo (docs/31 §10), "Console da sessão · 3 presentes · pico 5", so abaixo de sm.
-  assert.match(top, /<p class="[^"]*" data-console-line=""><span aria-hidden="true">Console da sessão<\/span><span class="sm:hidden" data-console-status=""> · <span class="tabular-nums" data-console-present="">3 presentes · pico 5<\/span><\/span><\/p>/);
+  // Desde a rodada v12 (docs/30 D107) eles sao o botao que abre a Presença.
+  assert.match(
+    top,
+    /<p class="[^"]*" data-console-line=""><span aria-hidden="true">Console da sessão<\/span><span class="sm:hidden" data-console-status=""> · <button aria-label="3 presentes · pico 5\. Abrir a Presença"[^>]*data-console-audience-open="top" data-console-present="" type="button">3 presentes · pico 5<\/button><\/span><\/p>/
+  );
   // Os chips do card de antes (Gravando, Sala trancada, "{n} pessoas na sala") saem; o "Gravando" e so o do palco.
   assert.doesNotMatch(markup, /data-live-room-status/);
   assert.equal(count(markup, /data-testid="live-recording"/g), 1);

@@ -1,6 +1,6 @@
 import { heartbeatBodySchema } from "@/server/webinars/chat-schemas";
 import { webinarsDb } from "@/server/webinars/room-queries";
-import { guardRoomRequest, loadCachedRoomContext, ok, parseRoomBody, recordAfterReply, resetRoomAccessCache, roomErrorResponse, type RouteContext } from "@/server/webinars/room-route";
+import { guardRoomRequest, loadCachedRoomContext, loadPresentCountShown, ok, parseRoomBody, recordAfterReply, resetRoomAccessCache, roomErrorResponse, type RouteContext } from "@/server/webinars/room-route";
 import { recordStudentHeartbeat } from "@/server/webinars/room-writes";
 import { WEBINARS_FEATURE } from "@/server/licensing/features";
 import { licenseRouteRefusal } from "@/server/licensing/guards";
@@ -38,16 +38,20 @@ export async function POST(request: Request, context: RouteContext) {
   try {
     const now = Date.now();
     const room = await loadCachedRoomContext(guarded.userId, guarded.webinarId, body.data.sessionId.toLowerCase(), now);
+    // A chave do numero de pessoas e relida a parte (15 s por webinario): a equipe a muda pelo console com a sessao no
+    // ar (docs/30 D107), e o contexto guardado por 10 min a deixaria velha.
+    const showPresentCount = await loadPresentCountShown(guarded.webinarId, room.webinar.roomSettings.showPresentCount, now);
     const result = await recordStudentHeartbeat({
       body: body.data,
-      context: { durationMs: room.durationMs, recordingId: room.recording?.id ?? null, session: room.session, showPresentCount: room.webinar.roomSettings.showPresentCount },
+      context: { durationMs: room.durationMs, recordingId: room.recording?.id ?? null, session: room.session, showPresentCount },
       db: webinarsDb(),
       now,
       userAgent: request.headers.get("user-agent"),
       userId: guarded.userId
     });
     await recordAfterReply(result.events);
-    return ok({ ended: result.ended, offsetMs: result.offsetMs, presentNow: result.presentNow, serverTime: result.serverTime });
+    // `presentHidden` vai junto: a sala esconde (ou volta a mostrar) o numero no proximo sinal, sem esperar a releitura da sessao.
+    return ok({ ended: result.ended, offsetMs: result.offsetMs, presentHidden: !showPresentCount, presentNow: result.presentNow, serverTime: result.serverTime });
   } catch (error) {
     return roomErrorResponse(error, "Não foi possível registrar a presença.");
   }

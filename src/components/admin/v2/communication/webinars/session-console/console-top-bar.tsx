@@ -68,6 +68,8 @@ type ConsoleTopBarProps = {
   onPresent?: () => void;
   /** "7 presentes · pico 9" (consolePresenceBadge); nulo sem sessao. */
   presentLabel: string | null;
+  /** O nome do botao dos presentes (o que ele abre: os participantes simulados ou a Presença); sem ele, o dos participantes simulados. */
+  presentOpenLabel?: string;
   /** Os presentes so abaixo de sm (a live: a partir dai eles ficam no palco, em cima a direita). */
   presentNarrowOnly?: boolean;
   /** Uma leitura do retrato a caminho: o icone do Atualizar gira. */
@@ -159,7 +161,7 @@ export function ConsoleTopBar(props: ConsoleTopBarProps) {
                 {" · "}
                 {props.onPresent ? (
                   <button
-                    aria-label={WEBINAR_COPY.simulacao.plateia.abrirControle(props.presentLabel)}
+                    aria-label={props.presentOpenLabel ?? WEBINAR_COPY.simulacao.plateia.abrirControle(props.presentLabel)}
                     className={cn("rounded-sm tabular-nums underline decoration-dotted underline-offset-4 hover:decoration-solid", ROOM_FOCUS)}
                     data-console-audience-open="top"
                     data-console-present=""

@@ -338,6 +338,12 @@ export const moderateMessageSchema = z.object({
   reason: z.string().trim().max(200).optional()
 });
 
+/**
+ * Mostrar ou esconder dos alunos quantas pessoas estao na sala, pelo console (rodada v12, docs/30 D107): a chave
+ * `showPresentCount` do room_settings do webinario, pela sessao que o console tem aberta.
+ */
+export const showPresentCountSchema = z.object({ sessionId: sessionIdSchema, shown: z.boolean() });
+
 export const sessionChatModeSchema = z.object({
   chatMode: z.enum(CHAT_MODES, { error: CHAT_MESSAGES.invalid }),
   sessionId: sessionIdSchema,
