@@ -312,9 +312,9 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   // so segue para o gravador, para a gravacao mostrar o que a turma ve.
   const simulatedNow = snapshot?.simulatedNow ?? 0;
   const audienceRoster = useRoomAudience({
-    enabled: live !== null && sessionId !== null && session?.status !== "ended",
+    // Sem participantes simulados agora, nada e pedido: a lista so existe para o gravador mostrar o que a turma ve.
+    enabled: live !== null && sessionId !== null && session?.status !== "ended" && simulatedNow > 0,
     sessionId: sessionId ?? "",
-    simulationKey: simulatedNow > 0 ? "com" : "sem",
     webinarId: webinar.id
   });
   const audienceNow = useMemo(() => audienceTilesNow(audienceRoster, simulatedNow), [audienceRoster, simulatedNow]);

@@ -690,7 +690,9 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const simulationOffsetMs = simulationClockMs({ kind: "live", scheduledAt, startedAt }, nowMs + skewMs);
   // Os participantes simulados nas miniaturas (docs/30 D117): a lista ordenada vem do servidor; aparecem os primeiros,
   // pelo numero de simulados deste segundo (o mesmo que soma no selo dos presentes), e quem desenha e o proprio motor.
-  const audienceRoster = useRoomAudience({ enabled: !readOnly && !blocked && phase !== "ended", sessionId, simulationKey: naTela.simulationKey, webinarId });
+  // So com a Simulacao ligada na sessao (a live sem ela nao pede nada) e a partir de 1024 px: abaixo disso a sala nao
+  // mostra miniaturas nem a Grade, e a lista so faria o celular baixar fotos que ninguem ve.
+  const audienceRoster = useRoomAudience({ enabled: !readOnly && !blocked && phase !== "ended" && desktop && simulation.enabled === true, sessionId, simulationKey: naTela.simulationKey, webinarId });
   const simulatedNow = simulation.displayCount(0, simulationOffsetMs);
   const audienceNow = audienceTilesNow(audienceRoster, simulatedNow);
   useAudienceTiles({ joined: room.jitsiStatus === "joined", people: audienceNow, post: room.postToFrame });

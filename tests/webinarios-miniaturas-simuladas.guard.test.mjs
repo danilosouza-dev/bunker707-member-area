@@ -20,7 +20,11 @@ test("o sinal de um simulado para no useJitsiMeet, antes de qualquer conta da pa
 
 test("a sala do aluno desenha (sem repasse) e o console so repassa ao gravador; os dois pela mesma lista e pelo numero de simulados de agora", () => {
   const room = read("src/components/member/webinars/room/live-room.tsx");
-  assert.match(room, /useRoomAudience\(\{ enabled: !readOnly && !blocked && phase !== "ended", sessionId, simulationKey: naTela\.simulationKey, webinarId \}\)/, "nunca no ver como nem com a live encerrada");
+  assert.match(
+    room,
+    /useRoomAudience\(\{ enabled: !readOnly && !blocked && phase !== "ended" && desktop && simulation\.enabled === true, sessionId, simulationKey: naTela\.simulationKey, webinarId \}\)/,
+    "nunca no ver como nem com a live encerrada; so com a Simulacao ligada e a partir de 1024 px (abaixo disso a sala nao mostra miniaturas)"
+  );
   assert.match(room, /const simulatedNow = simulation\.displayCount\(0, simulationOffsetMs\);/, "o mesmo numero que soma no selo dos presentes");
   assert.match(room, /useAudienceTiles\(\{ joined: room\.jitsiStatus === "joined", people: audienceNow, post: room\.postToFrame \}\);/);
   assert.doesNotMatch(room, /relay/, "a sala do aluno nunca repassa");
@@ -30,6 +34,7 @@ test("a sala do aluno desenha (sem repasse) e o console so repassa ao gravador; 
   const consolePage = read("src/components/admin/v2/communication/webinars/session-console/session-console.tsx");
   assert.match(consolePage, /audienceTilesNow\(audienceRoster, simulatedNow\)/);
   assert.match(consolePage, /const simulatedNow = snapshot\?\.simulatedNow \?\? 0;/, "o numero do retrato de 5 s do console");
+  assert.match(consolePage, /enabled: live !== null && sessionId !== null && session\?\.status !== "ended" && simulatedNow > 0,/, "sem participantes simulados agora, o console nao pede a lista");
 });
 
 test("a lista dos simulados nunca entra numa metrica real: a rota e o que ela le so leem, e nada cita o historico do aluno", () => {
