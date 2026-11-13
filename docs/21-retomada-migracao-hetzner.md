@@ -1274,8 +1274,12 @@ comando e sem transação, como o CLI aplica (três
 "Adriano Souza" em webinários diferentes, uma sem foto e a mais nova: ficou uma pessoa, a mais nova, com a foto mais
 recente das outras; os itens das três lives passaram para ela com a cópia; a pergunta simulada também; a segunda vez
 não mudou nada; excluir o webinário de origem deixou a pessoa com a origem nula). A integração
-`tests/integration/webinarios-pessoas.test.mjs` (4 e 4b) roda contra o Supabase local no CI. **Na nuvem de teste, ainda
-não aplicada**: precisa do ok do produtor no chat, antes do merge na `dev`.
+`tests/integration/webinarios-pessoas.test.mjs` (4 e 4b) roda contra o Supabase local no CI. **Na nuvem de teste,
+aplicada em 13/11/2026** (com o ok do produtor no chat: "pode subir direto para dev, main e produção"), pelo
+`execute_sql` do MCP, as duas seções em ordem, antes do merge da PR #186 na `dev`, com o `insert` da versão. A
+conferência deu `3` e `0`. Lá havia 14 pessoas, com dois nomes repetidos em 6 webinários cada (cópias do
+Duplicar): ficaram 4 pessoas, e os 7 itens do roteiro que estavam ligados continuam ligados, agora à pessoa
+que ficou.
 
 **Produção (Hetzner)**: nada manual, como na §9.13: o `deploy-membros` roda o `migrate.sh` antes de recriar o app. Com a
 produção guardada em snapshot (§10), o próximo deploy aplica esta junto das que faltarem.
