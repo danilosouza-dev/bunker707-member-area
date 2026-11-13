@@ -1,6 +1,6 @@
 import "server-only";
 
-// Publicar replay como aula (docs/30 §2.2 e §6.8; D108 a D113): o replay de um webinario vira uma aula, com o video da
+// Publicar replay como aula (docs/30 §2.2 e §6.8; D108 a D114): o replay de um webinario vira uma aula, com o video da
 // Bunny, no produto e no modulo escolhidos no card Publicar replay como aula (webinars.replay_lesson_target).
 // - Sozinho (`auto`): quando o replay nasce (createReplayForSession: a sessao encerrou e a gravacao esta pronta), se o
 //   card tem "Publicar sozinho quando o replay ficar pronto". Nunca derruba quem chamou: a falha vira log.

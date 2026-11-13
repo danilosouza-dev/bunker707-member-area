@@ -20,10 +20,6 @@ import { z } from "zod";
 import type { ActionResult } from "@/lib/action-result";
 import { runWebinarAction } from "./run-webinar-action";
 import { recordAudit } from "@/server/audit/log";
-import { requireScope } from "@/server/auth/permissions";
-import { can, describeForbidden, type AdminAccess } from "@/server/auth/roles";
-import { catalogIdSchema } from "@/server/catalog/schemas";
-import { fetchModulesFor } from "@/server/catalog/store";
 import { checkProductImage, decodeWebpDataUrl } from "@/server/catalog/webp";
 import { isSameVersion } from "@/server/communications/campaign-model";
 import { persistImageAsset } from "@/server/db/media-assets";
@@ -35,12 +31,11 @@ import { isJitSession, jitActive, withJitPublishProblems } from "./jit-model";
 import { fetchJitSettings, saveJitSettings } from "./jit-store";
 import { newRoomName } from "./jitsi-token";
 import { ensureSessionRoomName } from "./live-store";
-import { WEBINAR_LIMITS, toTime, webinarHasStudentData, webinarSituation, webinarSlug, type JitSettings, type ReplayLessonTarget, type WebinarDraft, type WebinarKind, type WebinarSituation, type WebinarStatus } from "./model";
+import { WEBINAR_LIMITS, toTime, webinarHasStudentData, webinarSituation, webinarSlug, type JitSettings, type WebinarDraft, type WebinarKind, type WebinarSituation, type WebinarStatus } from "./model";
 import { copyOfferToWebinar } from "./offer-store";
 import { copyPersonasToWebinar } from "./persona-store";
 import { queueWebinarCancelledNotices, queueWebinarRescheduledNotices } from "./notify";
-import { publishReplayLesson } from "./replay-lesson";
-import { REPLAY_LESSON_MESSAGES } from "./replay-lesson-model";
+import { assertReplayTargetAllowed } from "./replay-lesson-access";
 import { baseRecordingOf, draftSessionsOf } from "./queries";
 import { accessModeOfRow, replayLessonTargetOfRow, sessionFromRow, webinarFromRow, webinarRowPatch, type PresenterRow, type RecordingRow, type SessionRow, type WebinarRow } from "./rows";
 import {
@@ -88,9 +83,7 @@ const HAS_STUDENT_DATA = "Este webinário tem dados de alunos (vagas, presença,
 const ONLY_FINISHED_ARCHIVES = "Só um webinário encerrado ou cancelado é arquivado.";
 const JIT_BLOCKS_ARCHIVE = "Este webinário ainda atende pelo Começa quando você entra. Desligue no card Sessões e espere a sessão em andamento acabar para arquivar.";
 const NOT_ARCHIVED_MESSAGE = "Esse webinário não está arquivado.";
-const REPLAY_TARGET_FORBIDDEN = "Você não pode mexer no conteúdo deste produto. Escolha outro, ou peça a quem cuida dele.";
 
-const replayLessonModulesSchema = z.object({ productId: catalogIdSchema });
 const KIND_LOCKED_MESSAGE = "O tipo não muda depois de publicar.";
 const SESSION_MISSING_MESSAGE = "Essa sessão não existe mais.";
 const SESSION_NOT_SCHEDULED_MESSAGE = "Só uma sessão que ainda não começou muda de hora.";
@@ -113,31 +106,6 @@ function revalidateWebinars(id?: string) {
 
   if (id) {
     revalidatePath(`${LIST_PATH}/${id}`);
-  }
-}
-
-/**
- * O destino do card Publicar replay como aula cria uma aula dentro de um produto (docs/30 §6.8, D112): quem escolhe o
- * produto precisa poder mexer no conteudo dele (catalog.content, no escopo da pessoa). So confere quando o produto do
- * destino muda: quem so edita o resto do webinario nao e barrado pelo destino que outra pessoa escolheu.
- */
-async function assertReplayTargetAllowed(access: AdminAccess, target: ReplayLessonTarget | null, current: ReplayLessonTarget | null) {
-  if (!target?.productId || target.productId === current?.productId) {
-    return;
-  }
-
-  let allowed = can(access, "catalog.content");
-
-  if (allowed) {
-    try {
-      await requireScope(access, "catalog.content", { productIds: [target.productId] });
-    } catch {
-      allowed = false;
-    }
-  }
-
-  if (!allowed) {
-    throw new WebinarFieldError("replayLessonTarget.productId", REPLAY_TARGET_FORBIDDEN);
   }
 }
 
@@ -811,67 +779,6 @@ export async function unarchiveWebinar(input: { expectedUpdatedAt?: string; id: 
   });
 }
 
-export type ReplayLessonPublished = {
-  /** Falso quando o replay ja era uma aula (nada mudou). */
-  created: boolean;
-  lessonId: string;
-  title: string;
-};
-
-/**
- * [messaging.publish, e catalog.content no produto de destino] Publicar replay (docs/30 §2.3 e §6.8): o replay do
- * webinario vira uma aula publicada no produto e no modulo do card Publicar replay como aula. Uma aula por webinario:
- * se ja existe, nada muda e a resposta diz qual e; a excluida pela equipe volta. Sem destino, sem replay pronto ou com
- * o destino invalido, recusa com a frase do motivo. O arquivado fica de leitura.
- */
-export async function publishWebinarReplay(input: { expectedUpdatedAt?: string; id: string }): Promise<ActionResult<ReplayLessonPublished>> {
-  return runWebinarAction("messaging.publish", "conteudo", webinarIdSchema, input, async ({ access, input: data, user }) => {
-    const db = webinarsDb();
-    const row = await requireWebinarRow(db, data.id);
-    assertWebinarNotArchived(row);
-    const target = replayLessonTargetOfRow(row.replay_lesson_target);
-
-    if (!target) {
-      throw new WebinarError(REPLAY_LESSON_MESSAGES.no_target, 422);
-    }
-
-    // A aula nasce dentro de um produto: quem publica o replay tambem precisa poder mexer no conteudo dele.
-    if (!can(access, "catalog.content")) {
-      throw new WebinarError(describeForbidden("catalog.content"), 403);
-    }
-
-    await requireScope(access, "catalog.content", { productIds: [target.productId] });
-
-    const outcome = await publishReplayLesson(db, { actorId: user.id, mode: "manual", now: new Date(), webinar: row, webinarId: row.id });
-
-    if (outcome.status === "skipped") {
-      throw new WebinarError(REPLAY_LESSON_MESSAGES[outcome.reason], outcome.reason === "no_replay" ? 409 : 422);
-    }
-
-    revalidateWebinars(row.id);
-
-    return { created: outcome.status === "published", lessonId: outcome.lessonId, title: outcome.title };
-  });
-}
-
-/**
- * [messaging.write, e catalog.content no produto] Os modulos do produto escolhido no card Publicar replay como aula, na
- * ordem do curso (sem os excluidos). So para quem mexe no conteudo do produto (a mesma regra do destino no Salvar,
- * D112): os outros recebem 403 e o card diz que nao leu os modulos. A formacao nao tem modulos proprios: lista vazia.
- */
-export async function listReplayLessonModules(input: { productId: string }): Promise<ActionResult<{ modules: { id: string; title: string }[] }>> {
-  return runWebinarAction("messaging.write", "conteudo", replayLessonModulesSchema, input, async ({ access, input: data }) => {
-    if (!can(access, "catalog.content")) {
-      throw new WebinarError(REPLAY_TARGET_FORBIDDEN, 403);
-    }
-
-    await requireScope(access, "catalog.content", { productIds: [data.productId] });
-
-    const modules = await fetchModulesFor([data.productId], webinarsDb());
-
-    return { modules: modules.map((module) => ({ id: module.id, title: module.title })) };
-  });
-}
 
 /* ------------------------------------------------------------------------------------------------
  * Sessao e capa

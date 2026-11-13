@@ -14,10 +14,11 @@ import { bancoEmMemoria } from "./support/webinarios-banco-em-memoria.mjs";
 //   recusa com o motivo; a aula excluida so volta pelo botao; dois pedidos juntos criam uma aula so;
 // - a Server Action Publicar replay: quem publica na Comunicacao e mexe no conteudo do produto; as recusas com a
 //   frase e o status; o arquivado fica de leitura;
-// - os modulos do produto para o card, e o destino recusado no Salvar para quem nao mexe no conteudo do produto.
+// - os modulos do produto para o card, e o destino recusado no Salvar para quem nao mexe no conteudo do produto;
+// - o cartao do console (D114): le o destino, os produtos e a aula que ja existe, e o Salvar destino grava so o destino.
 // O replay que vira aula sozinho no tick e a retencao que poupa o video estao em tests/webinarios-gravacoes-job.test.mjs.
 
-const estado = (globalThis.__replayAula ??= { foraDoEscopo: [], revalidados: [] });
+const estado = (globalThis.__replayAula ??= { foraDoEscopo: [], produtos: [], revalidados: [] });
 const PRODUTORA = "00000000-0000-4000-8000-0000000000a1";
 
 registerHooks({
@@ -36,6 +37,8 @@ registerHooks({
         export async function getAuthenticatedUser() { return globalThis.__adminActionStubs.role.user; }
         export async function getAdminAccessForUser() { return null; }
         export function getUserDisplayName() { return { fullName: "Produtora de Teste", name: "Produtora" }; }`,
+      // Os produtos do seletor do console: a lista que o teste escolher (a consulta de verdade usa filtros que o banco em memoria nao tem).
+      "@/server/catalog/queries": `export async function listProductOptions() { return globalThis.__replayAula.produtos; }`,
       "next/cache": `
         export function revalidatePath(path) { globalThis.__replayAula.revalidados.push(path); }
         export function revalidateTag(tag) { globalThis.__replayAula.revalidados.push(tag); }
@@ -55,6 +58,7 @@ actionStubs.role = pessoa("messaging.write", "messaging.publish", "catalog.conte
 const model = await import("../src/server/webinars/replay-lesson-model.ts");
 const { publishReplayLesson, autoPublishReplayLesson } = await import("../src/server/webinars/replay-lesson.ts");
 const actions = await import("../src/server/webinars/actions.ts");
+const replayActions = await import("../src/server/webinars/replay-lesson-actions.ts");
 const { emptyWebinarDraft } = await import("../src/server/webinars/model.ts");
 const { PROIBIDAS_WEBINARIO } = await import("../src/lib/webinar-copy.ts");
 const { describeForbidden } = await import("../src/server/auth/roles.ts");
@@ -342,13 +346,13 @@ test("dois pedidos ao mesmo tempo criam uma aula so: quem perde a corrida ve a a
 test("Publicar replay: quem publica na Comunicacao e mexe no conteudo do produto cria a aula; de novo, a resposta diz que ja existia", async () => {
   const db = escola();
 
-  const primeira = await actions.publishWebinarReplay({ id: WEBINAR });
+  const primeira = await replayActions.publishWebinarReplay({ id: WEBINAR });
   assert.deepEqual(primeira, { data: { created: true, lessonId: AULA, title: "Live de agentes" }, ok: true });
   assert.equal(aulaDe(db).status, "published");
   assert.equal(db.tables.admin_audit_log[0].actor_id, PRODUTORA);
   assert.deepEqual(estado.revalidados, ["/admin/comunicacao/webinarios", `/admin/comunicacao/webinarios/${WEBINAR}`]);
 
-  const segunda = await actions.publishWebinarReplay({ id: WEBINAR });
+  const segunda = await replayActions.publishWebinarReplay({ id: WEBINAR });
   assert.deepEqual(segunda, { data: { created: false, lessonId: AULA, title: "Live de agentes" }, ok: true });
   assert.equal(db.tables.lessons.length, 1);
 });
@@ -357,7 +361,7 @@ test("Publicar replay recusa com a frase e o status: sem mexer no conteudo (403)
   const recusa = async (opcoes, antes = () => {}) => {
     const db = escola(opcoes);
     antes();
-    const result = await actions.publishWebinarReplay({ id: WEBINAR });
+    const result = await replayActions.publishWebinarReplay({ id: WEBINAR });
     assert.equal(result.ok, false, JSON.stringify(result));
     assert.equal(aulaDe(db), null);
     return [result.status, result.error];
@@ -389,7 +393,7 @@ test("os modulos do produto para o card: na ordem do curso, sem os excluidos e s
     ]
   });
 
-  assert.deepEqual(await actions.listReplayLessonModules({ productId: PRODUTO }), {
+  assert.deepEqual(await replayActions.listReplayLessonModules({ productId: PRODUTO }), {
     data: {
       modules: [
         { id: OUTUBRO, title: "Outubro" },
@@ -398,19 +402,91 @@ test("os modulos do produto para o card: na ordem do curso, sem os excluidos e s
     },
     ok: true
   });
-  assert.deepEqual((await actions.listReplayLessonModules({ productId: "course-sem-modulos" })).data, { modules: [] });
-  assert.equal((await actions.listReplayLessonModules({ productId: "id com espaco" })).ok, false);
+  assert.deepEqual((await replayActions.listReplayLessonModules({ productId: "course-sem-modulos" })).data, { modules: [] });
+  assert.equal((await replayActions.listReplayLessonModules({ productId: "id com espaco" })).ok, false);
 
   // So quem mexe no conteudo do produto le os modulos dele (a mesma regra do destino no Salvar).
   estado.foraDoEscopo.push(PRODUTO);
-  assert.deepEqual([(await actions.listReplayLessonModules({ productId: PRODUTO })).ok, (await actions.listReplayLessonModules({ productId: PRODUTO })).status], [false, 403]);
+  assert.deepEqual([(await replayActions.listReplayLessonModules({ productId: PRODUTO })).ok, (await replayActions.listReplayLessonModules({ productId: PRODUTO })).status], [false, 403]);
   estado.foraDoEscopo.length = 0;
   try {
     actionStubs.role = pessoa("messaging.write", "messaging.publish");
-    assert.equal((await actions.listReplayLessonModules({ productId: PRODUTO })).status, 403);
+    assert.equal((await replayActions.listReplayLessonModules({ productId: PRODUTO })).status, 403);
   } finally {
     actionStubs.role = pessoa("messaging.write", "messaging.publish", "catalog.content");
   }
+});
+
+test("console: o cartao le o destino salvo, os produtos para escolher e a aula que ja existe (a excluida nao conta)", async () => {
+  estado.produtos = [{ accent: "lima", coverUrl: null, format: "curso", id: PRODUTO, situation: "published", title: "Lives semanais" }];
+
+  escola();
+  assert.deepEqual(await replayActions.getReplayLessonSetup({ id: WEBINAR }), { data: { lesson: null, products: estado.produtos, target: DESTINO }, ok: true });
+
+  escola({ lessons: [{ id: AULA, module_id: NOVEMBRO, sort_order: 0, status: "published", title: "Live de agentes" }], target: null });
+  assert.deepEqual((await replayActions.getReplayLessonSetup({ id: WEBINAR })).data, { lesson: { id: AULA, title: "Live de agentes" }, products: estado.produtos, target: null });
+
+  escola({ lessons: [{ id: AULA, module_id: NOVEMBRO, sort_order: 0, status: "deleted", title: "Live de agentes" }] });
+  assert.equal((await replayActions.getReplayLessonSetup({ id: WEBINAR })).data.lesson, null);
+
+  escola({ webinar: { deleted_at: "2026-11-13T14:00:00.000Z" } });
+  assert.equal((await replayActions.getReplayLessonSetup({ id: WEBINAR })).status, 404);
+});
+
+test("console: Salvar destino grava so o destino do webinario (sem espacos nas pontas), com auditoria; nulo desliga; a aula que ja existe nao e mexida", async () => {
+  const db = escola({ lessons: [{ id: AULA, module_id: OUTUBRO, sort_order: 0, status: "published", title: "Live de agentes" }], target: null });
+  const antes = { ...db.tables.webinars[0] };
+
+  const salvo = await replayActions.saveReplayLessonTarget({ id: WEBINAR, target: { autoPublish: true, moduleId: NOVEMBRO, productId: PRODUTO, title: "  Live 12  " } });
+  assert.deepEqual(salvo, { data: { target: { autoPublish: true, moduleId: NOVEMBRO, productId: PRODUTO, title: "Live 12" } }, ok: true });
+  const linha = db.tables.webinars[0];
+  assert.deepEqual(linha.replay_lesson_target, { autoPublish: true, moduleId: NOVEMBRO, productId: PRODUTO, title: "Live 12" });
+  assert.deepEqual({ ...linha, replay_lesson_target: null }, { ...antes, replay_lesson_target: null }, "nenhuma outra coluna do webinario muda");
+  assert.equal(aulaDe(db).module_id, OUTUBRO, "o destino novo vale para o proximo replay; a aula que existe fica onde esta");
+  assert.deepEqual(db.tables.admin_audit_log.map((row) => [row.action, row.actor_id, row.entity_id, row.metadata]), [
+    ["webinar.replay_lesson_target_saved", PRODUTORA, WEBINAR, { auto_publish: true, module_id: NOVEMBRO, product_id: PRODUTO, source: "console" }]
+  ]);
+  assert.deepEqual(estado.revalidados, ["/admin/comunicacao/webinarios", `/admin/comunicacao/webinarios/${WEBINAR}`]);
+
+  // Titulo so com espacos e modulo vazio viram nulos; nulo desliga o destino.
+  assert.deepEqual((await replayActions.saveReplayLessonTarget({ id: WEBINAR, target: { autoPublish: false, moduleId: null, productId: PRODUTO, title: "   " } })).data, {
+    target: { autoPublish: false, moduleId: null, productId: PRODUTO, title: null }
+  });
+  assert.deepEqual((await replayActions.saveReplayLessonTarget({ id: WEBINAR, target: null })).data, { target: null });
+  assert.equal(db.tables.webinars[0].replay_lesson_target, null);
+});
+
+test("console: Salvar destino recusa o produto em que a pessoa nao mexe no conteudo (no campo do produto), mas deixa mudar o resto do destino que outra pessoa escolheu; arquivado e destino sem produto nao salvam", async () => {
+  const outro = "course-mentoria-mf3k9";
+
+  try {
+    actionStubs.role = pessoa("messaging.write");
+    const db = escola();
+    const recusado = await replayActions.saveReplayLessonTarget({ id: WEBINAR, target: { ...DESTINO, productId: outro } });
+    assert.equal(recusado.ok, false);
+    assert.ok(recusado.fieldErrors?.["replayLessonTarget.productId"], JSON.stringify(recusado));
+    assert.deepEqual(db.tables.webinars[0].replay_lesson_target, DESTINO, "nada gravado");
+
+    // O mesmo produto: desligar o Publicar sozinho ou trocar o modulo nao pede o conteudo do produto.
+    const mesmo = await replayActions.saveReplayLessonTarget({ id: WEBINAR, target: { ...DESTINO, autoPublish: false, moduleId: OUTUBRO } });
+    assert.equal(mesmo.ok, true, JSON.stringify(mesmo));
+    assert.equal(db.tables.webinars[0].replay_lesson_target.moduleId, OUTUBRO);
+  } finally {
+    actionStubs.role = pessoa("messaging.write", "messaging.publish", "catalog.content");
+  }
+
+  const fora = escola();
+  estado.foraDoEscopo.push(outro);
+  assert.ok((await replayActions.saveReplayLessonTarget({ id: WEBINAR, target: { ...DESTINO, productId: outro } })).fieldErrors?.["replayLessonTarget.productId"]);
+  assert.deepEqual(fora.tables.webinars[0].replay_lesson_target, DESTINO);
+
+  escola({ webinar: { status: "archived" } });
+  assert.equal((await replayActions.saveReplayLessonTarget({ id: WEBINAR, target: DESTINO })).status, 409);
+
+  const semProduto = escola();
+  const invalido = await replayActions.saveReplayLessonTarget({ id: WEBINAR, target: { ...DESTINO, productId: "" } });
+  assert.deepEqual([invalido.ok, invalido.status], [false, 400]);
+  assert.deepEqual(semProduto.tables.webinars[0].replay_lesson_target, DESTINO);
 });
 
 test("Salvar com o destino num produto em que a pessoa nao mexe no conteudo: recusa no campo do produto, antes de gravar qualquer coisa", async () => {

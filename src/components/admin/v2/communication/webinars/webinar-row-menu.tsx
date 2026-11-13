@@ -6,7 +6,7 @@ import { startTransition, useId, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import type { ActionResult } from "@/lib/action-result";
 import { cn } from "@/lib/utils";
-import { archiveWebinar, cancelWebinar, deleteWebinar, duplicateWebinar, publishWebinarReplay, unarchiveWebinar } from "@/server/webinars/actions";
+import { archiveWebinar, cancelWebinar, deleteWebinar, duplicateWebinar, unarchiveWebinar } from "@/server/webinars/actions";
 import {
   WEBINAR_ACTION_TOASTS,
   WEBINAR_ADMIN_COPY,
@@ -21,6 +21,7 @@ import {
   type WebinarPermissions
 } from "@/server/webinars/editor-model";
 import { WEBINAR_LIMITS, type WebinarKind, type WebinarSituation, type WebinarStatus } from "@/server/webinars/model";
+import { publishWebinarReplay } from "@/server/webinars/replay-lesson-actions";
 import { endSessionNow } from "@/server/webinars/room-actions";
 import { ErrorBanner } from "../../error-banner";
 import { adminTextareaClass } from "../../form";

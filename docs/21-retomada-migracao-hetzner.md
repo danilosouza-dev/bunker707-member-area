@@ -1211,7 +1211,7 @@ nenhuma etapa `deploy-meet` é necessária para esta rodada.
 
 ### 9.20 O replay que vira aula: sem migração (13/11/2026)
 
-**Publicar replay como aula** (`docs/30` §6.8, D108 a D113) não tem migração: o destino já morava em
+**Publicar replay como aula** (`docs/30` §6.8, D108 a D114) não tem migração: o destino já morava em
 `webinars.replay_lesson_target` (migração `202610280001`), a aula usa as colunas de sempre de `lessons` e
 `course_modules`, a ligação entre o webinário e a aula é o id da aula (`lesson-replay-<id do webinário>`), e a
 retenção só adia o `purge_due_at` que já existia.

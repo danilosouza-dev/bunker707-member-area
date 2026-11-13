@@ -1,4 +1,4 @@
-// Publicar replay como aula, a parte pura (docs/30 §2.2 e §6.8; D108 a D113): qual e a aula de um webinario, o titulo,
+// Publicar replay como aula, a parte pura (docs/30 §2.2 e §6.8; D108 a D114): qual e a aula de um webinario, o titulo,
 // o video e a duracao dela, em que modulo do produto ela entra, e o que cada recusa diz na tela. Quem grava e
 // replay-lesson.ts (o servidor); aqui nada toca o banco. Modulo puro (tests/webinarios-replay-aula.test.mjs).
 

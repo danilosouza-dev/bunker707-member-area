@@ -112,6 +112,7 @@ const actions = await import("../src/server/webinars/actions.ts");
 const queries = await import("../src/server/webinars/queries.ts");
 const { RecordingCard, RoomCard } = await import("../src/components/admin/v2/communication/webinars/webinar-editor-cards.tsx");
 const { ReplayLessonCard } = await import("../src/components/admin/v2/communication/webinars/replay-lesson-card.tsx");
+const { ConsoleReplayLesson } = await import("../src/components/admin/v2/communication/webinars/session-console/console-replay-lesson.tsx");
 const { WebinarEditor } = await import("../src/components/admin/v2/communication/webinars/webinar-editor.tsx");
 const { WebinarsTable } = await import("../src/components/admin/v2/communication/webinars/webinars-table.tsx");
 
@@ -351,6 +352,20 @@ test("card Publicar replay como aula (13/11/2026, docs/30 §6.8): desligado so o
   assert.match(seletor(lendo), /<option value="module-novembro-mf3k4" selected="">module-novembro-mf3k4<\/option>/);
   assert.match(lendo, /id="webinar-replayLessonTarget-title"[^>]*value="Live 12"|value="Live 12"[^>]*id="webinar-replayLessonTarget-title"/);
   assert.match(lendo.match(/<button[^>]*id="webinar-replayLessonTarget-autoPublish"[^>]*>/)?.[0] ?? "", /aria-checked="false"/);
+
+  // O cartao do console (D114): o mesmo titulo do card, a frase que diz que e o mesmo destino do editor, e a leitura
+  // do destino na primeira pintura (os campos chegam depois, pela Server Action).
+  const noConsole = html(createElement(ConsoleReplayLesson, { canWrite: true, webinarId: ID }));
+  assert.match(noConsole, /id="console-replay-lesson-title"/);
+  assert.match(textOf(noConsole), /Publicar replay como aula/);
+  assert.match(textOf(noConsole), new RegExp(vm.WEBINAR_ADMIN_COPY.replayConsole.description.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(noConsole, /data-replay-lesson="loading"/);
+  assert.doesNotMatch(noConsole, /console-replayLessonTarget-/, "os campos so aparecem com o destino lido");
+  for (const frase of [...Object.values(vm.WEBINAR_ADMIN_COPY.replayConsole).map((value) => (typeof value === "function" ? value("Live 12") : value))]) {
+    for (const palavra of PROIBIDAS_WEBINARIO) {
+      assert.ok(!frase.toLocaleLowerCase("pt-BR").includes(palavra), `"${frase}" usa "${palavra}"`);
+    }
+  }
 
   // O texto do modulo deixou de prometer a lista para depois.
   assert.doesNotMatch(Object.values(campos).filter((value) => typeof value === "string").join(" "), /chega depois/);

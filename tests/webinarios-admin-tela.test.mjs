@@ -55,6 +55,9 @@ export function DropdownMenuSeparator() { return createElement("hr", { "data-men
 export function DropdownMenuItem({ children, disabled, render }) {
   return render ? cloneElement(render, { "data-menu-item": "", role: "menuitem" }, children) : createElement("div", { "aria-disabled": disabled || undefined, "data-menu-item": "", role: "menuitem" }, children);
 }`,
+  // O replay que vira aula (13/11/2026, docs/30 §6.8): o Publicar replay do menu, os modulos do produto e o cartao do console.
+  "@/server/webinars/replay-lesson-actions": `const fail = async () => ({ error: "Falhou.", ok: false, status: 500 });
+export const publishWebinarReplay = fail; export const listReplayLessonModules = async () => ({ data: { modules: [] }, ok: true }); export const getReplayLessonSetup = fail; export const saveReplayLessonTarget = fail;`,
   "@/server/webinars/actions": `const fail = async () => ({ error: "Falhou.", ok: false, status: 500 });
 export const saveWebinarDraft = fail;
 export const publishWebinar = fail;
@@ -63,8 +66,6 @@ export const duplicateWebinar = fail;
 export const deleteWebinar = fail;
 export const archiveWebinar = fail;
 export const unarchiveWebinar = fail;
-export const publishWebinarReplay = fail;
-export const listReplayLessonModules = async () => ({ data: { modules: [] }, ok: true });
 export const rescheduleSession = fail;
 export const uploadWebinarCover = fail;`,
   // As pessoas que comentam (11/11/2026, D75): a lista do Roteiro grava pela propria Server Action.

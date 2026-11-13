@@ -10,12 +10,13 @@ import { ESCOLA_DE_TESTE, LIVE_AO_VIVO_ENCERRADA_DE_TESTE, limparWebinarios, see
 // 1. o replay que nasce com "Publicar sozinho" vira uma aula publicada no fim do ultimo modulo do curso, com o video da
 //    Bunny no formato das outras aulas, a contagem do modulo, a auditoria e o catalogo invalidado;
 // 2. o botao Publicar replay: quem nao publica recebe 403; de novo nao cria a segunda aula; a excluida pela equipe volta;
+// 2b. o cartao do console le e grava so o destino do webinario, com as permissoes de verdade;
 // 3. a retencao le o video da aula pelo jsonb (video_config->>assetId): enquanto a aula existe, o video fica na Bunny
 //    e a conferencia e adiada; com a aula excluida, e apagado como antes.
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
-const actions = await import("../../src/server/webinars/actions.ts");
+const actions = await import("../../src/server/webinars/replay-lesson-actions.ts");
 const { createReplayForSession } = await import("../../src/server/webinars/session-lifecycle.ts");
 const { replayLessonIdFor } = await import("../../src/server/webinars/replay-lesson-model.ts");
 const { RECORDINGS_LESSON_RECHECK_DAYS, RECORDINGS_PURGE_MINUTE, runRecordingsTick } = await import("../../src/server/webinars/recordings-tick.ts");
@@ -171,6 +172,28 @@ test("2. Publicar replay: quem nao publica recebe 403; de novo nao cria a segund
     [curso.modulos.modulo1, curso.modulos.modulo2],
     "os modulos do curso, na ordem, para o card"
   );
+});
+
+test("2b. console: o cartao do painel Gravação le o destino, os produtos e a aula, e o Salvar destino grava so o destino do webinario; quem so le recebe 403", async () => {
+  actAs(analista);
+  const negado = await actions.saveReplayLessonTarget({ id: webinarId, target: null });
+  assert.deepEqual([negado.ok, negado.status], [false, 403]);
+
+  actAs(produtor);
+  const setup = await actions.getReplayLessonSetup({ id: webinarId });
+  assert.equal(setup.ok, true, setup.ok ? "" : `${setup.status}: ${setup.error}`);
+  assert.deepEqual(setup.data.target, { autoPublish: true, moduleId: null, productId: curso.id, title: null });
+  assert.deepEqual(setup.data.lesson, { id: AULA, title: titulo });
+  assert.ok(setup.data.products.some((produto) => produto.id === curso.id), "o curso de teste esta entre os produtos para escolher");
+
+  const antes = unwrap(await db.from("webinars").select("title, status, room_settings").eq("id", webinarId).single(), "Lendo o webinario");
+  const destino = { autoPublish: false, moduleId: curso.modulos.modulo1, productId: curso.id, title: "Replay de teste" };
+  const salvo = await actions.saveReplayLessonTarget({ id: webinarId, target: destino });
+  assert.equal(salvo.ok, true, salvo.ok ? "" : `${salvo.status}: ${salvo.error}`);
+  const depois = unwrap(await db.from("webinars").select("title, status, room_settings, replay_lesson_target").eq("id", webinarId).single(), "Lendo o webinario salvo");
+  assert.deepEqual(depois.replay_lesson_target, destino);
+  assert.deepEqual({ room_settings: depois.room_settings, status: depois.status, title: depois.title }, antes, "o resto do webinario nao muda");
+  assert.equal((await aula()).module_id, curso.modulos.modulo2, "a aula que ja existe fica onde esta");
 });
 
 test("3. retencao: o video da aula fica na Bunny e a conferencia e adiada (o filtro pelo jsonb de verdade); com a aula excluida, o video e apagado", async () => {

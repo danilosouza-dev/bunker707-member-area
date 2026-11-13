@@ -607,6 +607,15 @@ export const WEBINAR_ADMIN_COPY = {
     unarchive: WEBINAR_COPY.admin.desarquivar,
     viewReport: WEBINAR_COPY.admin.verRelatorio
   },
+  /** O cartao Publicar replay como aula do painel Gravação do console (docs/30 §6.8, D114). */
+  replayConsole: {
+    description: "Para qual curso vai o replay desta live. É o mesmo destino do card Publicar replay como aula, no editor.",
+    existing: (title: string) => `O replay desta live já é a aula “${title}”. Mudar o destino não mexe nessa aula.`,
+    failed: "Não foi possível ler o destino do replay agora. Recarregue a página para tentar de novo.",
+    loading: "Lendo o destino do replay…",
+    save: "Salvar destino",
+    saved: "Destino do replay salvo. Vale para o próximo replay desta live."
+  },
   /** Por que um botao da sala ao vivo esta desligado para quem so escreve na Comunicacao (docs/30 §2.6). */
   blocked: {
     end: "Só quem publica na Comunicação encerra a live.",
