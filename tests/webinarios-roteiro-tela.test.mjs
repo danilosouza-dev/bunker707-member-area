@@ -183,7 +183,7 @@ test("Roteiro de chat: as linhas com minuto, nome, papel, Solta em e situacao; o
     scriptItem("d", { offsetMs: 5_000, position: 5, status: "disabled" })
   ];
   const transcript = { cues: 312, format: "vtt", language: "pt-BR", updatedAt: "2026-11-01T15:00:00.000Z" };
-  // A linha da frase aberta (D117: so uma abre por vez); as outras, fechadas.
+  // A linha da frase aberta (D118: so uma abre por vez); as outras, fechadas.
   const markup = html(createElement(ScriptCard, { disabled: false, hasRecording: true, initialItems: items, initialOpenKey: "p", initialTranscript: transcript, sessions: [session(), ended], webinarId: WEBINAR }));
   const text = textOf(markup);
 
@@ -497,7 +497,7 @@ test("pessoas no editor: a lista 'Pessoas que comentam' (foto ou iniciais, Apare
     scriptItem("c", { offsetMs: 120_000, personaId: null, personaName: "Caio D.", position: 2 })
   ];
   const props = { disabled: false, hasRecording: true, initialItems: items, initialPersonas: COM_LISTA, initialTranscript: null, sessions: [session()], webinarId: WEBINAR };
-  // Fechada (D118): uma linha com as fotos, o total da escola e "Gerenciar pessoas"; a lista so ao abrir.
+  // Fechada (D119): uma linha com as fotos, o total da escola e "Gerenciar pessoas"; a lista so ao abrir.
   const fechada = html(createElement(ScriptCard, props));
   assert.match(fechada, /data-persona-panel="" data-persona-panel-open="false"/);
   assert.match(textOf(fechada), /Pessoas que comentam .*A lista é da escola: as mesmas pessoas aparecem em todos os webinários, no editor e no console\. BC 2 pessoas na lista da escola Gerenciar pessoas/, "a foto do Adriano e as iniciais da Bia, o total e o botao");
@@ -591,7 +591,7 @@ test("pessoas: a confirmacao do Remover diz quantos comentarios do roteiro usam 
   const base = { available: true, onDelete: falha, onSave: falha, onUpload: falha, personas: PESSOAS_LISTA, usage: { [ADRIANO]: 3 } };
   const removendo = textOf(html(createElement(PersonaList, { ...base, initialRemoving: ADRIANO })));
   assert.match(removendo, /Remover Adriano Souza da lista\?/);
-  // A lista e da escola (D116): o numero e deste roteiro, e remover vale para todos os webinarios.
+  // A lista e da escola (D117): o numero e deste roteiro, e remover vale para todos os webinarios.
   assert.match(
     removendo,
     /3 comentários deste roteiro usam esta pessoa\. Ela sai da lista de todos os webinários\. Os comentários que a usam continuam com o nome e a foto de agora, fora da lista\. O que a turma já viu não muda\./
@@ -610,7 +610,7 @@ test("pessoas: a confirmacao do Remover diz quantos comentarios do roteiro usam 
   assert.doesNotMatch(vazia, /data-persona-toggle/);
 });
 
-test("D117 e D118 com muita gente: a busca do roteiro a partir de 9 mensagens (pelo nome ou pelo texto, sem acento), a caixa com rolagem propria; a busca da lista a partir de 7 pessoas e as 5 primeiras fotos com o 'mais N'", async () => {
+test("D118 e D119 com muita gente: a busca do roteiro a partir de 9 mensagens (pelo nome ou pelo texto, sem acento), a caixa com rolagem propria; a busca da lista a partir de 7 pessoas e as 5 primeiras fotos com o 'mais N'", async () => {
   const { PersonaList } = await import("../src/components/admin/v2/communication/webinars/persona-list.tsx");
   const { SCRIPT_COMPACT } = await import("../src/components/admin/v2/communication/webinars/script-card.tsx");
   const personaModel = await import("../src/server/webinars/persona-model.ts");

@@ -35,7 +35,7 @@ import {
 //   distribuida, nem na conta de abertas);
 // - importar o CSV liga e cria as pessoas, com duas importacoes ao mesmo tempo contra o indice unico de verdade (revisao
 //   v8, achado 3); a lista com mais de 1.000 pessoas vem inteira (revisao v8, achado 4);
-// - a lista da escola (pedido do produtor de 13/11/2026; docs/30 D116; migracao 202611180001): o nome e unico na escola
+// - a lista da escola (pedido do produtor de 13/11/2026; docs/30 D117; migracao 202611180001): o nome e unico na escola
 //   pelo indice de verdade, a pessoa criada numa live vale na outra, o Duplicar nao copia mais a lista, excluir o
 //   webinario de origem deixa a pessoa na lista (a origem nula), e a secao 2 da migracao junta as repetidas de
 //   webinarios diferentes numa transacao desfeita.
@@ -131,7 +131,7 @@ test("2. criar, editar (as copias dos itens mudam), o nome repetido recusado e r
   const criada = ok(await personaActions.savePersona({ avatarPath: FOTO, name: "Adriano Souza", role: "student", webinarId: AO_VIVO.id }));
   const repetida = await personaActions.savePersona({ avatarPath: null, name: "  adriano SOUZA ", role: "team", webinarId: AO_VIVO.id });
   assert.deepEqual([repetida.status, repetida.fieldErrors?.name?.[0]], [400, WEBINAR_COPY.pessoas.erros.nomeRepetido]);
-  // O indice unico do banco segura o mesmo nome por outro caminho, tambem noutro webinario (D116: o nome e da escola).
+  // O indice unico do banco segura o mesmo nome por outro caminho, tambem noutro webinario (D117: o nome e da escola).
   const direto = await db.from("webinar_personas").insert({ name: "ADRIANO  souza", webinar_id: AO_VIVO.id });
   assert.equal(direto.error?.code, "23505");
   const noutro = await db.from("webinar_personas").insert({ name: "Adriano Souza", webinar_id: GRAVADA.id });
@@ -196,7 +196,7 @@ test("3. o preenchimento da migracao (numa transacao desfeita): uma pessoa por n
   ]);
 });
 
-test("4. D116 a lista da escola: o Duplicar nao copia a lista; a pessoa criada na copia vale na outra live; excluir a copia deixa a pessoa, com a origem nula", async () => {
+test("4. D117 a lista da escola: o Duplicar nao copia a lista; a pessoa criada na copia vale na outra live; excluir a copia deixa a pessoa, com a origem nula", async () => {
   actAs(produtor);
   const personaStore = await import("../../src/server/webinars/persona-store.ts");
   ok(await personaActions.savePersona({ avatarPath: FOTO, name: "Lia Escola", role: "student", webinarId: AO_VIVO.id }));

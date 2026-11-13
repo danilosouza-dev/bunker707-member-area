@@ -22,7 +22,7 @@ import { MIN, OTHER_WEBINAR, SESSION, WEBINAR, bancoFalso, escola, iso } from ".
 // - as correcoes da revisao v8: importar o CSV liga e cria as pessoas (e a corrida de duas importacoes reaproveita a
 //   que entrou; achado 3); a lista com mais de 1.000 pessoas vem inteira no Salvar e na edicao, e a pessoa que a leitura
 //   nao trouxe e buscada pelo id (achado 4);
-// - a lista da escola (pedido do produtor de 13/11/2026; docs/30 D116): a pessoa criada noutro webinario aparece aqui,
+// - a lista da escola (pedido do produtor de 13/11/2026; docs/30 D117): a pessoa criada noutro webinario aparece aqui,
 //   o nome dela e recusado aqui, o roteiro, o Novo comentário e a importacao usam a pessoa de outro webinario, e remover
 //   daqui tira de todos (pelo webinario de onde a equipe remove, que confere o arquivado).
 
@@ -554,11 +554,11 @@ test("revisao v8, achado 4: a lista com mais de 1.000 pessoas vem inteira; o Sal
   const repetida = await personaActions.savePersona({ avatarPath: null, name: "ZULEICA  torres", role: "student", webinarId: WEBINAR });
   assert.deepEqual([repetida.status, repetida.fieldErrors?.name?.[0]], [400, PESSOAS.erros.nomeRepetido]);
 
-  // O Duplicar nao copia mais a lista (D116): ela e da escola, e a copia ja enxerga todas.
+  // O Duplicar nao copia mais a lista (D117): ela e da escola, e a copia ja enxerga todas.
   assert.equal(personaStore.copyPersonasToWebinar, undefined);
 });
 
-test("D116 a lista da escola: a pessoa criada noutro webinario aparece aqui; o nome dela e recusado aqui; o roteiro, o Novo comentário e a importacao a usam; editar troca a copia nos dois roteiros", async () => {
+test("D117 a lista da escola: a pessoa criada noutro webinario aparece aqui; o nome dela e recusado aqui; o roteiro, o Novo comentário e a importacao a usam; editar troca a copia nos dois roteiros", async () => {
   const tables = cenario();
   const BIA = "eeeeeeee-0000-4000-8000-0000000000b9";
   const DO_OUTRO = "dddddddd-0000-4000-8000-0000000000c9";

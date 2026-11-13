@@ -1228,10 +1228,10 @@ sozinhos; para eles, **Publicar replay** no menu do webinário encerrado).
 
 ### 9.21 A lista de pessoas que comentam da escola: migração `202611180001` antes do merge (13/11/2026)
 
-A lista **Pessoas que comentam** passa a ser uma só da escola (`docs/30` D116; `docs/31` §18), com uma migração que vem
+A lista **Pessoas que comentam** passa a ser uma só da escola (`docs/30` D117; `docs/31` §18), com uma migração que vem
 **depois** da `202611170001` (§9.18) e não muda as de antes (a guarda `tests/webinarios-pessoas-da-escola.guard.test.mjs`
 prende o hash acumulado das 76 anteriores e o do arquivo novo). O roteiro em linhas fechadas e a lista numa linha
-(D117 e D118) não têm migração.
+(D118 e D119) não têm migração.
 
 | Ordem | Arquivo | O que faz | Seções | Nome em `schema_migrations` |
 |---|---|---|---|---|

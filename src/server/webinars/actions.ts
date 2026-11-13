@@ -613,7 +613,7 @@ export async function cancelWebinar(input: { expectedUpdatedAt?: string; id: str
  * nascem quando a copia for publicada). Fase 4: a Oferta (em rascunho, copyOfferToWebinar), o Assistente (desligado,
  * com as perguntas e respostas, copyAssistantToWebinar) e o "Comeca quando voce entra" (desligado; a Simulacao das
  * sessoes que nascem vai sem a decisao, que e de quem liga na copia, D10). A lista de pessoas que comentam nao e copiada
- * (desde 13/11/2026 ela e da escola, D116: a copia ja enxerga todas as pessoas).
+ * (desde 13/11/2026 ela e da escola, D117: a copia ja enxerga todas as pessoas).
  */
 export async function duplicateWebinar(input: { expectedUpdatedAt?: string; id: string }): Promise<ActionResult<{ id: string; updatedAt: string }>> {
   return runWebinarAction("messaging.write", "conteudo", webinarIdSchema, input, async ({ input: data, user }) => {
@@ -632,7 +632,7 @@ export async function duplicateWebinar(input: { expectedUpdatedAt?: string; id: 
     const copy = { fromWebinarId: bundle.row.id, toWebinarId: created.id, userId: user.id };
     const offer = await copyPart("a oferta", () => copyOfferToWebinar(db, copy), null);
     const assistantItems = await copyPart("o assistente", () => copyAssistantToWebinar(db, copy), 0);
-    // A lista de pessoas que comentam e da escola (D116): a copia ja enxerga todas. O roteiro nao e copiado hoje (docs/30
+    // A lista de pessoas que comentam e da escola (D117): a copia ja enxerga todas. O roteiro nao e copiado hoje (docs/30
     // §2.10, item 10): quando for, cada item copiado liga a mesma pessoa do item de origem.
     const jit = await copyPart(
       "o comeca quando voce entra",

@@ -70,7 +70,7 @@ test("as colunas que o app le existem na tabela; a leitura e tolerante e a escri
 
 test("o aviso de migracao pendente aponta esta, e WEBINARS_MIGRATION e esta ou uma mais nova", () => {
   assert.equal(likes.QUESTION_LIKES_MIGRATION, "202611170001");
-  // Desde 13/11/2026 a mais nova e a 202611180001 (as pessoas que comentam da escola, D116); a guarda dela confere o
+  // Desde 13/11/2026 a mais nova e a 202611180001 (as pessoas que comentam da escola, D117); a guarda dela confere o
   // arquivo e o aviso geral.
   assert.ok((dbSource.match(/export const WEBINARS_MIGRATION = "(\d+)";/)?.[1] ?? "") >= "202611170001", "o aviso geral aponta esta ou uma mais nova");
   for (const file of ["src/server/webinars/room-actions.ts", "src/server/webinars/room-writes.ts"]) {

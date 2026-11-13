@@ -3,7 +3,7 @@ import "server-only";
 // As escritas das pessoas que comentam e da pergunta simulada (pedido do produtor de 11/11/2026; docs/30 D75 a D78;
 // migracao 202611140001), que as Server Actions do roteiro (script-actions.ts), as da lista (persona-actions.ts) e o
 // tick da live (live-script-tick.ts) dividem. Tudo pela service role, com as conferencias do servidor (o nome unico na
-// lista antes do indice unico do banco) e as frases da migracao pendente. Desde 13/11/2026 (docs/30 D116; migracao
+// lista antes do indice unico do banco) e as frases da migracao pendente. Desde 13/11/2026 (docs/30 D117; migracao
 // 202611180001) a lista e da escola: toda pessoa vale em qualquer webinario, e o webinario de cada escrita fica so como
 // a origem da pessoa nova:
 // - commentPersona: a pessoa de um comentario do console. Com `personaId`, a da lista (a copia dela: o nome, o papel e
@@ -102,7 +102,7 @@ export async function commentPersona(
 }
 
 /**
- * Cria ou edita uma pessoa da lista da escola (D75 e D116): o nome unico na escola (a conferencia aqui e o indice unico
+ * Cria ou edita uma pessoa da lista da escola (D75 e D117): o nome unico na escola (a conferencia aqui e o indice unico
  * do banco), a foto so da nossa pasta (o schema) e, na edicao, a copia nova em todos os itens do roteiro dela, de todos
  * os webinarios. A pessoa nova guarda o webinario de origem. Devolve a pessoa, se e nova e quantos itens mudaram.
  */
@@ -144,7 +144,7 @@ export async function savePersonaRow(
 }
 
 /**
- * Tira a pessoa da lista da escola (D75 e D116): os itens do roteiro dela, de todos os webinarios, perdem a ligacao e
+ * Tira a pessoa da lista da escola (D75 e D117): os itens do roteiro dela, de todos os webinarios, perdem a ligacao e
  * ficam com a copia (o nome e a foto de agora). Devolve a pessoa tirada e quantos itens a usavam; nula quando ela nao
  * existe mais.
  */
@@ -166,7 +166,7 @@ const IMPORT_PERSONAS_BATCH = 500;
 
 /**
  * As pessoas das linhas de um CSV importado (correcao da revisao v8, achado 3): cada nome (pelo nome comparavel,
- * personaNameKey) vira a pessoa da lista da escola com o mesmo nome (D116: a criada em outro webinario tambem), e os que
+ * personaNameKey) vira a pessoa da lista da escola com o mesmo nome (D117: a criada em outro webinario tambem), e os que
  * faltam entram na lista com o papel da primeira linha deles, sem foto e com este webinario de origem. As novas vao em
  * lotes; a corrida com outra importacao (o indice unico do nome recusa o lote) grava uma por vez, e o nome que outra
  * importacao ja gravou e reaproveitado (relido no fim). Devolve as pessoas pelo nome comparavel e quantas entraram

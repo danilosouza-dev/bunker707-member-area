@@ -1,4 +1,4 @@
-// Frases das pessoas que comentam e da pergunta simulada (docs/30 §2.2, §2.4, §2.7, D75 a D78, D116 e D118; docs/31
+// Frases das pessoas que comentam e da pergunta simulada (docs/30 §2.2, §2.4, §2.7, D75 a D78, D117 e D119; docs/31
 // §13.1 e §18; pedidos do produtor de 11 e 13/11/2026): a lista "Pessoas que comentam" da escola (no card Roteiro do
 // editor e na entrada Roteiro do console, numa linha com as fotos e o total, que abre para gerenciar), o formulario da pessoa (Nome, Foto (opcional), Aparece como), a escolha de "Quem comenta" em
 // cada comentario, o "Comentar como {nome}" que repete a pessoa, o "Tipo" (Comentário ou Pergunta), o selo "Simulada"
@@ -11,7 +11,7 @@ export const PESSOAS_COPY = {
   titulo: "Pessoas que comentam",
   descricao: "Crie cada pessoa uma vez e escolha quem comenta em cada comentário. A lista é da escola: as mesmas pessoas aparecem em todos os webinários, no editor e no console.",
   vazia: "Nenhuma pessoa na lista ainda.",
-  /** A linha da lista fechada (D118): o total da escola, ao lado das primeiras fotos. */
+  /** A linha da lista fechada (D119): o total da escola, ao lado das primeiras fotos. */
   resumo: (total: number) => (total === 1 ? "1 pessoa na lista da escola" : `${total} pessoas na lista da escola`),
   /** As fotos que nao cabem na linha. */
   maisFotos: (total: number) => `mais ${total}`,
@@ -42,7 +42,7 @@ export const PESSOAS_COPY = {
     titulo: (nome: string) => `Remover ${nome} da lista?`,
     texto: (total: number) =>
       total === 0 ? "Nenhum comentário deste roteiro usa esta pessoa." : total === 1 ? "1 comentário deste roteiro usa esta pessoa." : `${total} comentários deste roteiro usam esta pessoa.`,
-    /** A lista e da escola (D116): remover vale para todos os webinarios. */
+    /** A lista e da escola (D117): remover vale para todos os webinarios. */
     escola: "Ela sai da lista de todos os webinários. Os comentários que a usam continuam com o nome e a foto de agora, fora da lista.",
     visto: "O que a turma já viu não muda.",
     botao: "Remover da lista"

@@ -427,7 +427,7 @@ que eu quero que comente." A regra inteira (a lista por webinário, a pessoa com
 simulada fora de toda métrica e o repetir) está no `docs/30` D75 a D78, §2.2, §2.4, §2.7 e §4.2. Vale sobre §5.2 onde
 houver conflito (o **Quem comenta** com o Nome digitado e o "Usar esta foto em todos os comentários de {nome}").
 
-> **Atualizado em 13/11/2026 (§18; `docs/30` D116 a D118)**: a lista passou a ser da escola, fica fechada numa linha que
+> **Atualizado em 13/11/2026 (§18; `docs/30` D117 a D119)**: a lista passou a ser da escola, fica fechada numa linha que
 > abre em **Gerenciar pessoas**, e o roteiro do editor ficou em linhas fechadas, uma aberta por vez.
 
 - **A lista "Pessoas que comentam"** (`persona-list.tsx`, a mesma peça no editor e no console): cada pessoa numa linha
@@ -720,10 +720,10 @@ Depois do merge da rodada v11, o produtor perguntou por que trocar as miniaturas
 Ao criar uma live nova em produção, o produtor pediu duas coisas sobre o card **Roteiro de chat**: "se a gente criar 30
 pessoas com 30 comentários, fica uma lista enorme, tomando muito espaço da página. Fica listando tudo aberto" e "listar
 só o que foi criado hoje não faz sentido, né? Tem que listar todos os nomes que foram criados". As regras estão no
-`docs/30` D116 a D118; aqui, o desenho. Vale sobre a §13.1 onde houver conflito (a lista "do webinário" e a lista sempre
+`docs/30` D117 a D119; aqui, o desenho. Vale sobre a §13.1 onde houver conflito (a lista "do webinário" e a lista sempre
 aberta no topo do card).
 
-### 18.1 A lista da escola (D116)
+### 18.1 A lista da escola (D117)
 
 - **Uma lista só**: o editor e o console de todo webinário mostram as mesmas pessoas. Quem foi criado numa live aparece
   na próxima, sem criar de novo. A frase do card diz isso: "A lista é da escola: as mesmas pessoas aparecem em todos os
@@ -732,7 +732,7 @@ aberta no topo do card).
   **Remover** conta os comentários **deste** roteiro e avisa que a pessoa sai da lista de todos os webinários.
 - **O número de cada pessoa** é o deste roteiro: "2 comentários neste roteiro".
 
-### 18.2 O roteiro em linhas fechadas (D117)
+### 18.2 O roteiro em linhas fechadas (D118)
 
 - **A linha fechada**, da esquerda para a direita: o minuto (mm:ss) ou "Frase" ou "Botão", numa coluna de 48 px; a foto
   de 24 px (a da sala, com as iniciais sem foto); o nome, com o selo **Pergunta** e a situação só quando diz algo
@@ -748,7 +748,7 @@ aberta no topo do card).
   no máximo 640 px). Sem resultado, "Nenhuma mensagem com “...”." e nenhuma lista vazia.
 - **No celular** (375 px): os selos descem para baixo do nome, e o nome e o texto se cortam com reticências.
 
-### 18.3 A lista de pessoas numa linha (D118)
+### 18.3 A lista de pessoas numa linha (D119)
 
 - **Fechada**: as cinco primeiras fotos sobrepostas, "mais N", "30 pessoas na lista da escola" e **Gerenciar pessoas**
   (com `aria-expanded`). Vazia: "Nenhuma pessoa na lista ainda." e **Nova pessoa**, que abre a lista com o formulário.

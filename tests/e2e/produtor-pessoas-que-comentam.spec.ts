@@ -11,7 +11,7 @@ import { LIVE_AO_VIVO_DE_TESTE, expect, salaFalsaDoJitsi, seedLiveAoVivoDeTeste,
 // Pelo "Comentar como {nome}" manda um comentario, depois uma Pergunta (o Tipo) e mais um comentario como a mesma
 // pessoa, sem digitar o nome de novo (o formulario fica aberto, com "Enviado."). A aluna, na sala da live, ve os dois
 // comentarios no chat com o nome e a foto da pessoa, e a pergunta na aba Perguntas com a mesma foto. Desde 13/11/2026
-// (docs/30 D116 e D118) a lista e da escola e fica fechada numa linha: vazia, a linha oferece "Nova pessoa", que abre a
+// (docs/30 D117 e D119) a lista e da escola e fica fechada numa linha: vazia, a linha oferece "Nova pessoa", que abre a
 // lista com o formulario; com gente, "Gerenciar pessoas" abre e fecha.
 //
 // Escrito na rodada v8 e rodado por quem junta (as frentes nao rodam o Playwright).

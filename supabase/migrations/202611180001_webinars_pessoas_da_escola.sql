@@ -1,4 +1,4 @@
--- Webinarios, as pessoas que comentam da escola (docs/30 D116; docs/31 §18; docs/21 §9.21; pedido do produtor de
+-- Webinarios, as pessoas que comentam da escola (docs/30 D117; docs/31 §18; docs/21 §9.21; pedido do produtor de
 -- 13/11/2026: "listar so o que foi criado hoje nao faz sentido, ne? Tem que listar todos os nomes que foram criados"):
 -- a lista "Pessoas que comentam" deixa de ser de cada webinario e passa a ser uma so da escola. Toda pessoa criada
 -- aparece em qualquer webinario, novo ou antigo, no editor e no console; trocar o nome, a foto ou o Aparece como muda
@@ -52,8 +52,8 @@ begin
 end;
 $$;
 
-comment on table public.webinar_personas is 'As pessoas que comentam da escola (docs/30 D116): uma lista so, que o editor e o console de todo webinario usam. O nome e unico na escola.';
-comment on column public.webinar_personas.webinar_id is 'O webinario em que a pessoa foi criada (so a origem; a lista e da escola, docs/30 D116). Nula quando ele foi excluido.';
+comment on table public.webinar_personas is 'As pessoas que comentam da escola (docs/30 D117): uma lista so, que o editor e o console de todo webinario usam. O nome e unico na escola.';
+comment on column public.webinar_personas.webinar_id is 'O webinario em que a pessoa foi criada (so a origem; a lista e da escola, docs/30 D117). Nula quando ele foi excluido.';
 
 /* ------------------------------------------------------------------------------------------------
  * 2. Uma pessoa por nome na escola: as repetidas viram uma so, e o indice unico do nome. MCP.

@@ -627,7 +627,7 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
     Number.isFinite(presenceMs) ? listPresentUserIds(db, { currentBucket: presenceBucket(Math.floor(presenceMs / 1000)), sessionId: session.id }) : Promise.resolve([]),
     simulatedDurationMs(db, session, input.webinar),
     loadConsoleScreen(db, session, nowMs),
-    // As pessoas que comentam (11/11/2026, D75): a lista da escola (D116), para o Roteiro do console (nunca no Replay).
+    // As pessoas que comentam (11/11/2026, D75): a lista da escola (D117), para o Roteiro do console (nunca no Replay).
     withScript && session.kind !== "replay" ? listPersonas(db) : Promise.resolve(NO_PERSONA_LIST),
     // As curtidas da resposta e do fio de cada pergunta (docs/30 D101); sem a 202611170001, nenhuma.
     listQuestionLikeRows(db, { sessionId: session.id })
