@@ -159,7 +159,7 @@ test("compose do Jitsi: web, prosody, jicofo e jvb na tag stable fixada, saude e
   const prosody = services.get("prosody");
   assert.match(prosody, /JWT_APP_SECRET: "\$\{JWT_APP_SECRET\}"/);
   assert.match(prosody, /JWT_ALLOW_EMPTY: "0"/);
-  assert.match(prosody, /XMPP_MUC_MODULES: "\$\{XMPP_MUC_MODULES:-token_affiliation,bunker_room_guard\}"/, "o modulo que barra quem foi removido ou banido");
+  assert.match(prosody, /XMPP_MUC_MODULES: "\$\{XMPP_MUC_MODULES:-token_affiliation,bunker_room_guard,bunker_presence_guard\}"/, "o modulo que barra quem foi removido ou banido e o que deixa so a foto do token (D115)");
   assert.match(prosody, /ROOM_GUARD_URL: "\$\{ROOM_GUARD_URL:-\}"/);
   assert.match(prosody, /- \.\/prosody\/plugins:\/prosody-plugins-custom:ro/, "a copia versionada do token_affiliation entra no caminho dos plugins");
   assert.match(prosody, /\/usr\/local\/bin\/healthcheck\.sh/);
@@ -274,7 +274,12 @@ test("custom-config.js e custom-interface_config.js, avaliados como o navegador 
   assert.equal(config.disablePolls, true);
   assert.equal(config.disableReactions, true);
   assert.equal(config.disableDeepLinking, true);
-  assert.equal(config.disableThirdPartyRequests, true);
+  // A foto do Perfil na miniatura (docs/30 D115): a chave fica desligada e cada terceiro e barrado um por um (o video
+  // compartilhado e a foto de outro endereco saem no Prosody, mod_bunker_presence_guard).
+  assert.equal(config.disableThirdPartyRequests, false);
+  assert.equal(config.gravatar.disabled, true, "sem Gravatar");
+  assert.equal(config.analytics.disabled, true, "sem analise de uso");
+  assert.equal(config.giphy.enabled, false, "sem Giphy");
   assert.equal(config.channelLastN, 9, "palco + 8 miniaturas");
   // Objetos criados dentro do vm tem o prototipo de outro "realm": compara-se o valor, nao a referencia.
   const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -367,7 +372,7 @@ test("generate-secrets em producao: --domain e --email obrigatorios, --jwt-secre
   assert.equal(env.get("MEET_SITE_ADDRESS"), "meet.exemplo.com.br");
   assert.equal(env.get("MEET_FRAME_ANCESTORS"), "https://membros.exemplo.com.br", "a area de membros e membros.<mesmo dominio> por convencao");
   assert.equal(env.get("ROOM_GUARD_URL"), "https://membros.exemplo.com.br/api/webhooks/room-guard", "a lista de barrados do app");
-  assert.equal(env.get("XMPP_MUC_MODULES"), "token_affiliation,bunker_room_guard");
+  assert.equal(env.get("XMPP_MUC_MODULES"), "token_affiliation,bunker_room_guard,bunker_presence_guard");
   assert.equal(env.get("ACME_EMAIL"), "equipe@exemplo.com.br");
   assert.equal(env.get("CADDY_BIND"), "0.0.0.0");
   assert.equal(env.get("CADDY_LOCAL_CERTS"), "");
@@ -408,6 +413,46 @@ test("mod_bunker_room_guard: recusa na entrada (antes do token_affiliation) a co
   const ts = String(Math.floor(Date.now() / 1000));
   const assinatura = createHmac("sha256", chave).update(`${ts}.`).digest("hex");
   assert.deepEqual(verifyRecorderSignature({ body: "", now: Date.now(), secret: roomGuardKey(jwt), signature: assinatura, timestamp: ts }), { ok: true });
+});
+
+test("mod_bunker_presence_guard (D115): toda presenca que chega de uma sessao perde o video compartilhado e a foto anunciada, e volta so com a foto do token; um erro nunca derruba a sessao", () => {
+  const plugin = read(join(jitsiDir, "prosody", "plugins", "mod_bunker_presence_guard.lua"));
+  assert.match(plugin, /filters\.add_filter_hook\(filter_session\)/, "vale para toda sessao nova, como o mod_muc_displayname do Jitsi");
+  assert.match(plugin, /filters\.remove_filter_hook\(filter_session\)/);
+  assert.match(plugin, /filters\.add_filter\(session, "stanzas\/in", guard_presence, -?\d+\)/, "filtro de entrada: o que o navegador manda");
+  assert.match(plugin, /\["shared-video"\] = true, \["avatar-url"\] = true/, "os dois comandos que o navegador nao decide");
+  assert.match(plugin, /session\.jitsi_meet_context_user/, "a foto vem do token assinado pelo app");
+  assert.match(plugin, /avatar:match\("\^https\?:\/\/\[\^%s<>\\"\]\+\$"\)/, "so endereco http(s) sem espaco nem marcacao");
+  assert.match(plugin, /add_direct_child\(st\.stanza\("avatar-url"\):text\(avatar\)\)/, "a foto volta na raiz, sem mexer no cursor");
+  assert.match(plugin, /pcall\(function\(\)/, "um erro vira aviso no log, nunca derruba a sessao");
+  assert.match(plugin, /stanza\.attr\.type == "unavailable"/, "a saida passa intacta");
+  assert.doesNotMatch(plugin, /http\.request|os\.getenv/, "nada de rede nem de ambiente: so a presenca e o token");
+
+  // De verdade, com o util.stanza e o util.filters do Prosody 13, quando a maquina tem os dois (ver o cabecalho do .lua).
+  const root = process.env.PROSODY_LUA_ROOT;
+  const lua = spawnSync("lua5.4", ["-v"], { encoding: "utf8" });
+  if (!root || lua.status !== 0) {
+    return;
+  }
+  const run = spawnSync("lua5.4", [fileURLToPath(new URL("./support/prosody-presence-guard.lua", import.meta.url)), root, join(jitsiDir, "prosody", "plugins", "mod_bunker_presence_guard.lua")], { encoding: "utf8" });
+  assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
+  assert.doesNotMatch(run.stdout, /FALHOU/);
+});
+
+test("deploy-meet poe o bunker_presence_guard na lista do Prosody de um servidor que ja existia, sem tirar os outros modulos (D115)", () => {
+  const start = deploySource.indexOf("    muc_modules=$(get_env");
+  const end = deploySource.indexOf("    esac\n", start) + "    esac\n".length;
+  assert.ok(start > 0 && end > start, "o passo esta no ramo do meet");
+  const meetBranch = deploySource.slice(deploySource.indexOf('elif [ "$role" = "meet" ]; then'));
+  assert.ok(meetBranch.indexOf("muc_modules=$(get_env") < meetBranch.indexOf("$jitsi_compose up -d"), "antes do compose up (o prosody e recriado com o ambiente novo)");
+  const passo = (atual) => {
+    const script = `get_env() { printf '%s' "$ATUAL"; }\nset_env() { echo "set $3=$4"; }\ntarget=t; envf=e\n${deploySource.slice(start, end)}echo fim`;
+    return spawnSync("bash", ["-c", script], { encoding: "utf8", env: { ...process.env, ATUAL: atual } }).stdout.trim();
+  };
+  assert.equal(passo("token_affiliation,bunker_room_guard"), "set XMPP_MUC_MODULES=token_affiliation,bunker_room_guard,bunker_presence_guard\nfim");
+  assert.equal(passo(""), "set XMPP_MUC_MODULES=token_affiliation,bunker_room_guard,bunker_presence_guard\nfim", "sem a linha: o padrao do compose mais o modulo");
+  assert.equal(passo("token_affiliation,bunker_room_guard,outro"), "set XMPP_MUC_MODULES=token_affiliation,bunker_room_guard,outro,bunker_presence_guard\nfim", "um modulo a mais fica");
+  assert.equal(passo("token_affiliation,bunker_presence_guard,bunker_room_guard"), "fim", "ja esta: nada muda e o prosody nao e recriado");
 });
 
 test("licenca e atribuicao ficam no repositorio, nao na tela: LICENSE-jitsi (Apache 2.0), NOTICE e a copia do mod_token_affiliation", () => {

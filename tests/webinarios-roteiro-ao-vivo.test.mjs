@@ -309,7 +309,7 @@ test("R9 a foto no chat (muda o D62 so nisto): a mensagem do roteiro mostra a fo
   assert.equal(authorPhotoUrl({ ...base, personaAvatarUrl: null, source: "scripted", viewer: "student" }), null);
   assert.equal(authorPhotoUrl({ ...base, source: "scripted", viewer: "student" }), null);
   assert.equal(authorPhotoUrl({ ...base, personaAvatarUrl: url, source: "ai", viewer: "student" }), null, "o Assistente nunca");
-  const aluno = { authorUserId: "11111111-1111-4111-8111-111111111111", displayName: "Ana M.", photo: { avatarUrl: "https://x/y.webp", consentCurrent: true }, webinarId: WEBINAR };
+  const aluno = { authorUserId: "11111111-1111-4111-8111-111111111111", displayName: "Ana M.", photo: { avatarUrl: "https://x/y.webp" }, webinarId: WEBINAR };
   assert.equal(authorPhotoUrl({ ...aluno, personaAvatarUrl: url, source: "audience", viewer: "student" }), "https://x/y.webp", "o aluno real segue a regra dele");
 });
 

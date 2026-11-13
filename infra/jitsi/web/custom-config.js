@@ -22,9 +22,19 @@ config.disableChat = true;
 config.disablePolls = true;
 config.disableReactions = true;
 
-// Sem a pagina "abra no aplicativo" e sem pedidos a terceiros (gravatar etc.).
+// Sem a pagina "abra no aplicativo".
 config.disableDeepLinking = true;
-config.disableThirdPartyRequests = true;
+
+// A foto do Perfil na miniatura (docs/30 D115): na tag fixada, o motor so carrega foto por endereco com os pedidos a
+// terceiros ligados; com a chave desligada, a miniatura so aceita foto embutida e mostra as iniciais. O que a chave
+// barrava fica barrado um por um: o Gravatar, a analise de uso e o Giphy aqui; o video compartilhado (YouTube) e a
+// foto anunciada por outro endereco saem no Prosody (mod_bunker_presence_guard), que so repassa a foto do token. O
+// ENABLE_THIRD_PARTY_REQUESTS=0 do .env continua: este arquivo vem depois do config.js gerado e vence.
+config.disableThirdPartyRequests = false;
+config.gravatar = { disabled: true };
+config.analytics = config.analytics || {};
+config.analytics.disabled = true;
+config.giphy = { enabled: false };
 
 // Cada um recebe no maximo o palco + 8 miniaturas (quem falou por ultimo).
 config.channelLastN = 9;

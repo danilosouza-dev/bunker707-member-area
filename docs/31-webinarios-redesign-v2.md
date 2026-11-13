@@ -336,7 +336,7 @@ O **⋯** que o motor de vídeo mostra na miniatura (o menu com **Fixar no palco
 |---|---|---|
 | V2-A71 | A lista `/webinarios` no mesmo padrão (o destaque da próxima live) | fica como está até o produtor pedir; a página do webinário era a que destoava |
 | V2-A72 | O fio das Perguntas na gaveta do vertical (o celular em pé, na Live gravada) | a gaveta mostra só a primeira resposta; o fio completo e o Responder ficam no desenho normal |
-| V2-A73 | A foto do perfil nas miniaturas do motor de vídeo | as miniaturas seguem com as iniciais: o token continua sem avatar (`docs/30` §8.5) |
+| V2-A73 | A foto do perfil nas miniaturas do motor de vídeo | **respondida em 13/11/2026 (`docs/30` D115)**: a miniatura mostra a foto de quem a enviou pelo Perfil, com ou sem o aceite do chat; as iniciais só sem foto |
 | V2-A74 | O anel de foco do admin (2 px, afastado) nos campos de digitar do resto do admin | fica: o pedido foi sobre o console; mudar o admin inteiro pede uma decisão própria |
 
 ### 11.5 Quem assiste agora, ao lado do selo do momento
@@ -519,7 +519,7 @@ O produtor testou a `dev` em 12/11/2026 e mandou doze pedidos (P1 a P12). As dec
 
 ### 14.1 As pílulas do palco com a foto e com tempo (P2)
 
-As pílulas das duas últimas mensagens, na base do palco com o painel fechado (V2-8), mostravam sempre as iniciais e ficavam até a pessoa abrir o chat. Agora o avatar de 22 px leva a foto pela regra do chat (`docs/30` D62 e D82: a da equipe sempre, a do aluno com o aceite em dia, a da pessoa que comenta na mensagem do roteiro; sem foto, as iniciais), e cada pílula fica 8 s e some sozinha (`CHAT_PILL_TTL_MS`). A contagem começa quando a mensagem entra na lista do navegador (`pillsStep`, com o relógio lido só no efeito e no despertador); a saída é só o sumiço, sem animação (a lista é `aria-live`). O console não desenha pílulas: a correção é no componente da sala, que o produtor também vê quando abre a sala como aluno.
+As pílulas das duas últimas mensagens, na base do palco com o painel fechado (V2-8), mostravam sempre as iniciais e ficavam até a pessoa abrir o chat. Agora o avatar de 22 px leva a foto pela regra do chat (`docs/30` D62 e D82: a da equipe sempre, a do aluno com o aceite em dia, e desde o D115 a do aluno sempre que existir, a da pessoa que comenta na mensagem do roteiro; sem foto, as iniciais), e cada pílula fica 8 s e some sozinha (`CHAT_PILL_TTL_MS`). A contagem começa quando a mensagem entra na lista do navegador (`pillsStep`, com o relógio lido só no efeito e no despertador); a saída é só o sumiço, sem animação (a lista é `aria-live`). O console não desenha pílulas: a correção é no componente da sala, que o produtor também vê quando abre a sala como aluno.
 
 ### 14.2 O painel com largura máxima e com transição (P10 e P12)
 

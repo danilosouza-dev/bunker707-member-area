@@ -617,7 +617,14 @@ pela Cloudflare). O IP do C fica visivel; a protecao e o firewall da Hetzner, o 
   `smoke.sh` (site no ar, servicos saudaveis, nenhuma marca do Jitsi na interface, UDP 10000 ouvindo).
 - Com o stack ja no ar, um novo `deploy-meet` recria containers e derruba quem esta na sala: so com `SEM_LIVE_2H=sim`
   nas opcoes (nenhuma live nas proximas 2 h).
-- O `.env` do C leva `XMPP_MUC_MODULES=token_affiliation,bunker_room_guard` e `ROOM_GUARD_URL=<origem da area de
+- **A foto do Perfil na miniatura (13/11/2026, `docs/30` D115)**: o Prosody carrega tambem o nosso
+  `bunker_presence_guard` (a presenca de cada um leva so a foto do token e nunca o video compartilhado). O
+  `deploy-meet` acrescenta o modulo ao `XMPP_MUC_MODULES` do `.env` do C quando falta, sem tirar os outros, e o compose
+  recria o prosody (o ambiente mudou; o `reconnect_focus` reinicia o jicofo). Vale como qualquer `deploy-meet`: da
+  `main`, com `SEM_LIVE_2H=sim`, e com o C restaurado do snapshot antes (`restaurar` com `PAPEIS=meet`, §4A.7).
+  Conferir depois: numa sala de teste com duas contas, a miniatura de quem tem foto no Perfil mostra a foto; no C,
+  `exec-meet` com `docker compose logs prosody | grep -i presence_guard` nao mostra erro ao carregar.
+- O `.env` do C leva `XMPP_MUC_MODULES=token_affiliation,bunker_room_guard,bunker_presence_guard` e `ROOM_GUARD_URL=<origem da area de
   membros>/api/webhooks/room-guard` (o `generate-secrets.sh` deriva os dois; num `.env` gerado antes de 29/10/2026,
   acrescentar as duas linhas a mao antes do proximo `deploy-meet`): o Prosody busca ali, a cada 5 s, quem a equipe
   removeu ou baniu e recusa a entrada dessas contas mesmo com o token antigo (`docs/30` §8.1). A busca e assinada com
@@ -725,6 +732,7 @@ equipe tecnica). Se o monitor acusar queda com live marcada nas proximas 24 h, o
 | Envio para a Bunny falhou (`upload_failed`) | o e-mail "A gravacao nao subiu" chega ao Apresentador; arquivo em `/opt/jibri/recordings` (`exec-jibri`); reenviar como em §8B.5 ou subir pelo painel da Bunny e ligar pelo console; so entao `jibri-down` com `FORCAR=1` |
 | Certificado do `meet` invalido | `docker compose logs caddy` no C; o registro DNS so DNS (sem proxy); porta 80 aberta; `docker compose restart caddy` |
 | O servidor C sumiu | painel da Hetzner; o plano B "Live gravada do dia" (§8B.7) e o aviso pelo sino; reprovisionar com `provision-meet` + `deploy-meet` + `secrets-meet` (o DNS e refeito pelo `cf_apply_dns`) |
+| A miniatura mostra as iniciais de quem tem foto no Perfil | o `custom-config.js` servido (`https://meet.<dominio>/config.js`) termina com `config.disableThirdPartyRequests = false`; `XMPP_MUC_MODULES` com `bunker_presence_guard` no `.env` do C e `docker compose logs prosody` sem erro do modulo; a foto e a enviada pelo Perfil (a do Google vira iniciais, `docs/30` D115); o motor le a foto so na entrada |
 | Aluno removido ou banido volta para a sala | `XMPP_MUC_MODULES` com `bunker_room_guard` e `ROOM_GUARD_URL` no `.env` do C; `exec-meet` com `docker compose logs prosody` ("lista de barrados indisponivel" = o app nao respondeu: conferir `JWT_APP_SECRET` = `WEBINAR_JWT_SECRET` e o `ROOM_GUARD_URL`); o token vence em 15 min de qualquer jeito |
 | O segredo do token vazou | trocar `JWT_APP_SECRET` (C, `secrets-meet`) e `WEBINAR_JWT_SECRET` (app, `secrets-membros`) juntos, fora de live (derruba quem esta na sala) |
 
