@@ -84,3 +84,31 @@ config.localRecording = { disable: false };
     }
 })();
 // bunker707:css-loader:fim
+
+// Bunker707: os participantes simulados desenhados pelo proprio motor (docs/30 D117). Como o carregador do CSS acima,
+// este roda como script da pagina, antes do app: so liga /libs/bunker707-plateia.js, servido por este mesmo nginx
+// (montado em docker-compose.yml), e so em dois casos: o iframe do nosso app (a chave config.bunkerTheme no hash) e o
+// gravador (config.iAmRecorder=true no hash, que o Jibri manda). Uma sala aberta pelo endereco nao carrega nada. O
+// arquivo so poe na lista de participantes deste navegador o que a nossa pagina manda (ou, no gravador, o que um
+// moderador manda); sem ele, o motor segue como sempre. So cria a tag de script para um caminho desta origem, entre as
+// marcas. O nome da tag nunca aparece escrito com os sinais de menor e maior neste arquivo, nem em comentario: ele entra
+// inline no index.html, depois de um texto de comentario de HTML no config.js gerado, e a tag escrita ali faria o
+// navegador nao fechar o bloco (o index inteiro quebraria; conferido no ensaio local de 13/11/2026).
+// bunker707:plateia-loader:inicio
+(function () {
+    if (typeof document === 'undefined' || typeof window === 'undefined') { return; }
+    try {
+        var hash = String((window.location && window.location.hash) || '');
+        var ours = /config\.bunkerTheme=/.test(hash);
+        var recorder = /config\.iAmRecorder=(?:%22|"|%27|')?true\b/.test(hash);
+        if (!ours && !recorder) { return; }
+        var script = document.createElement('script');
+        // O v e o comeco do sha256 do arquivo (a guarda da infra confere e diz o valor novo), como no CSS.
+        script.src = '/libs/bunker707-plateia.js?v=b852b9d6';
+        script.async = true;
+        (document.head || document.documentElement).appendChild(script);
+    } catch (e) {
+        // Sem o arquivo, o motor segue como sempre.
+    }
+})();
+// bunker707:plateia-loader:fim

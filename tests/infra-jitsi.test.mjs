@@ -307,12 +307,28 @@ test("custom-config.js e custom-interface_config.js, avaliados como o navegador 
   const generated = "config.toolbarButtons = ['microphone', 'desktop', 'recording'];\n";
   assert.match(toolbarCheck(`${generated}${customConfig}`), /cfg_ok=1/, "a nossa barra minima no fim passa");
   assert.match(toolbarCheck(generated), /FALHA config\.js barra padrao com 'desktop'/, "a barra do host no config.js servido falha");
-  // Os dois arquivos so atribuem: nada de fetch, script ou acesso a window. A unica excecao e o carregador do CSS
-  // nosso (docs/31 §3), entre as marcas (uma vez so): ele so le o hash e cria um <link> para um caminho desta origem.
+  // Os dois arquivos so atribuem: nada de fetch, script ou acesso a window. As unicas excecoes sao os dois carregadores
+  // nossos, cada um entre as suas marcas (uma vez so): o do CSS (docs/31 §3), que so le o hash e cria um <link> para um
+  // caminho desta origem, e o dos participantes simulados (docs/30 D117), que so le o hash e cria a tag de script para
+  // um caminho desta origem.
   assert.equal(customConfig.split("bunker707:css-loader:inicio").length, 2, "uma marca de inicio so: nada se esconde num segundo bloco");
   const loader = /\/\/ bunker707:css-loader:inicio\n([\s\S]*?)\/\/ bunker707:css-loader:fim\n/.exec(customConfig);
   assert.ok(loader, "o carregador do CSS fica entre as marcas bunker707:css-loader");
-  for (const source of [customConfig.replace(loader[0], ""), customInterface]) assert.doesNotMatch(source, /\b(fetch|XMLHttpRequest|document|window|import|require)\b/);
+  assert.equal(customConfig.split("bunker707:plateia-loader:inicio").length, 2, "uma marca de inicio so no carregador dos simulados");
+  const audienceLoader = /\/\/ bunker707:plateia-loader:inicio\n([\s\S]*?)\/\/ bunker707:plateia-loader:fim\n/.exec(customConfig);
+  assert.ok(audienceLoader, "o carregador dos simulados fica entre as marcas bunker707:plateia-loader");
+  for (const source of [customConfig.replace(loader[0], "").replace(audienceLoader[0], ""), customInterface]) assert.doesNotMatch(source, /\b(fetch|XMLHttpRequest|document|window|import|require)\b/);
+  assert.doesNotMatch(
+    audienceLoader[1],
+    /\b(fetch|XMLHttpRequest|import|require|eval|innerHTML|WebSocket|EventSource|sendBeacon|navigator|Function|setTimeout|setInterval|postMessage)\b|location\.(href|replace|assign)/,
+    "o carregador dos simulados nao busca nada, nao escuta nada e nao navega: so liga o arquivo"
+  );
+  assert.doesNotMatch(audienceLoader[1], /https?:|wss?:|['"]\/\//, "o arquivo fica nesta origem (nem endereco sem esquema)");
+  assert.match(audienceLoader[1], /script\.src = '\/libs\/bunker707-plateia\.js\?v=[0-9a-f]{8}';/, "o v e o comeco do sha256 do arquivo (infra-jitsi-plateia.guard confere o valor)");
+  // Os dois arquivos entram inline no index.html, depois de um texto de comentario de HTML no config.js gerado
+  // (subdir.startsWith com o abre-comentario). Com isso, o nome da tag de script escrito ali, ate em comentario, faz o
+  // navegador nao fechar o bloco e o index inteiro quebra (ensaio local de 13/11/2026: a sala nao abria).
+  for (const source of [customConfig, customInterface]) assert.doesNotMatch(source, /<\/?script|<!--/i, "nem a tag de script nem o abre-comentario de HTML escritos nos arquivos que entram inline");
   assert.doesNotMatch(
     loader[1],
     /\b(fetch|XMLHttpRequest|import|require|eval|innerHTML|src|WebSocket|EventSource|sendBeacon|navigator|Function|setTimeout|setInterval|postMessage)\b|location\.(href|replace|assign)/,
@@ -1040,7 +1056,7 @@ test("o carregador do CSS: so com config.bunkerTheme no hash cria o <link> (v = 
     const documentElement = { attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } };
     const fakeDocument = { createElement: (tag) => ({ tag }), documentElement, head };
     vm.runInNewContext(customConfig, { config: { videoQuality: {} }, document: fakeDocument, window: { location: { hash } } });
-    return { link: head.children[0] ?? null, theme: documentElement.attributes["data-bunker-theme"] ?? null };
+    return { link: head.children.find((element) => element.tag === "link") ?? null, theme: documentElement.attributes["data-bunker-theme"] ?? null };
   };
   const link = { href: `/css/bunker707.css?v=${v}`, rel: "stylesheet", tag: "link" };
   // O external_api.js serializa configOverwrite.bunkerTheme = "light" como config.bunkerTheme=%22light%22.
@@ -1058,6 +1074,30 @@ test("o carregador do CSS: so com config.bunkerTheme no hash cria o <link> (v = 
   const config = { videoQuality: {} };
   vm.runInNewContext(customConfig, { config });
   assert.equal(config.channelLastN, 9);
+});
+
+// Os participantes simulados desenhados pelo motor (docs/30 D117): o carregador do arquivo no custom-config.js, avaliado
+// como o navegador faria. So liga o arquivo no iframe do nosso app (a chave do tema no hash) e no gravador
+// (config.iAmRecorder=true, que o Jibri manda); uma sala aberta pelo endereco nao carrega nada. O que o arquivo faz
+// tem teste de comportamento em tests/infra-jitsi-plateia.test.mjs; a montagem e o smoke, a guarda ao lado.
+test("o carregador dos simulados: liga /libs/bunker707-plateia.js (v = sha256 do arquivo) so no iframe do nosso app e no gravador", () => {
+  const v = createHash("sha256").update(readFileSync(join(jitsiDir, "web", "bunker707-plateia.js"))).digest("hex").slice(0, 8);
+  const run = (hash) => {
+    const head = { children: [], appendChild(element) { this.children.push(element); } };
+    const documentElement = { setAttribute() {} };
+    const fakeDocument = { createElement: (tag) => ({ tag }), documentElement, head };
+    vm.runInNewContext(customConfig, { config: { videoQuality: {} }, document: fakeDocument, window: { location: { hash } } });
+    return head.children.filter((element) => element.tag === "script");
+  };
+  const script = [{ async: true, src: `/libs/bunker707-plateia.js?v=${v}`, tag: "script" }];
+  assert.deepEqual(run("#jitsi_meet_external_api_id=0&config.bunkerTheme=%22dark%22&config.disableChat=true"), script, "o iframe do nosso app");
+  assert.deepEqual(run('#config.bunkerTheme="light"'), script);
+  assert.deepEqual(run("#config.iAmRecorder=true&config.externalConnectUrl=null&config.startWithAudioMuted=true"), script, "o gravador, como o Jibri abre a sala");
+  assert.deepEqual(run("#config.iAmRecorder=%22true%22"), script);
+  assert.deepEqual(run("#config.disableChat=true"), [], "uma sala aberta pelo endereco, sem as chaves: nada");
+  assert.deepEqual(run(""), []);
+  assert.deepEqual(run("#config.iAmRecorder=false"), [], "so o gravador de verdade");
+  assert.deepEqual(run("#config.iAmRecorder=trueish"), []);
 });
 
 // A linha do install -d da pasta do gravador tem o __DEPLOY_USER__ duas vezes: sem o /g do sed a segunda ficava, o
