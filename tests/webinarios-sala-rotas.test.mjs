@@ -349,7 +349,7 @@ test("D64, pagina antiga nas Perguntas e no fio: os tres pedidos respondem 400; 
   assert.deepEqual(fio.tables.webinar_chat_consents.map((row) => [row.display_mode, row.nickname]), [["first_name_initial", null]]);
 });
 
-test("D64, o aceite antigo com anonimo ou apelido (na versao de agora) conta como sem aceite: a sessao diz consented false, as escritas pedem o aceite (409), a foto nao aparece para outro aluno, e aceitar de novo grava first_name_initial sem apelido", async () => {
+test("D64, o aceite antigo com anonimo ou apelido (na versao de agora) conta como sem aceite: a sessao diz consented false, as escritas pedem o aceite (409), a foto aparece para outro aluno assim mesmo (D115: a foto nao depende do aceite), e aceitar de novo grava first_name_initial sem apelido", async () => {
   // So a foto enviada pelo Perfil aparece na sala (avatars/{id}/arquivo, pela origem do nosso Supabase: roomPhotoUrl).
   const origemAntes = process.env.NEXT_PUBLIC_SUPABASE_URL;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://projeto.supabase.co";
@@ -387,13 +387,13 @@ test("D64, o aceite antigo com anonimo ou apelido (na versao de agora) conta com
       assert.equal(db.tables.webinar_question_replies.length, 0);
       assert.equal(db.tables.webinar_chat_consents[0].display_mode, modo, "a linha antiga continua como estava ate o aluno aceitar de novo");
 
-      // Outro aluno le o chat: a foto de quem tem o aceite antigo nao aparece (as iniciais).
+      // Outro aluno le o chat: a foto de quem tem o aceite antigo aparece (D115, 13/11/2026: a foto do Perfil nao depende do aceite).
       const autor = sessao.user;
       sessao.user = { id: `66666666-6666-4666-8666-${userId.slice(-12)}` };
       const ler = async (from, to) => (await json(await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${SESSION}&from=${from}&to=${to}`), contexto()))).body.data.messages;
       const antes = (await ler(90_000, 120_000)).find((message) => message.id === ANTIGA);
       assert.equal(antes.displayName, nomeAntigo, "o que ja foi escrito aparece como foi gravado");
-      assert.equal(antes.avatarUrl, null, `${modo}: sem o aceite em dia, sem foto para os outros alunos`);
+      assert.equal(antes.avatarUrl, FOTO, `${modo}: sem o aceite em dia, a foto do Perfil aparece para os outros alunos`);
 
       // O aluno aceita de novo (o texto de agora): o aceite passa a first_name_initial, sem apelido, e o nome e o dele.
       sessao.user = autor;
@@ -410,7 +410,7 @@ test("D64, o aceite antigo com anonimo ou apelido (na versao de agora) conta com
       sessao.user = { id: `66666666-6666-4666-8666-${userId.slice(-12)}` };
       // A sessao comecou ha 10 min: a mensagem nova caiu perto dos 600 s do relogio do servidor.
       const nova = (await ler(aceitou.body.data.message.offsetMs - 10_000, aceitou.body.data.message.offsetMs + 10_000)).find((message) => message.id === aceitou.body.data.message.id);
-      assert.equal(nova.avatarUrl, FOTO, `${modo}: com o aceite de agora, a foto aparece para os outros alunos`);
+      assert.equal(nova.avatarUrl, FOTO, `${modo}: com o aceite de agora, a mesma foto para os outros alunos`);
       sessao.user = autor;
     }
   } finally {

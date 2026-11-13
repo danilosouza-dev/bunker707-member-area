@@ -595,7 +595,7 @@ test("join-token do aluno: 409 not_started na agendada; 200 na espera e no ar co
   // No ar ha 95 s, 60 min previstos: o fim previsto + 30 min e daqui a 88 min; o token curto vence antes (agora + 15 min):
   // o Remover e o Banir nao revogam o token que o navegador ja tem (seguranca-01).
   perto(claims.exp, agora + 15 * 60, 2, "exp = agora + 15 min");
-  assert.deepEqual(claims.context.user, { id: userId, name: "Ana S." }, "primeiro nome + inicial, sem e-mail nem avatar");
+  assert.deepEqual(claims.context.user, { id: userId, name: "Ana S." }, "primeiro nome + inicial, sem e-mail; a foto de fora nunca vai (D115)");
   assert.deepEqual(
     claims.context.features,
     { livestreaming: false, "outbound-call": false, recording: false, "screen-sharing": false },
@@ -701,6 +701,44 @@ test("papeis pela regra unica: host (moderator, grava, tela), co-apresentador (m
   const forcado = await json(await joinTokenRoute.POST(pedido(`${WEBINAR}/join-token`, "POST", { role: "host", sessionId: LIVE }), contexto()));
   assert.equal(forcado.status, 409);
   assert.equal(db.tables.student_events.length, 0, "a equipe na sala nao e plateia: nenhum webinar_joined");
+});
+
+test("D115: a foto enviada pelo Perfil vai no token sempre que existir (o aluno com ou sem o aceite do chat, e a equipe); sem foto, com um endereco de fora ou com a foto de outra pasta, o motor mostra as iniciais", async () => {
+  const origemAntes = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://projeto.supabase.co";
+  try {
+    const foto = (id) => `https://projeto.supabase.co/storage/v1/object/public/content-assets/avatars/${id}/foto.webp`;
+    const { db, userId } = montar();
+    const meuPerfil = db.tables.profiles.find((row) => row.id === userId);
+    meuPerfil.avatar_url = foto(userId);
+
+    assert.deepEqual(claimsDe(await token()).context.user, { avatar: foto(userId), id: userId, name: "Ana S." }, "o aluno sem o aceite do chat ja leva a foto");
+    db.tables.webinar_chat_consents.push({ consent_version: CHAT_CONSENT_VERSION, display_mode: "first_name_initial", nickname: null, revoked_at: null, user_id: userId });
+    assert.equal(claimsDe(await token()).context.user.avatar, foto(userId), "com o aceite, a mesma foto");
+    db.tables.webinar_chat_consents[0].revoked_at = iso(Date.now());
+    assert.equal(claimsDe(await token()).context.user.avatar, foto(userId), "o aceite retirado nao tira a foto");
+
+    meuPerfil.avatar_url = null;
+    assert.deepEqual(claimsDe(await token()).context.user, { id: userId, name: "Ana S." }, "sem foto: as iniciais");
+    meuPerfil.avatar_url = "https://lh3.googleusercontent.com/a/foto";
+    assert.equal(claimsDe(await token()).context.user.avatar, undefined, "um endereco de fora nunca chega ao motor");
+    meuPerfil.avatar_url = foto("77777777-7777-4777-8777-777777777777");
+    assert.equal(claimsDe(await token()).context.user.avatar, undefined, "a pasta de outra pessoa");
+
+    const host = daEquipe(db);
+    db.tables.profiles.find((row) => row.id === host).avatar_url = foto(host);
+    db.tables.webinars[0].host_user_id = host;
+    const doHost = claimsDe(await token());
+    assert.equal(doHost.context.user.avatar, foto(host), "a equipe com a foto");
+    assert.equal(doHost.context.user.name, "Bruno C.");
+    assert.equal(doHost.context.user.moderator, true);
+
+    daEquipe(db);
+    assert.equal(claimsDe(await token()).context.user.avatar, undefined, "a equipe sem foto: as iniciais");
+  } finally {
+    if (origemAntes === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = origemAntes;
+  }
 });
 
 test("join-token: removido 409 kicked, banido 409 banned, encerrada 409 ended; silenciado entra; a equipe nunca e barrada; a vaga obrigatoria e do aluno", async () => {

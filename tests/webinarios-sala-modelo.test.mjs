@@ -162,15 +162,13 @@ test("a mensagem para o aluno: scripted vai com o papel da persona, pendente so 
   assert.equal(room.offsetLabel(-30_000), "-0:30");
 });
 
-test("a foto de quem escreveu (docs/30 §8.5, aceite versao 2): a da equipe sempre; a do aluno so com o aceite em dia e nunca no anonimo (legado: linhas de antes de 10/11/2026); a equipe ve sem depender do aceite; o roteiro e o Assistente nunca", () => {
+test("a foto de quem escreveu (docs/30 §8.5; D115, 13/11/2026): quem enviou a foto pelo Perfil aparece com ela, sempre, para a turma e para a equipe, sem depender do aceite; as iniciais so sem foto; nunca no anonimo (legado: linhas de antes de 10/11/2026); o roteiro e o Assistente nunca", () => {
   const foto = "https://exemplo.test/ana.jpg";
-  const emDia = { avatarUrl: foto, consentCurrent: true };
-  const antigo = { avatarUrl: foto, consentCurrent: false };
-  const aluno = { authorUserId: "u1", displayName: "Ana M.", photo: emDia, source: "audience", viewer: "student", webinarId: "w1" };
-  assert.equal(room.authorPhotoUrl(aluno), foto, "o aluno com o aceite da versao de agora");
-  assert.equal(room.authorPhotoUrl({ ...aluno, photo: antigo }), null, "quem aceitou o texto de antes (so o nome) fica com as iniciais para os outros alunos");
-  assert.equal(room.authorPhotoUrl({ ...aluno, photo: antigo, viewer: "team" }), foto, "a equipe, no console, ve a foto do aluno (ela ja ve o perfil)");
-  assert.equal(room.authorPhotoUrl({ ...aluno, photo: { avatarUrl: null, consentCurrent: true } }), null, "sem foto no perfil, nada");
+  const comFoto = { avatarUrl: foto };
+  const aluno = { authorUserId: "u1", displayName: "Ana M.", photo: comFoto, source: "audience", viewer: "student", webinarId: "w1" };
+  assert.equal(room.authorPhotoUrl(aluno), foto, "o aluno com foto no Perfil, para os outros alunos, com ou sem o aceite do chat");
+  assert.equal(room.authorPhotoUrl({ ...aluno, viewer: "team" }), foto, "a mesma foto para a equipe no console");
+  assert.equal(room.authorPhotoUrl({ ...aluno, photo: { avatarUrl: null } }), null, "sem foto no perfil: as iniciais");
   assert.equal(room.authorPhotoUrl({ ...aluno, photo: undefined }), null);
   // O anonimo (legado: linhas de antes de 10/11/2026, D64; nada novo e gravado assim): pela pergunta Anonima ou pelo
   // nome gravado "Aluno {n}" de quem participava como anonimo; nem a equipe ve.
@@ -181,11 +179,9 @@ test("a foto de quem escreveu (docs/30 §8.5, aceite versao 2): a da equipe semp
   assert.equal(room.authorPhotoUrl({ ...aluno, anonymous: true }), null);
   assert.equal(room.authorPhotoUrl({ ...aluno, anonymous: true, viewer: "team" }), null);
   assert.equal(room.authorPhotoUrl({ ...aluno, displayName: room.anonymousDisplayName("u1", "outro") }), foto, "o numero e por webinario: o de outro nao esconde");
-  // A equipe: sempre, sem aceite (quem apresenta a live).
-  assert.equal(room.authorPhotoUrl({ ...aluno, photo: antigo, source: "team" }), foto);
-  // A mensagem de aluno levada para as proximas turmas segue a regra do aluno.
+  // A equipe (quem apresenta a live) e a mensagem de aluno levada para as proximas turmas: a mesma foto.
+  assert.equal(room.authorPhotoUrl({ ...aluno, source: "team" }), foto);
   assert.equal(room.authorPhotoUrl({ ...aluno, source: "original" }), foto);
-  assert.equal(room.authorPhotoUrl({ ...aluno, photo: antigo, source: "original" }), null);
   // O roteiro e o Assistente nao tem pessoa.
   assert.equal(room.authorPhotoUrl({ ...aluno, source: "scripted" }), null);
   assert.equal(room.authorPhotoUrl({ ...aluno, source: "ai" }), null);

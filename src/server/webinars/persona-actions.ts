@@ -2,7 +2,7 @@
 
 // Server Actions da lista "Pessoas que comentam" (pedido do produtor de 11/11/2026; docs/30 §2.2, §2.4, §5.2 e D75):
 // criar, editar e remover uma pessoa da lista, do card Roteiro do editor e da entrada Roteiro do console (a mesma
-// lista). Desde 13/11/2026 (docs/30 D115; migracao 202611180001) a lista e da escola: a pessoa vale em todo webinario,
+// lista). Desde 13/11/2026 (docs/30 D116; migracao 202611180001) a lista e da escola: a pessoa vale em todo webinario,
 // e o webinario de cada chamada e o de onde a equipe mexe (o arquivado fica so de leitura, a revalidacao e a auditoria
 // vao para ele; a pessoa nova o guarda como origem). A mesma permissao e o mesmo cuidado das acoes do roteiro (script-actions.ts): runWebinarAction (o modulo dos
 // Webinarios na licenca, classe conteudo) com messaging.write, o webinario arquivado so de leitura, so a Live gravada e a Live ao vivo, recordAudit so com ids e

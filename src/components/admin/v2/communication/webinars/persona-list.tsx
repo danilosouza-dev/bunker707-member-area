@@ -27,8 +27,8 @@ import { PersonaPhotoField } from "./persona-photo-field";
 // Roteiro do editor e a entrada Roteiro do console dividem:
 // - PersonaForm: a pessoa (Nome, Foto (opcional) e Aparece como), para criar ou editar; o nome repetido na lista volta
 //   no campo Nome antes de enviar (personaDraftErrors) e de novo pelo servidor; enquanto a foto sobe, o salvar espera;
-// - PersonaList: a lista "Pessoas que comentam" da escola (desde 13/11/2026 uma so para todo webinario, docs/30 D115),
-//   fechada numa linha com as primeiras fotos, o total e "Gerenciar pessoas" (D117: com 30 ou 100 pessoas, a lista
+// - PersonaList: a lista "Pessoas que comentam" da escola (desde 13/11/2026 uma so para todo webinario, docs/30 D116),
+//   fechada numa linha com as primeiras fotos, o total e "Gerenciar pessoas" (D118: com 30 ou 100 pessoas, a lista
 //   aberta tomava a pagina). Aberta: a busca a partir de 7 pessoas (sem acento nem caixa), cada pessoa com a foto ou as
 //   iniciais, o nome, o Aparece como, quantos comentarios deste roteiro a usam, e os botoes Editar e Remover (no
 //   console, tambem "Comentar como {nome}", que repete a pessoa no Novo comentário), numa caixa com rolagem propria;
@@ -207,7 +207,7 @@ export type PersonaListProps = {
 const SUMMARY_PHOTOS = 5;
 
 /**
- * A lista "Pessoas que comentam" da escola (o editor e o console; D115 e D117): fechada, uma linha com as primeiras fotos,
+ * A lista "Pessoas que comentam" da escola (o editor e o console; D116 e D118): fechada, uma linha com as primeiras fotos,
  * o total e Gerenciar pessoas (vazia, Nova pessoa); aberta, a busca (a partir de 7 pessoas), as pessoas numa caixa com
  * rolagem propria e Nova pessoa no fim.
  */

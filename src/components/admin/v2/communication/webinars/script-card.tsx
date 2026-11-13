@@ -60,13 +60,13 @@ import { minuteMarkOf, minuteMarkToMs } from "./simulation/simulation-card-model
 // com `available` falso), o card segue como antes: o Nome, o Aparece como e a Foto em cada linha, e a frase da migracao
 // no lugar da lista.
 //
-// As linhas fechadas (pedido do produtor de 13/11/2026, docs/30 D116: "se a gente criar 30 pessoas com 30 comentarios,
+// As linhas fechadas (pedido do produtor de 13/11/2026, docs/30 D117: "se a gente criar 30 pessoas com 30 comentarios,
 // fica uma lista enorme [...] Fica listando tudo aberto"): cada mensagem e uma linha so (o minuto ou o gatilho, a foto,
 // o nome, o Tipo Pergunta, a situacao quando diz algo (rascunho, desligada, frase nao achada ou o minuto da frase; a
 // "Pronta" de sempre nao repete em toda linha) e o comeco do texto) e so uma abre por vez, com os campos de sempre. Adicionar
 // abre a nova; o Salvar com problema abre a primeira linha com problema. A partir de 9 mensagens, a lista fica numa
 // caixa com rolagem propria e ganha a busca pelo nome ou pelo texto (sem acento nem caixa); a lista de pessoas da
-// escola fica numa linha que abre para gerenciar (persona-list.tsx, D117).
+// escola fica numa linha que abre para gerenciar (persona-list.tsx, D118).
 
 const copy = WEBINAR_ADMIN_COPY.script;
 const COMENTARIOS = WEBINAR_COPY.naTela.comentarios;
@@ -121,7 +121,7 @@ type ScriptCardProps = {
   origin?: string | null;
 };
 
-/** As linhas fechadas do roteiro (D116): a busca a partir de 9 mensagens, e a caixa com rolagem propria tambem. */
+/** As linhas fechadas do roteiro (D117): a busca a partir de 9 mensagens, e a caixa com rolagem propria tambem. */
 export const SCRIPT_COMPACT = { searchFrom: 9 } as const;
 
 const TRIGGER_OPTIONS: readonly { label: string; value: ScriptTrigger }[] = [
@@ -335,7 +335,7 @@ export function ScriptCard({
   // As pessoas que comentam (D75): a lista do webinario e a linha com o formulario da pessoa nova aberto.
   const [personas, setPersonas] = useState<readonly WebinarPersona[]>(initialPersonas.personas);
   const [creatingFor, setCreatingFor] = useState<string | null>(initialCreatingFor);
-  // As linhas fechadas (D116): a unica aberta, a busca e a linha que pede foco depois de abrir (a nova, a com problema).
+  // As linhas fechadas (D117): a unica aberta, a busca e a linha que pede foco depois de abrir (a nova, a com problema).
   const [openKey, setOpenKey] = useState<string | null>(initialCreatingFor ?? initialOpenKey);
   const [query, setQuery] = useState(initialQuery);
   const focusRow = useRef<string | null>(null);
@@ -708,7 +708,7 @@ export function ScriptCard({
                 data-script-row-key={row.key}
                 key={row.key}
               >
-                {/* A linha fechada (D116): o minuto ou o gatilho, a foto, o nome, os selos e o comeco do texto. */}
+                {/* A linha fechada (D117): o minuto ou o gatilho, a foto, o nome, os selos e o comeco do texto. */}
                 <div className="flex min-w-0 items-center gap-1 py-1 pr-1 pl-3">
                   <button
                     aria-controls={panelId}

@@ -241,7 +241,7 @@ function withAvatarColumn(upsert: ScriptItemUpsert, item: ScriptItemDraft, avata
 }
 
 /**
- * As pessoas dos itens que vao para o banco, pelo id: a lista da escola inteira (listPersonas le em paginas; D115) e,
+ * As pessoas dos itens que vao para o banco, pelo id: a lista da escola inteira (listPersonas le em paginas; D116) e,
  * das que o item pede e a lista nao trouxe (a que entrou na lista depois da leitura), uma leitura pelos ids. So a pessoa
  * que nao existe mais solta o item; nunca a que a leitura deixou de fora (correcao da revisao v8, achado 4).
  */

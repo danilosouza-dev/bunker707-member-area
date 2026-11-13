@@ -3,7 +3,7 @@ import test from "node:test";
 import "./support/resolve-extensionless-ts.mjs";
 import { assertOnlyAdds, assertSections, cumulativeHash, fileHash, migrationFiles, read, sqlCodeOf, statementsOf } from "./support/webinarios-migracao-guarda.mjs";
 
-// Guarda da migracao da lista de pessoas que comentam da escola (pedido do produtor de 13/11/2026; docs/30 D115, §4.2;
+// Guarda da migracao da lista de pessoas que comentam da escola (pedido do produtor de 13/11/2026; docs/30 D116, §4.2;
 // docs/21 §9.21; docs/18 §1.2): a 202611180001_webinars_pessoas_da_escola.sql.
 // - as 76 migracoes ate a 202611170001 continuam byte a byte (hash acumulado); a 202611180001 vem depois dela e e o
 //   texto exato (hash);
@@ -40,7 +40,7 @@ test("as 76 migracoes ate a 202611170001 continuam byte a byte; a 202611180001 v
   assert.ok(files.indexOf("202611180001_webinars_pessoas_da_escola.sql") > files.indexOf("202611170001_webinars_v11.sql"), "depois da rodada v11");
   assert.equal(
     fileHash(MIGRATION),
-    "9a48282a7cf6ee12636b5f230aa3fb78a4273a86e1e75fcda51870d05978741b",
+    "14c3f8e579e065eef30138484afd45bb5dd11398091e1e9ceb5acc84eb189626",
     "a 202611180001 mudou: depois de aplicada na nuvem de teste (docs/21 §9.21), a correcao vai numa migracao nova; antes, aplique de novo e atualize este hash junto"
   );
 });

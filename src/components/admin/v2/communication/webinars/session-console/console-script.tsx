@@ -27,7 +27,7 @@ import { useConsolePortal } from "./console-shell";
 // Ao fechar o formulario (Voltar, Cancelar, depois de enviar ou guardar), o foco volta ao "Novo comentário" (ou ao
 // titulo do Roteiro; console-focus.ts). Na live, "Minuto já passou" so depois da tolerancia do tick (scriptQueue).
 // As pessoas que comentam (pedido do produtor de 11/11/2026; docs/30 D75 a D78): embaixo da fila, a lista "Pessoas que
-// comentam" da escola (desde 13/11/2026, D115 e D117: uma lista so para todo webinario, fechada numa linha com as fotos
+// comentam" da escola (desde 13/11/2026, D116 e D118: uma lista so para todo webinario, fechada numa linha com as fotos
 // e o total, que abre para gerenciar; persona-list.tsx: criar, editar e remover sem sair do console, a mesma do editor), com
 // "Comentar como {nome}" em cada pessoa, que abre o Novo comentário com ela escolhida (o repetir). O "Novo comentário"
 // abre com a ultima pessoa usada enquanto a pagina estiver aberta (`lastPersonaId`, guardado no SessionConsole), e o
@@ -46,7 +46,7 @@ type ConsoleScriptProps = {
   initialComment?: ScriptCommentFormState | null;
   /** O formulario da lista aberto ao desenhar ("nova" ou o id da pessoa; o teste de tela). */
   initialPersonaForm?: string | null;
-  /** A lista de pessoas aberta ao desenhar (o teste de tela; fechada, uma linha com as fotos e o total, D117). */
+  /** A lista de pessoas aberta ao desenhar (o teste de tela; fechada, uma linha com as fotos e o total, D118). */
   initialPersonasOpen?: boolean;
   /** A ultima pessoa usada no Novo comentário (o SessionConsole guarda enquanto a pagina estiver aberta). */
   lastPersonaId?: string | null;

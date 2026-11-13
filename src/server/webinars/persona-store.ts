@@ -18,7 +18,7 @@
 //   da tela: a pessoa da lista virou a unidade (syncPersonaCopies, abaixo).
 //
 // As pessoas que comentam (pedido do produtor de 11/11/2026; docs/30 D75 a D78; migracao 202611140001):
-// - listPersonas: a lista da escola (o editor, o console e as acoes de todo webinario; desde 13/11/2026, D115), pelo
+// - listPersonas: a lista da escola (o editor, o console e as acoes de todo webinario; desde 13/11/2026, D116), pelo
 //   nome, inteira em paginas de 1.000 (a revisao v8, achado 4); banco sem a tabela, `available` falso e a lista vazia
 //   (o editor e o console seguem com o Nome digitado, como antes); fetchPersonasByIds: as que uma leitura de antes nao
 //   trouxe;
@@ -28,7 +28,7 @@
 // - syncPersonaCopies: a copia da pessoa (nome, papel e foto) em todos os itens ligados a ela, de todos os roteiros, em
 //   uma escrita;
 // - countPersonaItems: quantos itens do roteiro usam a pessoa, em todos os webinarios;
-// - o Duplicar nao copia mais a lista (copyPersonasToWebinar saiu em 13/11/2026, D115): a lista e da escola, e a copia
+// - o Duplicar nao copia mais a lista (copyPersonasToWebinar saiu em 13/11/2026, D116): a lista e da escola, e a copia
 //   ja enxerga todas as pessoas;
 // - loadScriptedQuestionAvatars: a foto da pergunta simulada pelo id (a copia gravada nela), com a mesma memoria do
 //   processo das mensagens (a aba Perguntas relida a cada 15 s por toda a turma).
@@ -250,7 +250,7 @@ export type PersonaRow = {
   name: string;
   role: string;
   updated_at: string;
-  /** So a origem (D115): o webinario em que a pessoa foi criada; nula quando ele foi excluido. */
+  /** So a origem (D116): o webinario em que a pessoa foi criada; nula quando ele foi excluido. */
   webinar_id: string | null;
 };
 
@@ -268,7 +268,7 @@ export function personaFromRow(row: PersonaRow): WebinarPersona {
 }
 
 /**
- * A lista da escola pelo nome, inteira (D115: uma lista so, para todo webinario): em paginas de 1.000 numa ordem total
+ * A lista da escola pelo nome, inteira (D116: uma lista so, para todo webinario): em paginas de 1.000 numa ordem total
  * (o nome e o id), porque o PostgREST corta toda resposta em 1.000 linhas sem erro e a pessoa que nao viesse seria
  * tratada como inexistente (o Salvar roteiro soltaria itens e a edicao voltaria 404; correcao da revisao v8, achado 4).
  * Banco sem a 202611140001: `available` falso e vazia.
@@ -309,7 +309,7 @@ export async function fetchPersonaRow(db: WebinarsDb, id: string): Promise<Perso
   return (data as PersonaRow | null) ?? null;
 }
 
-/** Uma pessoa nova; `webinar_id` e a origem (o webinario em que a equipe a criou; D115). */
+/** Uma pessoa nova; `webinar_id` e a origem (o webinario em que a equipe a criou; D116). */
 export type PersonaInsert = { avatar_path: string | null; created_by: string | null; name: string; role: PersonaRole; webinar_id: string | null };
 
 /** Grava uma pessoa nova; o nome repetido na escola (o indice unico) volta como `taken`. */
@@ -360,7 +360,7 @@ export async function deletePersonaRow(db: WebinarsDb, id: string): Promise<bool
 
 /**
  * A copia da pessoa (nome, papel e foto) em todos os itens do roteiro ligados a ela, de todos os webinarios (a lista e da
- * escola, D115). Devolve quantos itens mudaram.
+ * escola, D116). Devolve quantos itens mudaram.
  */
 export async function syncPersonaCopies(db: WebinarsDb, persona: Pick<WebinarPersona, "avatarPath" | "id" | "name" | "role">): Promise<number> {
   const { data, error } = await db

@@ -51,7 +51,7 @@ export type WebinarsDb = SupabaseClient;
  * comentario na tela) passa a ser a mais nova, entao o aviso a aponta. Nenhuma coluna dela entra nas listas que o app
  * sempre le: sem ela a sala e o console seguem como antes, e so as escritas novas voltam 409 com o aviso (docs/21 §9.16).
  * Rodada v11 (docs/30 D101, 12/11/2026): a 202611170001 (webinar_question_likes, as curtidas da resposta e do fio).
- * As pessoas que comentam da escola (docs/30 D115, 13/11/2026): a 202611180001 e a mais nova (a lista uma so da escola,
+ * As pessoas que comentam da escola (docs/30 D116, 13/11/2026): a 202611180001 e a mais nova (a lista uma so da escola,
  * o nome unico na escola e a origem nula quando o webinario sai); sem ela o app segue de pe (a lista le todas as
  * pessoas, e o nome repetido de outro webinario e recusado pela conferencia do servidor), entao o aviso a aponta
  * (docs/21 §9.21).
@@ -89,7 +89,7 @@ export const WEBINARS_SCREEN_MIGRATION = "202611100002";
 export const WEBINARS_PERSONAS_MIGRATION = "202611140001";
 
 /**
- * A lista de pessoas que comentam da escola (docs/30 D115; 13/11/2026): webinar_personas.webinar_id vira so a origem
+ * A lista de pessoas que comentam da escola (docs/30 D116; 13/11/2026): webinar_personas.webinar_id vira so a origem
  * (nula quando o webinario e excluido), as repetidas de webinarios diferentes viram uma pessoa so e o nome fica unico na
  * escola. Nenhuma leitura depende dela: sem ela, a lista le todas as pessoas e o servidor recusa o nome repetido antes
  * de gravar; so o indice unico do banco (a corrida de duas gravacoes) e a pessoa que sobrevive ao webinario excluido

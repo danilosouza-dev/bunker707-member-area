@@ -336,7 +336,7 @@ O **⋯** que o motor de vídeo mostra na miniatura (o menu com **Fixar no palco
 |---|---|---|
 | V2-A71 | A lista `/webinarios` no mesmo padrão (o destaque da próxima live) | fica como está até o produtor pedir; a página do webinário era a que destoava |
 | V2-A72 | O fio das Perguntas na gaveta do vertical (o celular em pé, na Live gravada) | a gaveta mostra só a primeira resposta; o fio completo e o Responder ficam no desenho normal |
-| V2-A73 | A foto do perfil nas miniaturas do motor de vídeo | as miniaturas seguem com as iniciais: o token continua sem avatar (`docs/30` §8.5) |
+| V2-A73 | A foto do perfil nas miniaturas do motor de vídeo | **respondida em 13/11/2026 (`docs/30` D115)**: a miniatura mostra a foto de quem a enviou pelo Perfil, com ou sem o aceite do chat; as iniciais só sem foto |
 | V2-A74 | O anel de foco do admin (2 px, afastado) nos campos de digitar do resto do admin | fica: o pedido foi sobre o console; mudar o admin inteiro pede uma decisão própria |
 
 ### 11.5 Quem assiste agora, ao lado do selo do momento
@@ -427,7 +427,7 @@ que eu quero que comente." A regra inteira (a lista por webinário, a pessoa com
 simulada fora de toda métrica e o repetir) está no `docs/30` D75 a D78, §2.2, §2.4, §2.7 e §4.2. Vale sobre §5.2 onde
 houver conflito (o **Quem comenta** com o Nome digitado e o "Usar esta foto em todos os comentários de {nome}").
 
-> **Atualizado em 13/11/2026 (§18; `docs/30` D115 a D117)**: a lista passou a ser da escola, fica fechada numa linha que
+> **Atualizado em 13/11/2026 (§18; `docs/30` D116 a D118)**: a lista passou a ser da escola, fica fechada numa linha que
 > abre em **Gerenciar pessoas**, e o roteiro do editor ficou em linhas fechadas, uma aberta por vez.
 
 - **A lista "Pessoas que comentam"** (`persona-list.tsx`, a mesma peça no editor e no console): cada pessoa numa linha
@@ -522,7 +522,7 @@ O produtor testou a `dev` em 12/11/2026 e mandou doze pedidos (P1 a P12). As dec
 
 ### 14.1 As pílulas do palco com a foto e com tempo (P2)
 
-As pílulas das duas últimas mensagens, na base do palco com o painel fechado (V2-8), mostravam sempre as iniciais e ficavam até a pessoa abrir o chat. Agora o avatar de 22 px leva a foto pela regra do chat (`docs/30` D62 e D82: a da equipe sempre, a do aluno com o aceite em dia, a da pessoa que comenta na mensagem do roteiro; sem foto, as iniciais), e cada pílula fica 8 s e some sozinha (`CHAT_PILL_TTL_MS`). A contagem começa quando a mensagem entra na lista do navegador (`pillsStep`, com o relógio lido só no efeito e no despertador); a saída é só o sumiço, sem animação (a lista é `aria-live`). O console não desenha pílulas: a correção é no componente da sala, que o produtor também vê quando abre a sala como aluno.
+As pílulas das duas últimas mensagens, na base do palco com o painel fechado (V2-8), mostravam sempre as iniciais e ficavam até a pessoa abrir o chat. Agora o avatar de 22 px leva a foto pela regra do chat (`docs/30` D62 e D82: a da equipe sempre, a do aluno com o aceite em dia, e desde o D115 a do aluno sempre que existir, a da pessoa que comenta na mensagem do roteiro; sem foto, as iniciais), e cada pílula fica 8 s e some sozinha (`CHAT_PILL_TTL_MS`). A contagem começa quando a mensagem entra na lista do navegador (`pillsStep`, com o relógio lido só no efeito e no despertador); a saída é só o sumiço, sem animação (a lista é `aria-live`). O console não desenha pílulas: a correção é no componente da sala, que o produtor também vê quando abre a sala como aluno.
 
 ### 14.2 O painel com largura máxima e com transição (P10 e P12)
 
@@ -720,10 +720,10 @@ Depois do merge da rodada v11, o produtor perguntou por que trocar as miniaturas
 Ao criar uma live nova em produção, o produtor pediu duas coisas sobre o card **Roteiro de chat**: "se a gente criar 30
 pessoas com 30 comentários, fica uma lista enorme, tomando muito espaço da página. Fica listando tudo aberto" e "listar
 só o que foi criado hoje não faz sentido, né? Tem que listar todos os nomes que foram criados". As regras estão no
-`docs/30` D115 a D117; aqui, o desenho. Vale sobre a §13.1 onde houver conflito (a lista "do webinário" e a lista sempre
+`docs/30` D116 a D118; aqui, o desenho. Vale sobre a §13.1 onde houver conflito (a lista "do webinário" e a lista sempre
 aberta no topo do card).
 
-### 18.1 A lista da escola (D115)
+### 18.1 A lista da escola (D116)
 
 - **Uma lista só**: o editor e o console de todo webinário mostram as mesmas pessoas. Quem foi criado numa live aparece
   na próxima, sem criar de novo. A frase do card diz isso: "A lista é da escola: as mesmas pessoas aparecem em todos os
@@ -732,7 +732,7 @@ aberta no topo do card).
   **Remover** conta os comentários **deste** roteiro e avisa que a pessoa sai da lista de todos os webinários.
 - **O número de cada pessoa** é o deste roteiro: "2 comentários neste roteiro".
 
-### 18.2 O roteiro em linhas fechadas (D116)
+### 18.2 O roteiro em linhas fechadas (D117)
 
 - **A linha fechada**, da esquerda para a direita: o minuto (mm:ss) ou "Frase" ou "Botão", numa coluna de 48 px; a foto
   de 24 px (a da sala, com as iniciais sem foto); o nome, com o selo **Pergunta** e a situação só quando diz algo
@@ -748,7 +748,7 @@ aberta no topo do card).
   no máximo 640 px). Sem resultado, "Nenhuma mensagem com “...”." e nenhuma lista vazia.
 - **No celular** (375 px): os selos descem para baixo do nome, e o nome e o texto se cortam com reticências.
 
-### 18.3 A lista de pessoas numa linha (D117)
+### 18.3 A lista de pessoas numa linha (D118)
 
 - **Fechada**: as cinco primeiras fotos sobrepostas, "mais N", "30 pessoas na lista da escola" e **Gerenciar pessoas**
   (com `aria-expanded`). Vazia: "Nenhuma pessoa na lista ainda." e **Nova pessoa**, que abre a lista com o formulário.
