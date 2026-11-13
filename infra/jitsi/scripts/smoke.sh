@@ -88,6 +88,10 @@ fi
 log "Saude interna (127.0.0.1)"
 check "jicofo /about/health (:$jicofo_rest)" 200 "http://127.0.0.1:$jicofo_rest/about/health"
 check "jvb /about/health (:$jvb_rest)" 200 "http://127.0.0.1:$jvb_rest/about/health"
+# O Jicofo nao da papel a ninguem (docs/30 §8.1, D116): com o bloco de autenticacao na configuracao que ele le, todo
+# token valido vira dono da sala (o aluno tambem). Sem o arquivo no caminho da tag fixada, a conta fica vazia e falha.
+jicofo_auth=$(compose exec -T jicofo sh -c 'grep -c "authentication {" /run/jicofo/config/jicofo.conf || true' 2>/dev/null | tr -d '\r' | head -n1 || true)
+if [ "$jicofo_auth" = "0" ]; then ok "jicofo sem dar papel (JICOFO_ENABLE_AUTH=0)" "so o token decide"; else falha "jicofo sem dar papel (JICOFO_ENABLE_AUTH=0)" "a autenticacao do jicofo esta ligada (ou a configuracao nao foi lida): todo token valido vira moderador"; fi
 if command -v ss >/dev/null 2>&1; then
     if ss -lun 2>/dev/null | grep -qE "[:.]$jvb_port([[:space:]]|$)"; then ok "UDP $jvb_port (midia do JVB) escutando" "sim"; else falha "UDP $jvb_port (midia do JVB)" "ninguem escuta no servidor"; fi
     if ss -ltn 2>/dev/null | grep -qE "[:.]$xmpp_port([[:space:]]|$)"; then ok "TCP $xmpp_port (XMPP para o Jibri) escutando" "sim"; else falha "TCP $xmpp_port (XMPP para o Jibri)" "ninguem escuta no servidor"; fi

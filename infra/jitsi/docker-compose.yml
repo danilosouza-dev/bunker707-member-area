@@ -187,7 +187,8 @@ services:
         aliases:
           - ${XMPP_SERVER:-xmpp.meet.jitsi}
 
-  # O foco da conferencia. ENABLE_AUTO_OWNER=0: o primeiro que entra NAO vira moderador (D14); a REST de saude
+  # O foco da conferencia. ENABLE_AUTO_OWNER=0: o primeiro que entra NAO vira moderador (D14).
+  # JICOFO_ENABLE_AUTH=0: o Jicofo nao da papel a ninguem (D116); so o Prosody da, pelo token. A REST de saude
   # fica em 127.0.0.1:8888 (smoke.sh). JICOFO_MAX_MEMORY: um palco por vez cabe em 512 MB de heap.
   jicofo:
     container_name: bunker707-meet-jicofo
@@ -212,6 +213,11 @@ services:
     environment:
       <<: *common-env
       ENABLE_AUTO_OWNER: "${ENABLE_AUTO_OWNER:-0}"
+      # A autenticacao do proprio Jicofo fica desligada (docs/30 §8.1, D116). Ligada (o padrao da imagem com
+      # ENABLE_AUTH=1), o Jicofo trata todo token valido como autenticado e da a posse da sala a cada um: o aluno
+      # tambem vira moderador, por cima do token_affiliation, e consegue remover ou silenciar os outros. Quem entra
+      # continua precisando do token: quem confere e o Prosody. O padrao 0 vale tambem no servidor cujo .env e de antes.
+      JICOFO_ENABLE_AUTH: "${JICOFO_ENABLE_AUTH:-0}"
       JICOFO_AUTH_PASSWORD: "${JICOFO_AUTH_PASSWORD}"
       # Sem isto a imagem nao liga a saude interna e /about/health responde 404: o healthcheck nunca passa.
       JICOFO_ENABLE_HEALTH_CHECKS: "${JICOFO_ENABLE_HEALTH_CHECKS:-1}"
