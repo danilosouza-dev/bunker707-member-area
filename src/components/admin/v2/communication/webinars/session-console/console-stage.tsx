@@ -13,7 +13,7 @@ import type { RoomThumbs } from "@/lib/webinar-room-prefs";
 import { consoleStageBadgeFor, consoleThumbsWanted, type ConsoleStageTopLeft } from "@/server/webinars/console-v2-model";
 import type { LiveConsoleSnapshot } from "@/server/webinars/live-console-model";
 import type { WebinarSession } from "@/server/webinars/model";
-import { consoleThumbsReload, type LiveRoomHandle } from "./live-room-panel";
+import type { LiveRoomHandle } from "./live-room-panel";
 
 // O palco da live no console de quem apresenta (docs/31 V2-4, V2-13 e V2-A5): o pai do iframe ([data-live-stage], o
 // mesmo ref do useLiveRoom, que nunca muda de pai), os selos por cima do video e as capas. Em cima a esquerda, "Ao vivo ·
@@ -30,10 +30,11 @@ import { consoleThumbsReload, type LiveRoomHandle } from "./live-room-panel";
 // coluna quando ela esta na tela (--room-video-right, stageColumnShown). Pela regra do papel (consoleColumnPolicy), o
 // Apresentador nunca manda toggleFilmStrip pela propria largura (o seguir a visao levaria a escolha a todos e ao
 // gravador) e o co-apresentador e a Equipe tiram ou poem a coluna pela largura, como o aluno (columnWanted).
-// As miniaturas onde a pessoa escolheu (rodada v9, docs/30 D91; `thumbs`, guardado no navegador do console): o
-// co-apresentador e a Equipe somam a escolha a conta da largura (Esconder tira com qualquer largura; a fileira embaixo
-// nao depende dela), e o Apresentador so manda o comando pela escolha dele, no Palco (consoleThumbsWanted). Com a
-// fileira embaixo na tela, os selos de baixo sobem (--room-video-bottom).
+// As miniaturas onde a pessoa escolheu (rodada v9, docs/30 D91; `thumbs`, guardado no navegador do console; so Lateral
+// ou Esconder desde a rodada v12, D105): o co-apresentador e a Equipe somam a escolha a conta da largura (Esconder tira
+// com qualquer largura), e o Apresentador so manda o comando pela escolha dele, no Palco (consoleThumbsWanted). As duas
+// valem por comando: o console nunca recarrega o video por causa das miniaturas. Com o iframe montado com a fileira
+// embaixo (o layout do motor, que o console nao pede mais), os selos de baixo sobem (--room-video-bottom).
 // Nenhum texto cita o motor da sala. A Na tela (docs/30 §2.4; especificacao de 10/11/2026, §6.1): os cartoes do banner
 // e do QR Code nao sao desenhados neste palco (o menu das miniaturas do motor precisa continuar livre); com algum deles
 // na tela, a pilula neutra "Na tela: Banner · QR Code" em cima a direita, depois dos presentes. Os presentes ("12
@@ -57,10 +58,15 @@ type ConsoleStageProps = {
   handsCount?: number;
   /** O toque no selo das maos: abre a aba Mãos. */
   onHands?: () => void;
-  /** O toque nos presentes (docs/30 D79): abre os participantes simulados. Sem ele, a pilula fica so como texto. */
+  /**
+   * O toque nos presentes: abre a Presença, nos participantes simulados (docs/30 D79) ou, sem eles, na chave do numero
+   * de pessoas (D107). Sem ele, a pilula fica so como texto.
+   */
   onPresent?: () => void;
   /** "12 presentes · pico 14" (consolePresenceBadge); nulo, o canto de cima a direita fica vazio. */
   presentLabel: string | null;
+  /** O nome do botao dos presentes (o que ele abre); sem ele, o dos participantes simulados. */
+  presentOpenLabel?: string;
   /** O nome do apresentador da pagina (o selo de outro moderador no video grande, V2-A25); nulo, esse selo nao aparece. */
   presenterName: string | null;
   /** "Na tela: Banner · QR Code" (a Na tela, com o banner ou o QR Code na frente da turma); nulo, a pilula nao aparece. */
@@ -105,7 +111,7 @@ function frameMessage(handle: LiveRoomHandle, status: WebinarSession["status"], 
   }
 }
 
-export function ConsoleStage({ busy, className, handle, handsCount = 0, live, onHands, onPresent, presentLabel, presenterName, screenLabel = null, session, stageRef, thumbs = "side", topLeft }: ConsoleStageProps) {
+export function ConsoleStage({ busy, className, handle, handsCount = 0, live, onHands, onPresent, presentLabel, presentOpenLabel, presenterName, screenLabel = null, session, stageRef, thumbs = "side", topLeft }: ConsoleStageProps) {
   const geometry = useStageGeometry(stageRef);
   const { joined, room } = handle;
   const frameWidth = geometry.frameWidth;
@@ -122,18 +128,6 @@ export function ConsoleStage({ busy, className, handle, handsCount = 0, live, on
       syncFilmstrip({ visible: filmstripVisible, wanted: wantColumn });
     }
   }, [filmstripVisible, frameWidth, joined, syncFilmstrip, wantColumn]);
-
-  // A troca entre Lateral e Embaixo (docs/30 D96): com nada de quem esta no console no ar, o video recarrega sozinho,
-  // uma vez (o iframe novo ja monta do jeito escolhido); com o microfone, a camera ou a tela ligados, fica com o menu.
-  const thumbsReload = consoleThumbsReload(handle, thumbs);
-  const reloadVideo = handle.reloadVideo;
-  useEffect(() => {
-    if (thumbsReload !== "auto") {
-      return;
-    }
-    const id = window.setTimeout(reloadVideo, 0);
-    return () => window.clearTimeout(id);
-  }, [reloadVideo, thumbsReload]);
 
   // O console ja entrou na sala nesta pagina (a falha depois disso e uma queda; antes, a sala que nao abriu).
   const [everJoined, setEverJoined] = useState(joined);
@@ -180,7 +174,7 @@ export function ConsoleStage({ busy, className, handle, handsCount = 0, live, on
               {presentLabel && onPresent ? (
                 // A pilula e o botao dos participantes simulados (D79): a camada dos selos nao recebe o toque, o botao sim.
                 <button
-                  aria-label={WEBINAR_COPY.simulacao.plateia.abrirControle(presentLabel)}
+                  aria-label={presentOpenLabel ?? WEBINAR_COPY.simulacao.plateia.abrirControle(presentLabel)}
                   className={cn("pointer-events-auto rounded-full", ROOM_FOCUS)}
                   data-console-audience-open="stage"
                   onClick={onPresent}
@@ -207,15 +201,7 @@ export function ConsoleStage({ busy, className, handle, handsCount = 0, live, on
           ) : null
         }
       />
-      {handle.reloading ? (
-        // A troca das miniaturas (docs/30 D98): o video recarrega em segundos; nem "Abrindo a sala" nem o Entrar na sala.
-        <div className={cn("absolute inset-0 flex items-center justify-center p-4 text-center", COVER)} data-live-stage-reloading="">
-          <p aria-live="polite" className="flex items-center gap-2 text-sm leading-5 text-white/85" role="status">
-            <RefreshCw aria-hidden="true" className="size-4 animate-spin motion-reduce:animate-none" />
-            {WEBINAR_COPY.salaV2.visao.miniaturas.mudando}
-          </p>
-        </div>
-      ) : message ? (
+      {message ? (
         <div className={cn("absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center", COVER)} data-live-stage-message="">
           <p className="max-w-md text-sm leading-5 text-white/85">{message}</p>
           <div className="flex flex-wrap items-center justify-center gap-2">
@@ -234,7 +220,7 @@ export function ConsoleStage({ busy, className, handle, handsCount = 0, live, on
           </div>
         </div>
       ) : null}
-      {handle.frameStatus === "left" && !handle.reloading ? (
+      {handle.frameStatus === "left" ? (
         <div className={cn("absolute inset-0 flex items-center justify-center p-4", COVER)} data-live-stage-left="">
           <RoomButton onClick={handle.retry} size="sm">
             <LogIn aria-hidden="true" />

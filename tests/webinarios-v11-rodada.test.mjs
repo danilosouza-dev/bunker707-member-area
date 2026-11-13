@@ -430,11 +430,15 @@ test("desligada, o numero nao sai do servidor nem aparece na sala: o retrato e o
   assert.match(consultas, /presentHidden: !showPresentCount,\s*presentNow: showPresentCount \? presentIds\.length : 0,/);
   const escritas = fonte("src/server/webinars/room-writes.ts");
   assert.match(escritas, /const presentNow = session\.kind === "replay" \|\| context\.showPresentCount === false \? 0 : \(await listPresentUserIds\(/);
-  assert.match(fonte("src/app/api/webinars/[id]/heartbeat/route.ts"), /showPresentCount: room\.webinar\.roomSettings\.showPresentCount/);
+  // Desde a rodada v12 (D107) o sinal rele a chave a parte (15 s por webinario) e diz na resposta se o numero esta escondido.
+  const sinal = fonte("src/app/api/webinars/[id]/heartbeat/route.ts");
+  assert.match(sinal, /const showPresentCount = await loadPresentCountShown\(guarded\.webinarId, room\.webinar\.roomSettings\.showPresentCount, now\);/);
+  assert.match(sinal, /presentHidden: !showPresentCount, presentNow: result\.presentNow,/);
 
   // A sala ao vivo: um numero so (o selo do palco, a aba Participantes e o titulo dela), nulo quando escondido.
   const aoVivo = fonte("src/components/member/webinars/room/live-room.tsx");
-  assert.match(aoVivo, /const presentShown = phase === "ended" \|\| session\.presentHidden === true \? null : simulation\.displayCount\(presentNow, simulationOffsetMs\);/);
+  assert.match(aoVivo, /const presentHidden = heartbeatHidden \?\? session\.presentHidden === true;/);
+  assert.match(aoVivo, /const presentShown = phase === "ended" \|\| presentHidden \? null : simulation\.displayCount\(presentNow, simulationOffsetMs\);/);
   // A gravada: o mesmo numero em todo lugar, e o vertical sem o "{n} assistindo".
   const gravada = fonte("src/components/member/webinars/room/webinar-room.tsx");
   assert.match(gravada, /const presentShown = momentBadge\.showCount && !presentHidden \? shownCount : null;/);

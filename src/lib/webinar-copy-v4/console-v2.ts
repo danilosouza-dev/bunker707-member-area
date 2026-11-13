@@ -101,7 +101,24 @@ export const CONSOLE_V2_COPY = {
     /** "Perguntas, 3 abertas". */
     comNumero: (rotulo: string, numero: string) => `${rotulo}, ${numero}`,
     abertas: (n: number) => (n === 1 ? "1 aberta" : `${n} abertas`),
-    maos: (n: number) => (n === 1 ? "1 levantada" : `${n} levantadas`)
+    maos: (n: number) => (n === 1 ? "1 levantada" : `${n} levantadas`),
+    /** "Chat, 3 mensagens novas": o que outras pessoas escreveram com o Chat fora da tela (rodada v12, docs/30 D106). */
+    mensagensNovas: (n: number) => (n === 1 ? "1 mensagem nova" : `${n} mensagens novas`)
+  },
+
+  /**
+   * A chave "Mostrar quantas pessoas estão na sala" no console (rodada v12, docs/30 D107; pedido do produtor de
+   * 12/11/2026: "Isso tem que estar na hora de criar o webnario e também no console"). O rotulo e a frase de baixo sao
+   * os do card Sala do editor (WEBINAR_ADMIN_COPY.fields); aqui, o titulo do bloco na entrada Presença, o que o aviso
+   * diz depois de gravar, o fim do selo dos presentes com a chave desligada e o nome do selo que abre a Presença.
+   */
+  numeroDePessoas: {
+    titulo: "Número de pessoas na sala",
+    descricao: "Vale para todas as sessões deste webinário. A sala dos alunos acompanha em até 1 minuto.",
+    mostrando: "Os alunos voltam a ver quantas pessoas estão na sala.",
+    escondido: "Os alunos não veem mais quantas pessoas estão na sala.",
+    soEquipe: "só a equipe vê",
+    abrirPresenca: (rotulo: string) => `${rotulo}. Abrir a Presença`
   },
 
   /**

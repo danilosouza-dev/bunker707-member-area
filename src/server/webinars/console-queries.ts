@@ -721,6 +721,8 @@ export async function loadConsoleSnapshot(db: WebinarsDb, input: { kind: Webinar
     polls: { launched, templates: templates.polls.map((poll) => pollFromRow(poll, templates.options)) },
     presence,
     presentNow: presentIds.length,
+    // A chave "Mostrar quantas pessoas estão na sala" como esta gravada agora (D102; o console a muda, D107).
+    showPresentCount: input.webinar ? roomSettingsOfRow(input.webinar.room_settings).showPresentCount : true,
     personas: personaList,
     questions: questions.map((question) => ({
       ...question,

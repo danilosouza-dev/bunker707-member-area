@@ -304,11 +304,11 @@ test("a sala: o refresh esquece a janela e a espera de 5 min, pede do offset de 
   checker.stop();
 });
 
-test("o console: a Presença existe com o controle dos participantes simulados tambem antes do comeco; nunca no Replay", () => {
+test("o console: a Presença existe com o controle dos participantes simulados tambem antes do comeco; nunca no Replay; sem eles, ela fica pela chave do numero de pessoas (D107)", () => {
   assert.deepEqual(v2.consoleMoreEntriesFor({ audience: true, hasPresence: false, kind: "live", webinarKind: "live" }), ["tela", "enquetes", "roteiro", "atendimento", "presenca", "gravacao"]);
   assert.deepEqual(v2.consoleMoreEntriesFor({ audience: true, hasPresence: false, kind: "simulated", webinarKind: "simulated" }), ["tela", "enquetes", "roteiro", "oferta", "atendimento", "presenca"]);
   assert.deepEqual(v2.consoleMoreEntriesFor({ audience: true, hasPresence: false, kind: "replay", webinarKind: "simulated" }), ["enquetes", "roteiro", "oferta", "atendimento"]);
-  assert.deepEqual(v2.consoleMoreEntriesFor({ audience: false, hasPresence: false, kind: "live", webinarKind: "live" }), ["tela", "enquetes", "roteiro", "atendimento", "gravacao"]);
+  assert.deepEqual(v2.consoleMoreEntriesFor({ audience: false, hasPresence: false, kind: "live", webinarKind: "live" }), ["tela", "enquetes", "roteiro", "atendimento", "presenca", "gravacao"]);
   assert.equal(v2.consolePresenceBadge({ peak: 1, presentNow: 1, simulated: 300 }), "1 presente · pico 1 · +300 simulados");
 });
 

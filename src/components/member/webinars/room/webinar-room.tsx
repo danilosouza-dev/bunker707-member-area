@@ -442,6 +442,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const [offerShown, setOfferShown] = useState(false);
   /** O contador do ultimo sinal de presenca; antes dele, o da leitura da sessao. */
   const [heartbeatPresent, setHeartbeatPresent] = useState<number | null>(null);
+  /** O ultimo sinal de 15 s disse que a equipe escondeu o numero de pessoas (nulo antes dele): vale sobre a sessao. */
+  const [heartbeatHidden, setHeartbeatHidden] = useState<boolean | null>(null);
   /** O sinal de presenca respondeu 404 (fora do acesso agora). */
   const [heartbeatLost, setHeartbeatLost] = useState(false);
   const reducedMotion = useRoomReducedMotion();
@@ -550,6 +552,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
     onAccessLost: () => setHeartbeatLost(true),
     onAnswer: (answer) => {
       setHeartbeatPresent(answer.presentNow);
+      setHeartbeatHidden(typeof answer.presentHidden === "boolean" ? answer.presentHidden : null);
       if (answer.ended) {
         setPlayerEnded(true);
       }
@@ -967,7 +970,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const mobileLine = roomMobileLine(presenterName);
   // O selo de quem assiste agora (o real, ou o somado da Simulacao), no palco ao lado do selo do momento (docs/31 §11.5).
   // A equipe pode esconder dos alunos quantas pessoas estao na sala (docs/30 D102).
-  const presentHidden = session.presentHidden === true;
+  // A chave muda tambem pelo console com a sessao no ar (D107): o ultimo sinal de 15 s vale sobre a sessao.
+  const presentHidden = heartbeatHidden ?? session.presentHidden === true;
   // O numero que a sala mostra (o selo do palco, a aba Participantes e o titulo dela): nulo quando nao ha o que mostrar.
   const presentShown = momentBadge.showCount && !presentHidden ? shownCount : null;
   const presentBadge = roomPresentBadge(presentShown);

@@ -448,12 +448,19 @@ test("consoleTabsFor: a live com Chat, Perguntas, Mãos e Pessoas; a gravada e o
   assert.deepEqual([...v2.CONSOLE_TABS], ["chat", "perguntas", "maos", "pessoas"]);
 });
 
-test("consoleMoreEntriesFor: as entradas do ⋯ na ordem do V2-15, pela sessao: Na tela primeiro na live e na gravada (nunca no Replay), Roteiro no webinario gravado e na sessao da live (R8, nunca no Replay da live), Oferta fora da live, Presença com a leitura dela, Gravação so na live", () => {
+test("consoleMoreEntriesFor: as entradas do ⋯ na ordem do V2-15, pela sessao: Na tela primeiro na live e na gravada (nunca no Replay), Roteiro no webinario gravado e na sessao da live (R8, nunca no Replay da live), Oferta fora da live, Presença sempre na live e na gravada (D107) e no Replay so com a leitura dela, Gravação so na live", () => {
   assert.deepEqual([...v2.CONSOLE_MORE_ENTRIES], ["tela", "enquetes", "roteiro", "oferta", "atendimento", "presenca", "gravacao"], "a Na tela e a primeira entrada");
   assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: true, kind: "live", webinarKind: "live" }), ["tela", "enquetes", "roteiro", "atendimento", "presenca", "gravacao"]);
-  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "live", webinarKind: "live" }), ["tela", "enquetes", "roteiro", "atendimento", "gravacao"], "antes de comecar, sem a Presença (a Na tela e o Roteiro ja valem na espera)");
+  // Desde a rodada v12 (docs/30 D107) a Presença existe tambem antes de comecar: la fica a chave do numero de pessoas.
+  assert.deepEqual(
+    v2.consoleMoreEntriesFor({ hasPresence: false, kind: "live", webinarKind: "live" }),
+    ["tela", "enquetes", "roteiro", "atendimento", "presenca", "gravacao"],
+    "antes de comecar, a Presença ja esta la (a chave do numero de pessoas)"
+  );
   assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: true, kind: "simulated", webinarKind: "simulated" }), ["tela", "enquetes", "roteiro", "oferta", "atendimento", "presenca"]);
-  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "live" }), ["enquetes", "oferta", "atendimento"], "no Replay nada aparece na frente da turma: sem a Na tela");
+  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "simulated", webinarKind: "simulated" }), ["tela", "enquetes", "roteiro", "oferta", "atendimento", "presenca"]);
+  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "live" }), ["enquetes", "oferta", "atendimento"], "no Replay nada aparece na frente da turma: sem a Na tela nem a Presença");
+  assert.deepEqual(v2.consoleMoreEntriesFor({ audience: true, hasPresence: false, kind: "replay", webinarKind: "live" }), ["enquetes", "oferta", "atendimento"], "nem com participantes simulados");
   assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "simulated" }), ["enquetes", "roteiro", "oferta", "atendimento"], "o Replay da gravada continua com o Roteiro, sem a Na tela");
   for (const entries of [v2.consoleMoreEntriesFor({ hasPresence: true, kind: "live", webinarKind: "live" }), v2.consoleMoreEntriesFor({ hasPresence: true, kind: "simulated", webinarKind: "simulated" })]) {
     assert.deepEqual(entries, v2.CONSOLE_MORE_ENTRIES.filter((entry) => entries.includes(entry)), "sempre na ordem do V2-15");
@@ -490,9 +497,12 @@ test("consolePanelViewOf: a aba ou a entrada escolhida vale enquanto existe nest
   const entries = v2.consoleMoreEntriesFor({ hasPresence: true, kind: "live", webinarKind: "live" });
   assert.deepEqual(v2.consolePanelViewOf({ entries, tabs, view: { tab: "maos" } }), { tab: "maos" });
   assert.deepEqual(v2.consolePanelViewOf({ entries, tabs, view: { more: "gravacao" } }), { more: "gravacao" });
-  // A Presença some sem a leitura dela; a gravada nao tem Mãos nem Gravação.
+  // A Presença fica tambem sem a leitura dela (a chave do numero de pessoas, docs/30 D107); a gravada nao tem Mãos nem Gravação.
   const semPresenca = v2.consoleMoreEntriesFor({ hasPresence: false, kind: "live", webinarKind: "live" });
-  assert.deepEqual(v2.consolePanelViewOf({ entries: semPresenca, tabs, view: { more: "presenca" } }), { tab: "chat" });
+  assert.deepEqual(v2.consolePanelViewOf({ entries: semPresenca, tabs, view: { more: "presenca" } }), { more: "presenca" });
+  // No Replay sem a leitura ela some, e a escolha volta ao Chat.
+  const replaySemPresenca = v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "live" });
+  assert.deepEqual(v2.consolePanelViewOf({ entries: replaySemPresenca, tabs: v2.consoleTabsFor({ kind: "replay" }), view: { more: "presenca" } }), { tab: "chat" });
   const gravada = { entries: v2.consoleMoreEntriesFor({ hasPresence: false, kind: "simulated", webinarKind: "simulated" }), tabs: v2.consoleTabsFor({ kind: "simulated" }) };
   assert.deepEqual(v2.consolePanelViewOf({ ...gravada, view: { tab: "maos" } }), { tab: "chat" });
   assert.deepEqual(v2.consolePanelViewOf({ ...gravada, view: { more: "gravacao" } }), { tab: "chat" });

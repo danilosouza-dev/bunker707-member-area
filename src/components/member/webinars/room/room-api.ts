@@ -72,7 +72,12 @@ export function getSession(webinarId: string, sessionId: string, signal?: AbortS
   return getJson<StudentSessionPayload>(roomApiPath(webinarId, "session", { sessao: sessionId }), WEBINAR_COPY.aluno.erroCarregar, signal);
 }
 
-export type HeartbeatAnswer = { ended: boolean; offsetMs: number | null; presentNow: number; serverTime: string };
+/**
+ * A resposta do sinal de 15 s. `presentHidden` (rodada v12, docs/30 D107): a equipe escondeu dos alunos quantas pessoas
+ * estao na sala; vem a cada sinal, para a sala acompanhar a chave do console sem esperar a releitura da sessao. Ausente
+ * na resposta do servidor de antes: vale o que a sessao disse.
+ */
+export type HeartbeatAnswer = { ended: boolean; offsetMs: number | null; presentHidden?: boolean; presentNow: number; serverTime: string };
 
 export function postHeartbeat(webinarId: string, body: { leave?: boolean; offsetSeconds: number; sessionId: string; state: string; visible: boolean }) {
   return sendJson<HeartbeatAnswer>(roomApiPath(webinarId, "heartbeat"), "POST", body, GENERIC);

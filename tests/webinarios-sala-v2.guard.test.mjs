@@ -93,7 +93,8 @@ test("a gravada: Participantes com quem apresenta e o numero do selo do palco (d
   // O numero de quem assiste: no palco, ao lado do selo do momento (roomPresentBadge), e fora do cabecalho nas duas salas.
   // Um numero so para o selo, a aba e o titulo dela; nulo quando o momento nao mostra ou a equipe escondeu (docs/30 D102).
   assert.match(recorded, /const presentShown = momentBadge\.showCount && !presentHidden \? shownCount : null;\s*const presentBadge = roomPresentBadge\(presentShown\);/, "a gravada: o selo do palco");
-  assert.match(recorded, /const presentHidden = session\.presentHidden === true;/);
+  // Escondido pelo ultimo sinal de 15 s (a chave muda pelo console com a sessao no ar, D107) ou, antes dele, pela sessao.
+  assert.match(recorded, /const presentHidden = heartbeatHidden \?\? session\.presentHidden === true;/);
   assert.match(recorded, /<RoomStageBadges[\s\S]*?present=\{presentBadge\}/);
   assert.match(
     room,
@@ -101,7 +102,7 @@ test("a gravada: Participantes com quem apresenta e o numero do selo do palco (d
     "a live: o numero do selo do palco, que some com a live encerrada (no ver como, a frase da previa sem a simulacao, D79)"
   );
   // Com a Simulacao na live (adendo de 10/11/2026, R7): o real mais a parte simulada, como na gravada.
-  assert.match(room, /const presentShown = phase === "ended" \|\| session\.presentHidden === true \? null : simulation\.displayCount\(presentNow, simulationOffsetMs\);\s*const presentBadge = roomPresentBadge\(presentShown\);/);
+  assert.match(room, /const presentHidden = heartbeatHidden \?\? session\.presentHidden === true;\s*const presentShown = phase === "ended" \|\| presentHidden \? null : simulation\.displayCount\(presentNow, simulationOffsetMs\);\s*const presentBadge = roomPresentBadge\(presentShown\);/);
   assert.match(room, /<RoomStageBadges[\s\S]*?present=\{presentBadge\}/);
   for (const [nome, fonte] of [
     ["live-room", room],

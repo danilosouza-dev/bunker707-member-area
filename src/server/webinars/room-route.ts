@@ -21,10 +21,11 @@ import { CHAT_MESSAGES } from "./chat-schemas";
 import { WebinarError, webinarsDb } from "./db";
 import { LiveRoomUnavailableError, loadRoomSignalContext } from "./live-room";
 import { CHAT_LIMITS } from "./model";
+import { rememberPresentCount, rememberedPresentCount, resetPresentCountMemory } from "./present-count-memory";
 import { INVALID_SESSION_MESSAGE, loadRoomContext, type RoomContext } from "./room-queries";
 import { RoomLimitError, RoomRefusedError } from "./room-writes";
-import { sessionFromRow } from "./rows";
-import { fetchSessionRow } from "./store";
+import { roomSettingsOfRow, sessionFromRow } from "./rows";
+import { fetchSessionRow, fetchWebinarRow } from "./store";
 
 export const ROOM_BODY_BYTES = 4_000;
 export const INVALID_REQUEST: string = CHAT_MESSAGES.invalid;
@@ -160,9 +161,46 @@ export async function loadCachedRoomContext(userId: string, webinarId: string, s
   return context;
 }
 
-/** Zera o acesso guardado (testes). */
+const presentCountReads = new Map<string, Promise<boolean>>();
+
+/**
+ * A chave do numero de pessoas para o sinal de 15 s (docs/30 D102 e D107). O contexto da sala fica 10 min na memoria
+ * (loadCachedRoomContext), e desde a rodada v12 a equipe muda a chave pelo console com a sessao no ar: lida so do
+ * contexto, a mudanca levaria ate 10 min para chegar ao aluno (e, ligada de novo, o sinal continuaria respondendo zero).
+ * Entao a chave e relida a parte: uma leitura por webinario a cada 15 s neste processo (present-count-memory.ts), nunca
+ * uma por aluno (os sinais que chegam juntos na virada esperam a mesma leitura). Sem a linha, ou com a leitura que
+ * falhou, vale o que o contexto guardou (`fallback`): a presenca nunca deixa de ser gravada por causa da chave.
+ */
+export async function loadPresentCountShown(webinarId: string, fallback: boolean, now = Date.now()): Promise<boolean> {
+  const remembered = rememberedPresentCount(webinarId, now);
+  if (remembered !== null) {
+    return remembered;
+  }
+  const reading = presentCountReads.get(webinarId);
+  if (reading) {
+    return reading;
+  }
+  const read = (async () => {
+    try {
+      const row = await fetchWebinarRow(webinarsDb(), webinarId);
+      const shown = row ? roomSettingsOfRow(row.room_settings).showPresentCount : fallback;
+      rememberPresentCount(webinarId, shown, now);
+      return shown;
+    } catch {
+      return fallback;
+    } finally {
+      presentCountReads.delete(webinarId);
+    }
+  })();
+  presentCountReads.set(webinarId, read);
+  return read;
+}
+
+/** Zera o acesso guardado e a chave do numero de pessoas (testes). */
 export function resetRoomAccessCache() {
   roomAccessCache.clear();
+  resetPresentCountMemory();
+  presentCountReads.clear();
 }
 
 /** Depois da resposta (after() do Next); fora de um pedido do Next (testes, scripts), na hora. */

@@ -1795,8 +1795,8 @@ test("a Na tela por cima do iframe do motor: no palco largo o banner e o QR Code
   }
 });
 
-test("as miniaturas (docs/30 D91 e D96): Esconder e Lateral valem na hora, por comando e sem remontar; Embaixo recarrega o video sozinho com o microfone e a camera desligados e a fileira entra na hora; com a camera ligada, o menu avisa e oferece Recarregar o vídeo agora", async ({ page }) => {
-  test.setTimeout(120_000);
+test("as miniaturas (docs/30 D91 e D105): o menu so tem Lateral e Esconder, as duas valem na hora, por comando, e o video nunca recarrega; o Embaixo guardado de antes abre como Lateral", async ({ page }) => {
+  test.setTimeout(90_000);
   const visao = WEBINAR_COPY.salaV2.visao;
   const miniaturas = visao.miniaturas;
   // A 1920 px com o painel aberto o iframe passa dos 1013 px: a coluna fica na tela pela largura.
@@ -1836,65 +1836,33 @@ test("as miniaturas (docs/30 D91 e D96): Esconder e Lateral valem na hora, por c
   await sala.disparar("filmstripDisplayChanged", { visible: true });
   await expect.poll(() => margem("--room-video-right")).toBe("222px");
 
-  // Embaixo, com o microfone e a camera desligados (teste do produtor de 12/11/2026: "quando eu coloco fileira embaixo,
-  // ela não funciona"): a pagina recarrega o video sozinha, sem recarregar a pagina e sem comando; o video novo monta com
-  // a fileira embaixo, a base do palco sobe a altura dela e nada e descontado a direita; o menu nao avisa nada.
-  antes = (await sala.comandos()).length;
-  const token = page.waitForResponse((response) => response.url().endsWith("/join-token") && response.request().method() === "POST");
+  // So duas opcoes (rodada v12, D105): o Embaixo saiu, porque pedia o video carregado de novo e tirava a aluna da sala
+  // de video por alguns segundos. Nenhuma frase de espera nem "Recarregar o vídeo agora".
   await botao.click();
-  await opcao(miniaturas.opcoes.bottom).click();
-  expect((await token).status(), "a sala pede outro token para o video novo").toBe(200);
-  await expect.poll(() => sala.montagens(), { timeout: 20_000 }).toBe(2);
-  // A aluna saiu da sala de video antes de o video recarregar (D98: sem isso ela aparecia duas vezes nas miniaturas): o
-  // pedido de saida foi para o video de antes (os comandos da sala falsa sao por montagem).
-  const saiuAntes = await page.evaluate((indice) => {
-    const sala = (window as unknown as { __salaFalsa?: { montagens: { comandos: { comando: string }[] }[] } }).__salaFalsa;
-    return sala?.montagens[indice]?.comandos.some((item) => item.comando === "hangup") ?? false;
-  }, 0);
-  expect(saiuAntes, "o hangup no video de antes").toBe(true);
-  // O palco diz o que esta acontecendo, nunca "Reconectando…".
-  await expect(palco.locator("[data-live-reloading]")).toHaveText(miniaturas.mudando);
-  const comFileira = await sala.esperarMontada();
-  expect(comFileira.interfaceConfigOverwrite.VERTICAL_FILMSTRIP, "a fileira embaixo").toBe(false);
-  await sala.disparar("videoConferenceJoined", { displayName: "Aluna T.", id: PARTICIPANTE, roomName });
-  await expect(dialogo.getByRole("button", { exact: true, name: aoVivo.levantarMao })).toBeEnabled();
-  await expect.poll(() => margem("--room-video-bottom")).toBe("144px");
-  await expect.poll(() => margem("--room-video-right")).toBe("0px");
-  expect((await sala.comandos()).slice(antes).some((item) => item.comando === "toggleFilmStrip"), "a troca para Embaixo nao manda comando").toBe(false);
-  await botao.click();
-  await expect(opcao(miniaturas.opcoes.bottom)).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByRole("group", { name: miniaturas.rotulo }).getByRole("menuitemradio")).toHaveText([miniaturas.opcoes.side, miniaturas.opcoes.hidden]);
+  await expect(menu.getByRole("menuitemradio", { exact: true, name: "Embaixo" })).toHaveCount(0);
   await expect(menu.getByRole("note")).toHaveCount(0);
-  await expect(menu.getByRole("menuitem", { exact: true, name: miniaturas.recarregarAgora })).toHaveCount(0);
+  await expect(menu.getByRole("menuitem")).toHaveCount(0);
   await page.keyboard.press("Escape");
-  expect(await sala.montagens(), "uma recarga so").toBe(2);
 
-  // Com a camera ligada, a pagina nao recarrega o video sozinha (desligaria a camera no meio): o menu avisa e oferece
-  // "Recarregar o vídeo agora"; o clique recarrega, e a coluna volta para o lado.
-  await sala.disparar("videoMuteStatusChanged", { muted: false });
-  await botao.click();
-  await opcao(miniaturas.opcoes.side).click();
-  await botao.click();
-  await expect(opcao(miniaturas.opcoes.side)).toHaveAttribute("aria-checked", "true");
-  await expect(menu.getByRole("note")).toHaveText(miniaturas.esperaManual);
-  expect(await sala.montagens(), "com a camera ligada, nada recarrega sozinho").toBe(2);
-  await menu.getByRole("menuitem", { exact: true, name: miniaturas.recarregarAgora }).click();
-  await expect.poll(() => sala.montagens(), { timeout: 20_000 }).toBe(3);
-  const comColuna = await sala.esperarMontada();
-  expect(comColuna.interfaceConfigOverwrite.VERTICAL_FILMSTRIP, "a coluna ao lado de novo").toBe(true);
-  await sala.disparar("videoConferenceJoined", { displayName: "Aluna T.", id: PARTICIPANTE, roomName });
-  await expect(dialogo.getByRole("button", { exact: true, name: aoVivo.levantarMao })).toBeEnabled();
-  await expect.poll(() => margem("--room-video-bottom")).toBe("0px");
-  await expect.poll(() => margem("--room-video-right")).toBe("222px");
-  await botao.click();
-  await expect(menu.getByRole("note")).toHaveCount(0);
+  // Nenhuma troca das miniaturas tirou a aluna da sala de video: o mesmo iframe, sem pedido de saida.
+  expect((await sala.comandos()).some((item) => item.comando === "hangup"), "nenhum hangup").toBe(false);
+  expect(await sala.montagens(), "o video nunca recarregou").toBe(1);
 
-  // A escolha fica guardada: Embaixo de novo e, depois de recarregar a pagina, o video ja monta com a fileira.
-  await opcao(miniaturas.opcoes.bottom).click();
-  await expect.poll(() => sala.montagens(), { timeout: 20_000 }).toBe(4);
+  // Quem tinha escolhido Embaixo antes da rodada v12 ainda tem "bottom" guardado no navegador: a sala abre na Lateral,
+  // com a coluna ao lado, e o menu marca a Lateral.
+  await page.evaluate(() => window.localStorage.setItem("bunker707:webinar-sala-miniaturas", "bottom"));
   await page.reload();
   await expect(dialogo).toHaveAttribute("data-room-kind", "live");
   await dialogo.getByRole("button", { exact: true, name: aoVivo.entrarNaSala }).click();
-  expect((await sala.esperarMontada()).interfaceConfigOverwrite.VERTICAL_FILMSTRIP, "a fileira embaixo, guardada").toBe(false);
+  expect((await sala.esperarMontada()).interfaceConfigOverwrite.VERTICAL_FILMSTRIP, "a coluna ao lado, mesmo com o Embaixo guardado").toBe(true);
+  await sala.disparar("videoConferenceJoined", { displayName: "Aluna T.", id: PARTICIPANTE, roomName });
+  await expect(dialogo.getByRole("button", { exact: true, name: aoVivo.levantarMao })).toBeEnabled();
+  await botao.click();
+  await expect(opcao(miniaturas.opcoes.side)).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
+  await expect.poll(() => margem("--room-video-bottom")).toBe("0px");
+  await page.evaluate(() => window.localStorage.removeItem("bunker707:webinar-sala-miniaturas"));
 });
 
 test("a live acaba com a aluna na sala (docs/30 D104): a janela da area avisa 'A live foi encerrada' com o OK em foco, sem o dialogo do motor; o OK fecha e a tela de encerrada fica", async ({ page }) => {

@@ -153,20 +153,14 @@ export const SALA_V2_COPY = {
     grade: "Grade",
     palco: "Palco",
     rotulo: "Visão do vídeo",
-    /* As miniaturas das cameras onde a pessoa escolher (rodada v9, pedido do produtor de 12/11/2026; docs/30 D91). */
+    /*
+     * As miniaturas das cameras onde a pessoa escolher (rodada v9, pedido do produtor de 12/11/2026; docs/30 D91). Desde
+     * a rodada v12 (docs/30 D105) so Lateral e Esconder, que trocam na hora: o Embaixo saiu, e com ele as frases da
+     * recarga do vídeo.
+     */
     miniaturas: {
       rotulo: "Miniaturas",
-      opcoes: { bottom: "Embaixo", hidden: "Esconder", side: "Lateral" },
-      /**
-       * A troca entre Lateral e Embaixo pede o vídeo carregado de novo. Com o microfone e a câmera da pessoa desligados,
-       * a sala recarrega o vídeo sozinha; com algo dela no ar, ela escolhe a hora (docs/30 D96).
-       */
-      esperaManual: "A mudança vale quando o vídeo recarregar. Recarregar agora desliga o seu microfone e a sua câmera por alguns segundos.",
-      /** Com a sala trancada, recarregar mandaria o aluno para a sala de espera. */
-      esperaTrancada: "Com a sala trancada, a mudança vale na próxima vez que você entrar.",
-      recarregarAgora: "Recarregar o vídeo agora",
-      /** No palco, enquanto o video recarrega por causa da troca (docs/30 D98): nunca "Reconectando…", que e a frase da queda. */
-      mudando: "Mudando as miniaturas de lugar…",
+      opcoes: { hidden: "Esconder", side: "Lateral" },
       /** Só no console de quem apresenta, com o Esconder marcado. */
       escondidasNaGravacao: "Escondidas para você e na gravação. Cada aluno escolhe as dele."
     }

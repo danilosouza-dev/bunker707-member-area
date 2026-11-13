@@ -38,8 +38,6 @@ export type LiveStageProps = {
   onRetry: () => void;
   /** "Ver como" da equipe: Entrar na sala fica desligado (nada e gravado). */
   readOnly: boolean;
-  /** O video recarrega por causa da troca das miniaturas (docs/30 D98): a frase diz isso, nao "Reconectando…". */
-  reloading?: boolean;
   replayHref: string | null;
   screen: LiveScreen;
   sessionId: string;
@@ -79,7 +77,7 @@ export function liveStageState(screen: LiveScreen, entry: LiveEntry): string {
 }
 
 export function LiveStage(props: LiveStageProps) {
-  const { children, className, countdownLabel, coverUrl, entry, frameRef, lobby = false, onEnter, onRetry, readOnly, reloading = false, replayHref, screen, sessionId, stageRef, title, videoBottomPx = 0, videoRightPx = 0 } = props;
+  const { children, className, countdownLabel, coverUrl, entry, frameRef, lobby = false, onEnter, onRetry, readOnly, replayHref, screen, sessionId, stageRef, title, videoBottomPx = 0, videoRightPx = 0 } = props;
   const copy = WEBINAR_COPY.aoVivo;
   const phrase = liveScreenPhrase(screen, { hasReplay: replayHref !== null });
   const open = screen === "open";
@@ -133,9 +131,9 @@ export function LiveStage(props: LiveStageProps) {
 
       {open && !knocking && entry === "reconnecting" ? (
         <Cover coverUrl={null} tone="dim">
-          <p aria-live="polite" className="flex items-center gap-2 text-sm font-semibold text-zinc-100" data-live-reloading={reloading ? "" : undefined} role="status">
+          <p aria-live="polite" className="flex items-center gap-2 text-sm font-semibold text-zinc-100" role="status">
             <RefreshCw aria-hidden="true" className="size-4 animate-spin motion-reduce:animate-none" />
-            {reloading ? WEBINAR_COPY.salaV2.visao.miniaturas.mudando : WEBINAR_COPY.sala.reconectando}
+            {WEBINAR_COPY.sala.reconectando}
           </p>
         </Cover>
       ) : null}

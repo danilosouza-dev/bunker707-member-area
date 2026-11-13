@@ -546,6 +546,8 @@ O controle **Participantes simulados** (o do console e o do card depois do come�
 
 ### 14.7 As miniaturas: Lateral, Embaixo, Esconder (P6)
 
+> **Desde a rodada v12 (§17.1, `docs/30` D105) o Embaixo não existe mais:** ficam só **Lateral** e **Esconder**, e o vídeo nunca recarrega por causa das miniaturas. O texto abaixo fica como histórico.
+
 - **Onde**: o menu **Visão do vídeo** da barra (a partir de 1024 px), na sala da Live ao vivo e no console, ganha um segundo grupo, **Miniaturas**, com as três opções em `menuitemradio`; a marcada é a escolha guardada da pessoa. No celular não há o que escolher: só o vídeo grande aparece (V2-A13).
 - **O que o motor permite** (lido na tag fixada): a coluna ao lado do vídeo, a fileira embaixo (que ele desenha por cima da base do vídeo), a grade e esconder. A fileira em cima não existe. Coluna ou fileira é decidido na montagem do vídeo (`VERTICAL_FILMSTRIP`); esconder e mostrar é por comando (`toggleFilmStrip`).
 - **Como vale**: **Lateral** e **Esconder** na hora. **Embaixo** (e a volta de **Embaixo** para **Lateral**) pede o vídeo carregado de novo, porque o motor decide coluna ou fileira na montagem. **Desde a rodada v10 (§15.1, `docs/30` D96), a página recarrega só o vídeo, sozinha, quando o microfone e a câmera da pessoa estão desligados; com algo no ar, o menu avisa e oferece Recarregar o vídeo agora; com a sala trancada, vale na próxima entrada.** Na rodada v9 o menu só avisava "Para as miniaturas mudarem de lugar, recarregue a página.", e o produtor não viu o aviso.
@@ -559,7 +561,7 @@ O controle **Participantes simulados** (o do console e o do card depois do come�
 - **A mão levantada**: o motor pinta o contorno da miniatura de quem levantou a mão (`.raised-hand-border`, pela classe da regra `raisedHand`) e o selo da mão no topo (`raisedHandIndicator`) de amarelo. Agora os dois ficam no ativo do design system (`docs/12`): branco com a mão escura no tema escuro, quase preto com a mão branca no claro; o selo fica redondo, como o botão do menu. Só cor e canto: a espessura e o tamanho continuam os da tag.
 - **Os pontos do nível de áudio** na lateral da miniatura eram azuis; ficam no verde de quem fala, como o anel (que já era nosso).
 - **Conferido no código da tag fixada** (`stable-11248`): `Thumbnail.tsx`, `RaisedHandIndicator.tsx`, `AudioLevelIndicator.tsx` e `_videolayout_default.scss`. A miniatura fixada não tem contorno próprio nessa tag. As iniciais coloridas de quem está sem câmera ficaram como estão: a área também usa avatares coloridos.
-- **Para chegar ao ar**: a etapa `deploy-meet` (`.github/workflows/infra.yml`), com `SEM_LIVE_2H=sim` e o ok do produtor no chat (`docs/20`). O `?v=` do carregador mudou junto com a folha (a guarda `tests/infra-jitsi-css.guard.test.mjs` confere).
+- **Para chegar ao ar**: a etapa `deploy-meet` (`.github/workflows/infra.yml`), com `SEM_LIVE_2H=sim` e o ok do produtor no chat (`docs/20`). O `?v=` do carregador mudou junto com a folha (a guarda `tests/infra-jitsi-css.guard.test.mjs` confere). A etapa rodou em 12/11/2026 (`docs/21` §9.18).
 
 ### 14.9 Perguntas novas
 
@@ -576,6 +578,8 @@ O controle **Participantes simulados** (o do console e o do card depois do come�
 Depois do merge da rodada v9, o produtor testou a `dev` de novo e mandou seis ajustes. As decisões estão no `docs/30` (D92 a D97); aqui fica o desenho de cada um. A migração é a `202611160001` (`docs/21` §9.17), só para o **Marcar como vista**. O que é da folha do motor (§15.5) só chega ao servidor de vídeo pela etapa `deploy-meet`, com o ok do produtor no chat; o resto vale no merge.
 
 ### 15.1 Embaixo vale na hora (D96)
+
+> **Desde a rodada v12 (§17.1, `docs/30` D105) o Embaixo não existe mais:** ficam só **Lateral** e **Esconder**, e o vídeo nunca recarrega por causa das miniaturas. O texto abaixo fica como histórico.
 
 O produtor escolheu **Embaixo** e a coluna continuou ao lado. O motor só troca coluna por fileira ao montar o vídeo, e a rodada v9 só avisava para recarregar a página.
 
@@ -602,7 +606,7 @@ Na aba **Perguntas** da sala, com o fio aberto, o **Responder** de quem pergunto
 
 - **No console, o aviso da mão levantada sai**: o cartão "{nome} Gostaria de participar." com **Ver participantes**, e o selo amarelo "✋ 1" no topo do vídeo, eram do motor. O console já mostra as mãos no número da aba **Mãos** e no círculo da barra, então os dois saem pela configuração do iframe (`disabledNotifications` e `conferenceInfo`, lidos na lista permitida da tag fixada). Vale no merge, sem `deploy-meet`. O som da mão continua para quem apresenta.
 - **A live encerrada sem o diálogo do motor**: quando quem apresenta clica em **Encerrar live**, o motor abria "A chamada foi encerrada" com um botão **OK** no meio do palco de cada aluno. Com `notifyOnConferenceDestruction` em falso (lido em `conference/middleware.web.ts` e `conference.js` da tag fixada), ele só desliga e avisa a página, que mostra a tela dela de live encerrada. Vale na sala e no console, no merge, sem `deploy-meet`.
-- **O que ainda pode aparecer do motor** (no console: a gravação que não começou, a tela negada, V2-A59; e algum diálogo de permissão): a folha `infra/jitsi/web/bunker707.css` veste os avisos (`#notifications-container`, pelos papéis `status` e `alert`) como o aviso da área, com o cartão invertido do tema, canto de 12 px, sem a faixa colorida e com o botão sublinhado na cor do texto; e os diálogos (`role="dialog"` com `aria-modal`) com o cartão do tema, canto de 16 px e o botão principal invertido, sem azul. Só ids e papéis, nunca as classes geradas do motor. **Para chegar ao ar**: a etapa `deploy-meet`, com `SEM_LIVE_2H=sim` e o ok do produtor no chat; o `?v=` do carregador mudou junto.
+- **O que ainda pode aparecer do motor** (no console: a gravação que não começou, a tela negada, V2-A59; e algum diálogo de permissão): a folha `infra/jitsi/web/bunker707.css` veste os avisos (`#notifications-container`, pelos papéis `status` e `alert`) como o aviso da área, com o cartão invertido do tema, canto de 12 px, sem a faixa colorida e com o botão sublinhado na cor do texto; e os diálogos (`role="dialog"` com `aria-modal`) com o cartão do tema, canto de 16 px e o botão principal invertido, sem azul. Só ids e papéis, nunca as classes geradas do motor. **Para chegar ao ar**: a etapa `deploy-meet`, com `SEM_LIVE_2H=sim` e o ok do produtor no chat; o `?v=` do carregador mudou junto. A etapa rodou em 12/11/2026 (`docs/21` §9.18).
 
 ### 15.6 Perguntas novas
 
@@ -615,9 +619,11 @@ Na aba **Perguntas** da sala, com o fio aberto, o **Responder** de quem pergunto
 
 ## 16. Rodada v11: o terceiro teste do produtor na `dev`, em 12/11/2026
 
-Depois do merge da rodada v10, o produtor testou a `dev` outra vez e mandou seis pontos. As decisões estão no `docs/30` (D98 a D104); aqui fica o desenho. A migração é a `202611170001` (`docs/21` §9.18), só para as curtidas. O que é da folha do motor continua esperando a etapa `deploy-meet`, com o ok do produtor no chat; o resto vale no merge.
+Depois do merge da rodada v10, o produtor testou a `dev` outra vez e mandou seis pontos. As decisões estão no `docs/30` (D98 a D104); aqui fica o desenho. A migração é a `202611170001` (`docs/21` §9.18), só para as curtidas. O que é da folha do motor chegou ao servidor de vídeo pela etapa `deploy-meet` de 12/11/2026, com o ok do produtor no chat (`docs/21` §9.18); o resto vale no merge.
 
 ### 16.1 Trocar as miniaturas sem duplicar a pessoa (D98)
+
+> **Desde a rodada v12 (§17.1, `docs/30` D105) o Embaixo não existe mais:** ficam só **Lateral** e **Esconder**, e o vídeo nunca recarrega por causa das miniaturas. O texto abaixo fica como histórico.
 
 A cada troca entre **Lateral** e **Embaixo**, quem trocava aparecia mais uma vez nas miniaturas de todos, por cerca de um minuto, e o palco dizia "Reconectando…". O vídeo era trocado sem a pessoa sair da sala de vídeo, e o servidor guardava a entrada de antes até o prazo dele.
 
@@ -651,7 +657,7 @@ No card **Sala** do editor, a chave **Mostrar quantas pessoas estão na sala**, 
 
 ### 16.6 Os avisos e os diálogos do motor (D103)
 
-O produtor viu, ao abrir a live, cartões do motor (aparelho novo conectado e outros) ainda com o visual dele. A regra: nada do motor é tirado sem ter o nosso equivalente; o que continua aparecendo é vestido pela folha `infra/jitsi/web/bunker707.css` (§15.5), que já está escrita desde a rodada v10 e **ainda não chegou ao servidor de vídeo**. Ela chega pela etapa `deploy-meet`, com `SEM_LIVE_2H=sim` e o ok do produtor no chat.
+O produtor viu, ao abrir a live, cartões do motor (aparelho novo conectado e outros) ainda com o visual dele. A regra: nada do motor é tirado sem ter o nosso equivalente; o que continua aparecendo é vestido pela folha `infra/jitsi/web/bunker707.css` (§15.5), que já estava escrita desde a rodada v10 e não tinha chegado ao servidor de vídeo. **Chegou em 12/11/2026**, pela etapa `deploy-meet` rodada da `dev`, com `SEM_LIVE_2H=sim` e o ok do produtor no chat (`docs/21` §9.18). O visual no ar fica para o produtor conferir na `dev`.
 
 ### 16.7 A janela "A live foi encerrada" (D104)
 
@@ -664,6 +670,44 @@ O diálogo do motor ("A chamada foi encerrada", com o botão azul) continua desl
 | V2-A85 | As curtidas devem entrar no relatório da sessão (as respostas mais curtidas, quem mais curtiu)? | sim, numa próxima rodada; os dados já ficam gravados |
 | V2-A86 | Curtir também as mensagens do chat? | não nesta rodada: pede tabela própria e o desenho do polegar na mensagem |
 | V2-A87 | O aviso de resposta nova deve chegar também ao sino, para quem saiu da sala? | o sino já avisa a resposta escrita da equipe; as respostas do fio, não por enquanto |
-| V2-A88 | A chave de mostrar o número de pessoas deve ter um botão no console, para trocar no meio da live? | não por enquanto: fica no editor e vale em até 1 min |
+| V2-A88 | A chave de mostrar o número de pessoas deve ter um botão no console, para trocar no meio da live? | **decidida em 12/11/2026:** sim, na entrada **Presença** do console (§17.3, `docs/30` D107) |
 | V2-A89 | A fila das mãos deve mostrar há quanto tempo cada um espera? | não por enquanto: a ordem e o **Próximo** bastam |
 | V2-A90 | A janela **A live foi encerrada** deve trazer o botão **Ver replay** quando o Replay já existe? | não por enquanto: só o **OK**; o Replay continua na página do webinário |
+
+## 17. Rodada v12: o quarto teste do produtor na `dev`, em 12/11/2026
+
+Depois do merge da rodada v11, o produtor perguntou por que trocar as miniaturas de lugar tira a pessoa da sala de vídeo (o Zoom não faz isso), e mandou três pontos. As decisões estão no `docs/30` (D105 a D107); aqui fica o desenho. Não tem migração e nada muda na folha do motor: a etapa `deploy-meet` não é necessária.
+
+### 17.1 As miniaturas sem o Embaixo (D105)
+
+- **Por que reconectava**: o vídeo da sala é o motor dentro de uma moldura na nossa página. Ele decide coluna ou fileira uma vez, quando carrega, e não tem comando para trocar com a sala aberta; então a página carregava o vídeo de novo, e carregar de novo é sair e entrar na sala de vídeo. No Zoom a conexão e o desenho são coisas separadas.
+- **O que fica**: o grupo **Miniaturas** do menu **Visão do vídeo**, na sala e no console, só com **Lateral** (o padrão) e **Esconder**. As duas valem na hora, por comando, no mesmo vídeo. Nenhuma frase de espera, nenhum item **Recarregar o vídeo agora**, e o palco nunca mais diz "Mudando as miniaturas de lugar…".
+- **Quem tinha escolhido Embaixo**: abre na **Lateral**, sem aviso.
+- **O que não muda**: o **Esconder** de quem apresenta continua saindo também da gravação, com a frase "Escondidas para você e na gravação. Cada aluno escolhe as dele.".
+- **Como o Embaixo pode voltar sem reconectar**: com a camada de vídeo própria (o vídeo desenhado pela página, sem a moldura do motor), que continua para uma fase posterior (§1). Forçar pela folha do motor ou alterar o motor foram descartados por ora: o primeiro pode quebrar a cada atualização dele, o segundo obriga a manter uma versão modificada.
+
+### 17.2 O número de mensagens novas no Chat do console (D106)
+
+- **Onde**: no item **Chat** do trilho, o contador vermelho no canto do ícone, igual ao das **Perguntas** e das **Mãos** e ao do Chat da sala do aluno. Abaixo de 1024 px, e na gravada (sem trilho), a aba vira "Chat 3".
+- **Quando**: só com o Chat fora da tela (o painel fechado, ou aberto noutra aba ou entrada). Abrir o Chat zera; o que já foi visto não volta a contar.
+- **O que conta**: o comentário do aluno (também o que espera a equipe liberar) e a mensagem de um colega da equipe. Não conta a mensagem de quem está olhando, o roteiro, o chat original da gravação, o Assistente nem a linha de sistema.
+- **Para o leitor de tela**: o nome do item diz o número, "Chat, 3 mensagens novas" (começa pelo rótulo visível, WCAG 2.5.3).
+- **Sem som e sem cartão na tela**: só o número. O console atualiza a cada 5 s, então o número aparece em até 5 s.
+
+### 17.3 A chave "Mostrar quantas pessoas estão na sala" no console (D107)
+
+- **No editor**: continua no card **Sala**, logo abaixo de **Câmeras dos alunos**, em **Novo webinário** e ao editar (§16.5). Conferido na tela de **Novo webinário** em 13/11/2026, no app de teste local.
+- **No console**: no alto da entrada **Presença**, um bloco "Número de pessoas na sala" com a mesma chave, o mesmo rótulo e a mesma frase do editor, e a linha "Vale para todas as sessões deste webinário. A sala dos alunos acompanha em até 1 minuto.". Depois dele vêm os participantes simulados (quando existem) e a leitura da presença. A **Presença** passa a existir sempre na live e na gravada, também antes de começar.
+- **Como chegar**: pelo item **Presença** do trilho, ou tocando nos presentes do palco ("12 presentes · pico 14") ou do topo, que viram botão sempre. Com participantes simulados o foco vai ao título deles, como antes; sem eles, à chave.
+- **O que o console mostra com a chave desligada**: o selo dos presentes termina em "· só a equipe vê". O número continua aparecendo para a equipe.
+- **Depois de mudar**: o aviso "Os alunos não veem mais quantas pessoas estão na sala." ou "Os alunos voltam a ver quantas pessoas estão na sala.". Na sala do aluno o número some ou volta no sinal de presença seguinte (cerca de 15 a 30 s), sem recarregar a página.
+- **Quem pode**: quem escreve no chat pela equipe (`messaging.write`), com a sessão aberta. Na sessão encerrada a chave fica desligada para clique; no Replay ela não aparece.
+
+### 17.4 Perguntas novas
+
+| # | Pergunta | Padrão assumido |
+|---|---|---|
+| V2-A91 | O Chat do console deve avisar também com som ou com um cartão na tela a cada comentário? | não por enquanto: só o número no item **Chat** |
+| V2-A92 | O número do Chat deve contar os comentários do roteiro (os participantes simulados)? | não: a equipe os programou; só o que uma pessoa escreveu agora |
+| V2-A93 | A chave do número de pessoas deve valer por sessão, e não pelo webinário inteiro? | pelo webinário, como no editor; por sessão pede coluna nova e migração |
+| V2-A94 | O que a página ainda sabe sobre a fileira embaixo (os selos que sobem a altura dela) deve sair do código? | fica: é a leitura do layout do motor e não custa nada com a coluna; sai junto com a moldura do motor, na camada de vídeo própria |

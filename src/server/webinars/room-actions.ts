@@ -53,6 +53,7 @@ import {
   savePollsSchema,
   saveSimulationSchema,
   sessionChatModeSchema,
+  showPresentCountSchema,
   sessionIdInputSchema,
   teamChatSchema,
   type ConsolePollLaunch,
@@ -110,6 +111,7 @@ import { queueWebinarAnswerNotice } from "./notify";
 import { baseRecordingOf } from "./queries";
 import { anonymousDisplayName, sessionOffsetMs, teamAuthorName } from "./room-model";
 import { questionReplyRefusal, questionSentMetadata } from "./room-rules";
+import { forgetPresentCount } from "./present-count-memory";
 import { presenterFromRow, sessionFromRow, type SessionRow, type WebinarRow } from "./rows";
 import { pollPinnable } from "./screen-model";
 import type { ScreenDisplayHide } from "./screen-rows";
@@ -117,7 +119,7 @@ import { pinPollSchema, pollPinSnapshotSchema, unpinPollSchema } from "./screen-
 import { hideActiveScreenDisplayRows, readActiveScreenDisplayRows, showScreenDisplayRow } from "./screen-store";
 import { fetchSessionSimulation } from "./simulation-store";
 import { finishSession, openSession } from "./session-lifecycle";
-import { assertWebinarNotArchived, fetchSessionRow, insertSessionRows, listPresenterRows, listRecordingRows, listSessionRows, requireWebinarRow, touchSessionRow, updateSessionRow } from "./store";
+import { assertWebinarNotArchived, fetchSessionRow, insertSessionRows, listPresenterRows, listRecordingRows, listSessionRows, requireWebinarRow, touchSessionRow, updateSessionRow, updateWebinarRow } from "./store";
 
 const LIST_PATH = "/admin/comunicacao/webinarios";
 
@@ -150,6 +152,7 @@ export type SessionOpened = { changed: boolean; fired: number; notified: number;
 export type SessionEnded = { replayCreated: boolean; sessionId: string; summary: PresenceSummary | null };
 export type ModeratedMessage = { message: ChatMessage; pinnedMessageId: string | null };
 export type SessionChatMode = { chatMode: ChatMode; sessionId: string; slowModeSeconds: SlowModeSeconds | null };
+export type PresentCountSaved = { sessionId: string; shown: boolean };
 export type SavedPolls = { created: number; deleted: number; polls: Poll[]; updated: number };
 export type AnsweredQuestion = { message: ChatMessage | null; notified: boolean; question: WebinarQuestion };
 export type RepliedQuestion = { notified: boolean; reply: QuestionReply };
@@ -771,6 +774,41 @@ export async function setSessionChatMode(input: { chatMode: ChatMode; sessionId:
     revalidateConsole(webinar.id);
 
     return { chatMode: data.chatMode, sessionId: row.id, slowModeSeconds: slow };
+  });
+}
+
+/**
+ * [messaging.write] Mostrar ou esconder dos alunos quantas pessoas estao na sala, pelo console (rodada v12, docs/30
+ * D107; sem migracao; pedido do produtor de 12/11/2026: "Isso tem que estar na hora de criar o webnario e também no
+ * console"). Grava so a chave `showPresentCount` no room_settings do webinario, com a guarda do `updated_at` lido (o
+ * editor aberto noutra aba recebe o conflito, 409, no proximo Salvar dele). E a mesma chave do card Sala do editor
+ * (D102): vale para todas as sessoes do webinario, e a sala do aluno acompanha na proxima batida (ate 1 min). So com a
+ * sessao aberta para a equipe (nunca no Replay nem na encerrada).
+ */
+export async function setShowPresentCount(input: { sessionId: string; shown: boolean }): Promise<ActionResult<PresentCountSaved>> {
+  return runWebinarAction("messaging.write", "atendimento", showPresentCountSchema, input, async ({ input: data, user }) => {
+    const db = webinarsDb();
+    const { row, session, webinar } = await loadSession(db, data.sessionId);
+
+    if (!canTeamActOn(session)) {
+      throw new WebinarError(SESSION_CLOSED_MESSAGE, 409);
+    }
+
+    const current = webinar.room_settings && typeof webinar.room_settings === "object" && !Array.isArray(webinar.room_settings) ? (webinar.room_settings as Record<string, unknown>) : {};
+    await updateWebinarRow(db, webinar.id, { room_settings: { ...current, showPresentCount: data.shown } }, { expectedUpdatedAt: webinar.updated_at });
+    // O sinal de 15 s dos alunos le a chave de novo ja no proximo (room-route.loadPresentCountShown).
+    forgetPresentCount(webinar.id);
+
+    await recordAudit(db, {
+      action: "webinar.show_present_count",
+      actorId: user.id,
+      entityId: webinar.id,
+      entityType: "webinar",
+      metadata: { session_id: row.id, shown: data.shown }
+    });
+    revalidateWebinar(webinar.id);
+
+    return { sessionId: row.id, shown: data.shown };
   });
 }
 

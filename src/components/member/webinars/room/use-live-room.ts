@@ -31,8 +31,6 @@ import {
   expectVideoToggle,
   filmstripStep,
   mountedThumbsRow,
-  thumbsPending,
-  thumbsReloadMode,
   gateSwitchDone,
   gateSwitchStarted,
   gateToggle,
@@ -273,8 +271,8 @@ export type UseLiveRoomInput = {
    */
   look: LiveEmbedLook;
   /**
-   * Onde a pessoa quer as miniaturas (rodada v9, docs/30 D91): Esconder tira a coluna (ou a fileira) por comando, com
-   * qualquer largura; Embaixo vale pelo `look` (a fileira so existe no iframe montado com ela). Sem ele, Lateral.
+   * Onde a pessoa quer as miniaturas (rodada v9, docs/30 D91; so Lateral ou Esconder desde a rodada v12, D105):
+   * Esconder tira a coluna por comando, com qualquer largura. Sem ele, Lateral.
    */
   thumbs?: RoomThumbs;
   nonce: string | null;
@@ -323,19 +321,10 @@ export type LiveRoomController = {
   toggleMic: () => void;
   toggleSound: () => void;
   /**
-   * Recarrega o video agora (o iframe novo entra com o token novo, pelo caminho da volta depois de uma queda): o que a
-   * troca entre Lateral e Embaixo pede. Fora da sala, ou com outra volta em curso, nao faz nada.
+   * O iframe de agora foi montado com a fileira de miniaturas embaixo (o layout `stage_bottom` do motor; falso sem
+   * iframe ou com a coluna). Desde a rodada v12 (docs/30 D105) a sala nunca pede esse layout: a pessoa escolhe so
+   * Lateral ou Esconder, e nada aqui tira ninguem da sala de video para mudar as miniaturas.
    */
-  reloadVideo: () => void;
-  /** O video esta recarregando por causa da troca das miniaturas: o palco diz isso, nao "Reconectando…". */
-  reloading: boolean;
-  /**
-   * A troca entre Lateral e Embaixo que ainda espera o video carregar de novo e nao sai sozinha (thumbsReloadMode):
-   * "manual" (algo do aluno no ar: o menu oferece Recarregar o vídeo agora) ou "locked" (a sala trancada). Nula sem
-   * espera, e tambem enquanto a pagina recarrega o video sozinha.
-   */
-  thumbsWait: "locked" | "manual" | null;
-  /** O iframe de agora foi montado com a fileira de miniaturas embaixo (falso sem iframe ou com a coluna). */
   thumbsRow: boolean;
   /** A visao que o aluno escolheu (guardada; Palco por padrao): volta depois de cada entrada. */
   view: RoomView;
@@ -541,12 +530,6 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
   useEffect(() => {
     dropRef.current = handleDrop;
   });
-  const reloadVideoRef = useRef<() => void>(() => undefined);
-  /** A saida pedida pela troca das miniaturas ainda nao foi avisada pelo iframe (reloadVideo): quem a solta. */
-  const reloadLeftRef = useRef<(() => void) | null>(null);
-  /** O video recarrega por causa da troca das miniaturas (a frase do palco nao e a da queda). */
-  const [reloading, setReloading] = useState(false);
-
   /** Le quem esta no palco pelo getRoomsInfo (o participantJoined nao traz o papel de quem ja era moderador). */
   const readRoomsInfo = useCallback(() => {
     if (roomsInfoPendingRef.current) {
@@ -611,11 +594,6 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
       if (leavingRef.current) {
         return;
       }
-      if (reloadLeftRef.current && (name === "videoConferenceLeft" || name === "readyToClose")) {
-        // A saida pedida pela troca das miniaturas: ja foi registrada (reloadVideo) e nao e uma queda.
-        reloadLeftRef.current();
-        return;
-      }
       // O mudo de um iframe antes da entrada dele (o startWithAudioMuted aplicado na chegada, base/media de falso para
       // verdadeiro): nem a barra, nem o pedido do microfone, nem o servidor (toda entrada ja comeca muda).
       const frame = meetApiRef.current?.current ?? null;
@@ -648,7 +626,6 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
         ownIdRef.current = typeof id === "string" ? id : null;
         everJoinedRef.current = true;
         rejoinedRef.current = true;
-        setReloading(false);
         attemptsRef.current = 0;
         droppingRef.current = false;
         joinedGenerationRef.current = mountGenerationRef.current;
@@ -932,67 +909,6 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     enter();
   }, [enter]);
 
-  // Recarregar o video de proposito (a troca entre Lateral e Embaixo, docs/30 D96): a mesma sequencia da volta depois
-  // de uma queda, sem a espera. A saida e registrada como no Sair (o iframe desmonta antes de avisar), o pedido do
-  // microfone acaba e o iframe novo monta com o token novo e com o `look` de agora.
-  const reloadVideo = useCallback(() => {
-    if (!joinedRef.current || droppingRef.current || leavingRef.current) {
-      return;
-    }
-    pushEvent(toRoomEvent("videoConferenceLeft", {}, { nowIso: new Date().toISOString(), ownId: ownIdRef.current }));
-    micAskRef.current = null;
-    joinedApiRef.current = null;
-    droppingRef.current = true;
-    rejoinedRef.current = false;
-    setReloading(true);
-    setEntry("reconnecting");
-    // A pessoa sai da sala de video antes de o iframe ser trocado (teste do produtor de 12/11/2026, docs/30 D98): sem
-    // isso o servidor de video guardava a entrada de antes por cerca de um minuto e a pessoa aparecia duas vezes nas
-    // miniaturas de todos. O `hangup` avisa a saida (videoConferenceLeft ou readyToClose); se o iframe nao responder
-    // (ja tinha caido), o prazo solta a troca.
-    const left = new Promise<void>((resolve) => {
-      let timer = 0;
-      const done = () => {
-        window.clearTimeout(timer);
-        reloadLeftRef.current = null;
-        resolve();
-      };
-      timer = window.setTimeout(done, LIVE_ROOM_RULES.reloadLeaveMs);
-      reloadLeftRef.current = done;
-      if (!commandRef.current("hangup")) {
-        done();
-      }
-    });
-    Promise.all([postJoinToken(webinarId, sessionId), left])
-      .then(([next]) => {
-        if (leavingRef.current) {
-          return;
-        }
-        setReply(next);
-        droppingRef.current = false;
-        armJoinTimeout();
-        retryRef.current();
-      })
-      .catch((error: unknown) => {
-        if (leavingRef.current) {
-          return;
-        }
-        setReloading(false);
-        const failure = joinFailureOf(error);
-        if (failure !== "error") {
-          refuse(failure);
-          return;
-        }
-        // Sem rede: vale o caminho da queda (as tentativas de voltar).
-        droppingRef.current = false;
-        dropRef.current();
-      });
-  }, [armJoinTimeout, pushEvent, refuse, sessionId, webinarId]);
-
-  useEffect(() => {
-    reloadVideoRef.current = reloadVideo;
-  });
-
   const hangUp = useCallback(() => {
     leavingRef.current = true;
     micAskRef.current = null;
@@ -1190,10 +1106,10 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
   // ou fecha, girar, a janela). So o toggleFilmStrip que muda o que o motor mostra, e um por vez.
   const joinedNow = entry === "joined";
   const filmstripVisible = signals.filmstripVisible;
-  // As miniaturas onde a pessoa escolheu (D91): o iframe montado com a fileira embaixo nao depende da largura, e o
-  // Esconder tira a coluna ou a fileira com qualquer largura.
-  const mountedRow = mountedThumbsRow(jitsi.mountedInterfaceConfig);
-  const thumbsRow = mountedRow === true;
+  // As miniaturas onde a pessoa escolheu (D91; so Lateral ou Esconder desde a rodada v12, D105): o Esconder tira a
+  // coluna com qualquer largura, por comando. O iframe montado com a fileira embaixo (o layout do motor) nao depende
+  // da largura.
+  const thumbsRow = mountedThumbsRow(jitsi.mountedInterfaceConfig) === true;
   const wantColumn = columnWanted({ frameWidth, row: thumbsRow, thumbs, view: signals.viewShown });
   useEffect(() => {
     if (!joinedNow || frameWidth <= 0 || filmstripStep({ visible: filmstripVisible, wanted: wantColumn }) === null) {
@@ -1206,18 +1122,6 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
       filmstripSentRef.current = filmstripVisible;
     }
   }, [filmstripVisible, frameWidth, joinedNow, wantColumn]);
-
-  // A troca entre Lateral e Embaixo (D96): com nada do aluno no ar, a pagina recarrega o video sozinha, uma vez (o
-  // iframe novo ja monta do jeito escolhido, e a espera acaba); com o microfone ou a camera ligados, ou com a sala
-  // trancada, fica com o menu (thumbsWait).
-  const thumbsReload = thumbsReloadMode({ joined: joinedNow, locked: lobby, onAir: signals.audioOn || signals.videoOn, pending: thumbsPending({ row: mountedRow, thumbs }) });
-  useEffect(() => {
-    if (thumbsReload !== "auto") {
-      return;
-    }
-    const id = window.setTimeout(() => reloadVideoRef.current(), 0);
-    return () => window.clearTimeout(id);
-  }, [thumbsReload]);
 
   return {
     acceptMic: accept,
@@ -1240,10 +1144,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     toggleHand,
     toggleMic,
     toggleSound,
-    reloadVideo,
     thumbsRow,
-    reloading: reloading && entry === "reconnecting",
-    thumbsWait: thumbsReload === "auto" ? null : thumbsReload,
     view,
     viewShown: signals.viewShown
   };
