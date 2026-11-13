@@ -10,7 +10,9 @@ import { LIVE_AO_VIVO_DE_TESTE, expect, salaFalsaDoJitsi, seedLiveAoVivoDeTeste,
 // do console, cria a pessoa na lista "Pessoas que comentam" (Nome, a Foto enviada pelo navegador, Aparece como Aluno).
 // Pelo "Comentar como {nome}" manda um comentario, depois uma Pergunta (o Tipo) e mais um comentario como a mesma
 // pessoa, sem digitar o nome de novo (o formulario fica aberto, com "Enviado."). A aluna, na sala da live, ve os dois
-// comentarios no chat com o nome e a foto da pessoa, e a pergunta na aba Perguntas com a mesma foto.
+// comentarios no chat com o nome e a foto da pessoa, e a pergunta na aba Perguntas com a mesma foto. Desde 13/11/2026
+// (docs/30 D117 e D119) a lista e da escola e fica fechada numa linha: vazia, a linha oferece "Nova pessoa", que abre a
+// lista com o formulario; com gente, "Gerenciar pessoas" abre e fecha.
 //
 // Escrito na rodada v8 e rodado por quem junta (as frentes nao rodam o Playwright).
 
@@ -67,9 +69,11 @@ test.describe("produtor", () => {
     await page.waitForLoadState("networkidle");
 
     const roteiro = await abrirRoteiro(page);
-    const lista = roteiro.locator("[data-persona-list]");
+    const lista = roteiro.locator("[data-persona-panel]");
+    await expect(lista).toHaveAttribute("data-persona-panel-open", "false");
     await expect(lista.getByText(PESSOAS.vazia, { exact: true })).toBeVisible();
     await lista.getByRole("button", { exact: true, name: PESSOAS.novaPessoa }).click();
+    await expect(lista).toHaveAttribute("data-persona-panel-open", "true");
     const formulario = lista.locator('[data-persona-form="nova"]');
     await formulario.getByLabel(COMENTARIOS.nome, { exact: true }).fill(NOME);
     await formulario.getByLabel(COMENTARIOS.enviarFoto, { exact: true }).setInputFiles({ buffer: pngQuadrado(640), mimeType: "image/png", name: "rosto-gerado.png" });
@@ -80,6 +84,12 @@ test.describe("produtor", () => {
     const pessoa = lista.locator("[data-persona]").filter({ hasText: NOME });
     await expect(pessoa).toBeVisible();
     await expect(pessoa.locator("img")).toHaveAttribute("src", FOTO_NO_ENDERECO);
+    // A linha da lista: o total da escola; Fechar a lista e Gerenciar pessoas abrem e fecham.
+    await expect(lista.locator("[data-persona-summary-count]")).toHaveText(PESSOAS.resumo(1));
+    await lista.getByRole("button", { exact: true, name: PESSOAS.fecharLista }).click();
+    await expect(pessoa).toHaveCount(0);
+    await lista.getByRole("button", { exact: true, name: PESSOAS.gerenciar }).click();
+    await expect(pessoa).toBeVisible();
 
     // Comentar como a pessoa: o Novo comentário abre com ela escolhida, sem o campo do Nome.
     await pessoa.getByRole("button", { exact: true, name: PESSOAS.comentarComo(NOME) }).click();

@@ -183,13 +183,24 @@ test("Roteiro de chat: as linhas com minuto, nome, papel, Solta em e situacao; o
     scriptItem("d", { offsetMs: 5_000, position: 5, status: "disabled" })
   ];
   const transcript = { cues: 312, format: "vtt", language: "pt-BR", updatedAt: "2026-11-01T15:00:00.000Z" };
-  const markup = html(createElement(ScriptCard, { disabled: false, hasRecording: true, initialItems: items, initialTranscript: transcript, sessions: [session(), ended], webinarId: WEBINAR }));
+  // A linha da frase aberta (D118: so uma abre por vez); as outras, fechadas.
+  const markup = html(createElement(ScriptCard, { disabled: false, hasRecording: true, initialItems: items, initialOpenKey: "p", initialTranscript: transcript, sessions: [session(), ended], webinarId: WEBINAR }));
   const text = textOf(markup);
 
   assert.equal(count(markup, /data-script-row=/g), 6);
   assert.match(text, /3 entram sozinhas · 1 pelo botão · 1 sem minuto · 1 desligada/);
-  assert.match(markup, /value="00:30"/, "o minuto em mm:ss");
-  assert.match(markup, /value="01:30"/);
+  // As linhas fechadas: o minuto em mm:ss (ou Frase, ou Botão), na ordem do minuto.
+  assert.deepEqual(
+    Array.from(markup.matchAll(/data-script-row-when="">([^<]*)</g), (match) => match[1]),
+    ["00:05", "00:30", "Frase", "01:30", "Frase", "Botão"],
+    "a frase achada entra no minuto resolvido (00:32); a nao achada e a do botao, no fim"
+  );
+  assert.equal(count(markup, /data-script-row-panel=""/g), 1, "uma linha aberta");
+  assert.equal(count(markup, /aria-expanded="true"/g), 1);
+  assert.equal(count(markup, /aria-expanded="false"/g), 5);
+  assert.match(markup, /data-script-open="true"[^>]*data-script-row="2"/, "a da frase, a terceira pelo minuto");
+  assert.match(text, /Mensagem 1: Duda Desligada Mensagem d/, "o numero para o leitor de tela, o nome, a situacao e o comeco do texto");
+  assert.doesNotMatch(markup, /data-script-search/, "com menos de 9 mensagens, sem a busca");
   assert.match(text, /Pronta · 00:32/, "a frase achada mostra o minuto resolvido");
   assert.match(text, /Frase não achada/);
   assert.match(text, /Desligada/);
@@ -325,13 +336,17 @@ const FOTO_URL = `https://projeto.supabase.co/storage/v1/object/public/content-a
 
 test("R8 e R9 Roteiro na Live ao vivo: 'Num minuto da live' e 'Pelo botão da equipe' (sem 'Quando o apresentador diz', com o porquê), o minuto da live, sem a transcricao; a Foto (opcional) de quem comenta em cada linha", () => {
   const items = [scriptItem("a", { offsetMs: 12 * 60_000, personaAvatarPath: FOTO, personaName: "Bia C.", position: 0 }), scriptItem("m", { personaName: "Caio D.", position: 1, triggerKind: "manual" })];
-  const markup = html(createElement(ScriptCard, { disabled: false, hasRecording: false, initialItems: items, initialTranscript: null, sessions: [session({ kind: "live" })], webinarId: WEBINAR, webinarKind: "live" }));
+  const props = { disabled: false, hasRecording: false, initialItems: items, initialTranscript: null, sessions: [session({ kind: "live" })], webinarId: WEBINAR, webinarKind: "live" };
+  const markup = html(createElement(ScriptCard, { ...props, initialOpenKey: "a" }));
   const text = textOf(markup);
   assert.match(text, /Num minuto da live/);
   assert.match(text, /Pelo botão da equipe/);
   assert.doesNotMatch(text, /Quando o apresentador diz”? Solta|Num minuto do vídeo/);
   assert.equal(count(markup, /type="radio"[^>]*value="on_phrase"/g), 0, "a opcao nao existe na live");
-  assert.equal(count(markup, /type="radio"[^>]*value="at_offset"/g), 2);
+  assert.equal(count(markup, /type="radio"[^>]*value="at_offset"/g), 1, "so a linha aberta mostra os campos");
+  // As linhas fechadas: "12:00" com a foto da Bia, e "Botão" com as iniciais do Caio.
+  assert.match(markup, new RegExp(`data-script-row-when="">12:00<[\\s\\S]*?src="${FOTO_URL.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}"`), "a foto na linha fechada");
+  assert.match(markup, /data-script-row-when="">Botão</);
   assert.match(markup, /data-script-live-hint=""/);
   assert.match(text, /Na live ao vivo não há transcrição durante a transmissão, então “Quando o apresentador diz” não existe aqui\./);
   assert.match(text, /Minuto da live/);
@@ -341,28 +356,28 @@ test("R8 e R9 Roteiro na Live ao vivo: 'Num minuto da live' e 'Pelo botão da eq
   assert.match(markup.match(/<span[^>]*data-script-csv-hint=""[^>]*>([^<]*)<\/span>/)?.[1] ?? "", /Tempo é o minuto da live, como 12 ou 12:30/);
   assert.doesNotMatch(text, /Transcrição do vídeo|Resolver frases|Salvar transcrição/, "sem transcricao na live");
   assert.doesNotMatch(markup, /data-transcript-input/);
-  // A foto de quem comenta em cada linha: a previa, Trocar e Remover, a dica, a linha do consentimento e a caixa.
-  assert.equal(count(markup, /data-persona-photo=""/g), 2);
+  // A foto de quem comenta na linha aberta: a previa, Trocar e Remover, a dica, a linha do consentimento e a caixa.
+  assert.equal(count(markup, /data-persona-photo=""/g), 1);
   assert.match(markup, new RegExp(`<img alt="Foto de Bia C\\." [^>]*data-persona-photo-preview=""[^>]*src="${FOTO_URL.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}"`));
   assert.match(text, /Foto \(opcional\)/);
   assert.match(text, /Trocar Remover/);
-  assert.match(text, /Enviar foto/, "a linha sem foto");
+  assert.match(textOf(html(createElement(ScriptCard, { ...props, initialOpenKey: "m" }))), /Enviar foto/, "a linha sem foto");
   assert.match(text, /JPG, PNG ou WebP\. Fica com até 512 px\./);
-  assert.equal(count(markup, /data-persona-photo-consent=""/g), 2);
+  assert.equal(count(markup, /data-persona-photo-consent=""/g), 1);
   assert.match(text, /Use imagem gerada ou com autorização\. Nunca a foto de uma pessoa real sem o consentimento dela\./);
   // A caixa "Usar esta foto em todos os comentários de {nome}" saiu em 11/11/2026 (D75): a foto e da pessoa da lista.
   assert.doesNotMatch(markup, /data-persona-photo-all|Usar esta foto em todos/);
   assert.doesNotMatch(text, /personagem/i);
 
   // A gravada continua com as tres opcoes e a transcricao; a foto tambem.
-  const gravada = html(createElement(ScriptCard, { disabled: false, hasRecording: true, initialItems: items, initialTranscript: null, sessions: [session()], webinarId: WEBINAR }));
+  const gravada = html(createElement(ScriptCard, { disabled: false, hasRecording: true, initialItems: items, initialOpenKey: "a", initialTranscript: null, sessions: [session()], webinarId: WEBINAR }));
   assert.match(gravada, /<input[^>]*placeholder="mm:ss"[^>]*value="12:00"\/>/, "a gravada continua no minuto do video");
   assert.match(textOf(gravada), /Tempo como 1:02:03, 02:03 ou 63 \(segundos\)/);
   assert.match(textOf(gravada), /Num minuto do vídeo.*Quando o apresentador diz.*Pelo botão da equipe/);
   assert.match(textOf(gravada), /Transcrição do vídeo/);
   assert.doesNotMatch(gravada, /data-script-live-hint/);
-  assert.equal(count(gravada, /data-persona-photo=""/g), 2);
-  assert.equal(count(gravada, /type="radio"[^>]*value="on_phrase"/g), 2, "na gravada, a frase continua");
+  assert.equal(count(gravada, /data-persona-photo=""/g), 1);
+  assert.equal(count(gravada, /type="radio"[^>]*value="on_phrase"/g), 1, "na gravada, a frase continua");
 });
 
 test("R8 e R9 console: o Roteiro da live com 'Aos 12 minutos da live', a foto de quem comenta e o 'Novo comentário' com Quem comenta, Aparece como, Enviar agora e Guardar na lista", async () => {
@@ -450,7 +465,7 @@ test("achados 1, 3 e 4 (revisao de 11/11/2026): o minuto da live digitado em min
   assert.equal(card.scriptCanSave({ dirty: true, locked: false, uploading: 1 }), false);
   assert.equal(card.scriptCanSave({ dirty: false, locked: false, uploading: 0 }), false);
   const items = [scriptItem("a", { offsetMs: 60_000, personaName: "Bia C.", position: 0 })];
-  const subindo = html(createElement(ScriptCard, { disabled: false, hasRecording: true, initialItems: items, initialTranscript: null, initialUploading: ["a"], sessions: [session()], webinarId: WEBINAR }));
+  const subindo = html(createElement(ScriptCard, { disabled: false, hasRecording: true, initialItems: items, initialOpenKey: "a", initialTranscript: null, initialUploading: ["a"], sessions: [session()], webinarId: WEBINAR }));
   assert.match(subindo, /<button(?=[^>]*data-persona-photo-send="")(?=[^>]*\sdisabled="")[^>]*>[\s\S]*?Enviando a foto…/, "a linha com a foto subindo");
   assert.match(subindo.match(/<button[^>]*data-script-save=""[^>]*>/)?.[0] ?? "", /\sdisabled=""/);
   const estado = { body: "Que aula!", kind: "message", personaAvatarPath: null, personaId: null, personaName: "Bia C.", personaRole: "student" };
@@ -481,26 +496,40 @@ test("pessoas no editor: a lista 'Pessoas que comentam' (foto ou iniciais, Apare
     scriptItem("b", { kind: "question", offsetMs: 90_000, personaAvatarPath: FOTO, personaId: ADRIANO, personaName: "Adriano Souza", position: 1 }),
     scriptItem("c", { offsetMs: 120_000, personaId: null, personaName: "Caio D.", position: 2 })
   ];
-  const markup = html(createElement(ScriptCard, { disabled: false, hasRecording: true, initialItems: items, initialPersonas: COM_LISTA, initialTranscript: null, sessions: [session()], webinarId: WEBINAR }));
+  const props = { disabled: false, hasRecording: true, initialItems: items, initialPersonas: COM_LISTA, initialTranscript: null, sessions: [session()], webinarId: WEBINAR };
+  // Fechada (D119): uma linha com as fotos, o total da escola e "Gerenciar pessoas"; a lista so ao abrir.
+  const fechada = html(createElement(ScriptCard, props));
+  assert.match(fechada, /data-persona-panel="" data-persona-panel-open="false"/);
+  assert.match(textOf(fechada), /Pessoas que comentam .*A lista é da escola: as mesmas pessoas aparecem em todos os webinários, no editor e no console\. BC 2 pessoas na lista da escola Gerenciar pessoas/, "a foto do Adriano e as iniciais da Bia, o total e o botao");
+  assert.match(fechada, /<button[^>]*aria-expanded="false"[^>]*data-persona-toggle=""/);
+  assert.doesNotMatch(fechada, /data-persona-list=""|data-persona="/, "a lista fechada");
+  assert.match(fechada, new RegExp(`data-persona-summary-photos=""[\\s\\S]*?src="${FOTO_URL.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}"`), "as fotos na linha fechada");
+  assert.equal(count(fechada, /data-script-row-panel=""/g), 0, "nenhuma mensagem aberta");
+
+  const markup = html(createElement(ScriptCard, { ...props, initialOpenKey: "b", initialPersonasOpen: true }));
   const text = textOf(markup);
   assert.match(markup, /data-persona-list=""/);
-  assert.match(text, /Pessoas que comentam/);
+  assert.match(markup, /<button[^>]*aria-expanded="true"[^>]*data-persona-toggle=""[^>]*>[\s\S]*?Fechar a lista/);
   assert.match(markup, new RegExp(`data-persona="${ADRIANO}"[\\s\\S]*?src="${FOTO_URL.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}"`), "a foto da pessoa");
-  assert.match(text, /Adriano Souza Aparece como Aluno · 2 comentários do roteiro/);
-  assert.match(text, /Bia Costa Aparece como Equipe · Nenhum comentário do roteiro/);
+  assert.match(text, /Adriano Souza Aparece como Aluno · 2 comentários neste roteiro/);
+  assert.match(text, /Bia Costa Aparece como Equipe · Nenhum comentário neste roteiro/);
   assert.match(markup, /aria-label="Editar Adriano Souza"/);
   assert.match(markup, /aria-label="Remover Bia Costa"/);
   assert.match(markup, /data-persona-new=""/);
+  assert.doesNotMatch(markup, /data-persona-search/, "com menos de 7 pessoas, sem a busca");
   assert.doesNotMatch(markup, /data-persona-comment-as/, "o Comentar como e so do console");
-  // Cada linha: a escolha da pessoa (a ligada, escolhida; a de fora, "(fora da lista)"), "Criar nova pessoa" e o Tipo.
-  assert.equal(count(markup, /data-persona-picker=""/g), 3);
-  assert.equal(count(markup, new RegExp(`<option value="${ADRIANO}" selected="">Adriano Souza · Aluno</option>`, "g")), 2);
-  assert.match(markup, /<option value="" selected="">Caio D\. \(fora da lista\)<\/option>/);
-  assert.equal(count(markup, /<option value="__nova__">Criar nova pessoa<\/option>/g), 3);
-  assert.equal(count(markup, /data-script-kind=""/g), 3);
+  // A linha aberta: a escolha da pessoa (a ligada, escolhida), "Criar nova pessoa" e o Tipo Pergunta.
+  assert.equal(count(markup, /data-persona-picker=""/g), 1);
+  assert.equal(count(markup, new RegExp(`<option value="${ADRIANO}" selected="">Adriano Souza · Aluno</option>`, "g")), 1);
+  assert.equal(count(markup, /<option value="__nova__">Criar nova pessoa<\/option>/g), 1);
+  assert.equal(count(markup, /data-script-kind=""/g), 1);
   assert.match(markup, /<input[^>]*type="radio"[^>]*checked=""[^>]*value="question"\/>/, "a linha Pergunta");
   assert.match(text, /Pergunta/);
   assert.match(markup, /maxLength="500"|maxlength="500"/i, "a Pergunta cabe na pergunta do aluno");
+  // A linha fechada da Pergunta tambem tem o selo.
+  assert.match(markup, /data-script-row="1"[\s\S]*?Adriano Souza<\/span><span[^>]*><span aria-hidden="true"[^>]*><\/span><span class="truncate">Pergunta</);
+  // A linha de fora da lista: "(fora da lista)".
+  assert.match(html(createElement(ScriptCard, { ...props, initialOpenKey: "c" })), /<option value="" selected="">Caio D\. \(fora da lista\)<\/option>/);
   assert.doesNotMatch(markup, /data-persona-photo-all|Usar esta foto em todos/);
   assert.doesNotMatch(text, /personagem/i);
 
@@ -509,10 +538,10 @@ test("pessoas no editor: a lista 'Pessoas que comentam' (foto ou iniciais, Apare
   assert.match(criando, /data-persona-form="nova"/);
   assert.match(textOf(criando), /Nova pessoa Nome Foto \(opcional\)[\s\S]*Aparece como Aluno Equipe Adicionar à lista Cancelar/);
   // No banco sem a lista: a frase da migracao no lugar dela e os campos de antes em cada linha.
-  const semLista = html(createElement(ScriptCard, { disabled: false, hasRecording: true, initialItems: items, initialTranscript: null, sessions: [session()], webinarId: WEBINAR }));
+  const semLista = html(createElement(ScriptCard, { disabled: false, hasRecording: true, initialItems: items, initialOpenKey: "a", initialTranscript: null, sessions: [session()], webinarId: WEBINAR }));
   assert.match(textOf(semLista), /A lista de pessoas que comentam precisa da atualização do banco \(migração 202611140001\)\./);
   assert.doesNotMatch(semLista, /data-persona-picker/);
-  assert.equal(count(semLista, /data-persona-photo=""/g), 3);
+  assert.equal(count(semLista, /data-persona-photo=""/g), 1, "o Nome e a Foto na linha aberta");
 });
 
 test("pessoas no console: a lista com 'Comentar como {nome}'; o Novo comentário com a pessoa escolhida (sem o Nome), o Tipo Pergunta e o aviso 'Enviado.' do repetir", async () => {
@@ -522,13 +551,18 @@ test("pessoas no console: a lista com 'Comentar como {nome}'; o Novo comentário
   const queue = consoleModel.scriptQueue(items, {}, 60_000);
   const falha = async () => ({ error: "x", ok: false, status: 500 });
   const props = { busyKey: null, canAct: true, live: true, onComment: async () => null, onDeletePersona: falha, onFire: () => undefined, onSavePersona: falha, onUpload: falha, origin: "https://projeto.supabase.co", personas: COM_LISTA, queue };
-  const lista = html(createElement(ConsoleScript, props));
+  // Fechada, a linha com as fotos e o total; aberta, Comentar como em cada pessoa.
+  const fechada = html(createElement(ConsoleScript, props));
+  assert.match(fechada, /data-persona-panel-open="false"/);
+  assert.match(textOf(fechada), /2 pessoas na lista da escola Gerenciar pessoas/);
+  assert.doesNotMatch(fechada, /data-persona-comment-as/);
+  const lista = html(createElement(ConsoleScript, { ...props, initialPersonasOpen: true }));
   const text = textOf(lista);
   assert.match(text, /Pessoas que comentam/);
   assert.match(text, /Comentar como Adriano Souza/);
   assert.match(text, /Comentar como Bia Costa/);
   assert.equal(count(lista, /data-persona-comment-as=""/g), 2);
-  assert.match(text, /Adriano Souza Aparece como Aluno · 2 comentários do roteiro/);
+  assert.match(text, /Adriano Souza Aparece como Aluno · 2 comentários neste roteiro/);
   assert.match(lista, /data-script-item="q"[\s\S]*?Pergunta/, "o item Pergunta com o selo");
 
   // O Novo comentário com a pessoa da lista: a escolha, sem o Nome; o Tipo Pergunta, o texto ate 500.
@@ -557,15 +591,74 @@ test("pessoas: a confirmacao do Remover diz quantos comentarios do roteiro usam 
   const base = { available: true, onDelete: falha, onSave: falha, onUpload: falha, personas: PESSOAS_LISTA, usage: { [ADRIANO]: 3 } };
   const removendo = textOf(html(createElement(PersonaList, { ...base, initialRemoving: ADRIANO })));
   assert.match(removendo, /Remover Adriano Souza da lista\?/);
-  assert.match(removendo, /3 comentários do roteiro usam esta pessoa\. Eles continuam com o nome e a foto de agora, fora da lista\. O que a turma já viu não muda\./);
+  // A lista e da escola (D117): o numero e deste roteiro, e remover vale para todos os webinarios.
+  assert.match(
+    removendo,
+    /3 comentários deste roteiro usam esta pessoa\. Ela sai da lista de todos os webinários\. Os comentários que a usam continuam com o nome e a foto de agora, fora da lista\. O que a turma já viu não muda\./
+  );
   assert.match(removendo, /Remover da lista/);
-  assert.match(textOf(html(createElement(PersonaList, { ...base, initialRemoving: BIA }))), /Nenhum comentário do roteiro usa esta pessoa\./);
+  assert.match(textOf(html(createElement(PersonaList, { ...base, initialRemoving: BIA }))), /Nenhum comentário deste roteiro usa esta pessoa\./);
   const editando = html(createElement(PersonaList, { ...base, initialForm: ADRIANO }));
   assert.match(editando, new RegExp(`data-persona-form="${ADRIANO}"`));
+  assert.match(editando, /data-persona-panel-open="true"/, "o formulario abre a lista");
   assert.match(editando, /value="Adriano Souza"/);
-  assert.match(textOf(editando), /Editar pessoa Muda o nome, a foto e o Aparece como em todos os comentários do roteiro desta pessoa\. O que a turma já viu não muda\./);
+  assert.match(textOf(editando), /Editar pessoa Muda o nome, a foto e o Aparece como em todos os comentários desta pessoa, em todos os webinários\. O que a turma já viu não muda\./);
   assert.match(textOf(editando), /Salvar pessoa/);
-  assert.match(textOf(html(createElement(PersonaList, { ...base, personas: [] }))), /Nenhuma pessoa na lista ainda\./);
+  // Vazia: a linha fechada diz que nao ha ninguem e oferece Nova pessoa (sem o Gerenciar).
+  const vazia = html(createElement(PersonaList, { ...base, personas: [] }));
+  assert.match(textOf(vazia), /Nenhuma pessoa na lista ainda\. Nova pessoa$/);
+  assert.doesNotMatch(vazia, /data-persona-toggle/);
+});
+
+test("D118 e D119 com muita gente: a busca do roteiro a partir de 9 mensagens (pelo nome ou pelo texto, sem acento), a caixa com rolagem propria; a busca da lista a partir de 7 pessoas e as 5 primeiras fotos com o 'mais N'", async () => {
+  const { PersonaList } = await import("../src/components/admin/v2/communication/webinars/persona-list.tsx");
+  const { SCRIPT_COMPACT } = await import("../src/components/admin/v2/communication/webinars/script-card.tsx");
+  const personaModel = await import("../src/server/webinars/persona-model.ts");
+  assert.equal(SCRIPT_COMPACT.searchFrom, 9);
+  assert.equal(personaModel.PERSONA_SEARCH_FROM, 7);
+  assert.equal(personaModel.matchesPersonaSearch(["José Álvares", "Oi"], "jose alv"), true, "sem acento nem caixa");
+  assert.equal(personaModel.matchesPersonaSearch(["Bia", "Que aula boa!"], "AULA"), true, "pelo texto");
+  assert.equal(personaModel.matchesPersonaSearch(["Bia", "Oi"], "  "), true, "a busca vazia acha todos");
+  assert.equal(personaModel.matchesPersonaSearch(["Bia", "Oi"], "caio"), false);
+
+  const nomes = ["Ana", "Bia", "Caio", "Duda", "Edu", "Fabi", "Gil", "Hugo", "Íris", "José"];
+  const items = nomes.map((nome, index) => scriptItem(`i${index}`, { body: `Comentário de ${nome}`, offsetMs: (index + 1) * 60_000, personaName: nome, position: index }));
+  const props = { disabled: false, hasRecording: true, initialItems: items, initialTranscript: null, sessions: [session()], webinarId: WEBINAR };
+  const todas = html(createElement(ScriptCard, props));
+  assert.match(todas, /<label[^>]*>Buscar no roteiro<span[^>]*><svg[\s\S]*?<input[^>]*data-script-search=""[^>]*placeholder="Nome ou texto da mensagem"[^>]*type="search"/);
+  assert.match(todas, /<ol class="[^"]*max-h-\[min\(70vh,640px\)\][^"]*overflow-y-auto[^"]*" data-script-rows="">/, "a caixa com rolagem propria");
+  assert.equal(count(todas, /data-script-row=/g), 10);
+  assert.doesNotMatch(todas, /data-script-search-count/);
+
+  const iris = html(createElement(ScriptCard, { ...props, initialQuery: "iris" }));
+  assert.equal(count(iris, /data-script-row=/g), 1, "so a da Íris (sem acento)");
+  assert.match(iris, /data-script-row="8"/, "o numero de antes da busca");
+  assert.match(textOf(iris), /Mostrando 1 de 10 mensagens\./);
+  const pelaFrase = html(createElement(ScriptCard, { ...props, initialQuery: "comentário de j" }));
+  assert.equal(count(pelaFrase, /data-script-row=/g), 1, "pelo texto: so a do José");
+  const nada = html(createElement(ScriptCard, { ...props, initialQuery: "zzz" }));
+  assert.doesNotMatch(nada, /<ol/, "sem linha, sem lista vazia");
+  assert.match(textOf(nada), /Nenhuma mensagem com “zzz”\./);
+  // Com menos de 9, a busca some e nao esconde nada.
+  const poucas = html(createElement(ScriptCard, { ...props, initialItems: items.slice(0, 8), initialQuery: "zzz" }));
+  assert.equal(count(poucas, /data-script-row=/g), 8);
+  assert.doesNotMatch(poucas, /data-script-search|overflow-y-auto[^"]*" data-script-rows/);
+
+  // A lista de pessoas com 10: as 5 primeiras fotos e o "mais 5"; aberta, a busca e a caixa com rolagem propria.
+  const falha = async () => ({ error: "x", ok: false, status: 500 });
+  const muitas = nomes.map((nome, index) => ({ avatarPath: null, createdAt: "", id: `eeeeeeee-0000-4000-8000-${String(index).padStart(12, "0")}`, name: nome, role: "student", updatedAt: "", webinarId: null }));
+  const base = { available: true, onDelete: falha, onSave: falha, onUpload: falha, personas: muitas, usage: {} };
+  const fechada = html(createElement(PersonaList, base));
+  assert.match(textOf(fechada), /A B C D E mais 5 10 pessoas na lista da escola Gerenciar pessoas/);
+  const aberta = html(createElement(PersonaList, { ...base, initialOpen: true }));
+  assert.match(aberta, /<input[^>]*data-persona-search=""[^>]*placeholder="Nome da pessoa"[^>]*type="search"/);
+  assert.match(aberta, /<ul class="[^"]*overflow-y-auto[^"]*" data-persona-rows="">/);
+  assert.equal(count(aberta, /data-persona="/g), 10);
+  const achou = html(createElement(PersonaList, { ...base, initialOpen: true, initialQuery: "JOSE" }));
+  assert.equal(count(achou, /data-persona="/g), 1);
+  const ninguem = html(createElement(PersonaList, { ...base, initialOpen: true, initialQuery: "zzz" }));
+  assert.match(textOf(ninguem), /Nenhuma pessoa com “zzz”\./);
+  assert.doesNotMatch(ninguem, /data-persona-rows/);
 });
 
 test("o selo 'Simulada' so na pergunta simulada do console, com a frase para o leitor de tela; a sala nunca recebe o selo", async () => {

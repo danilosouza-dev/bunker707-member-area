@@ -18,15 +18,18 @@
 //   da tela: a pessoa da lista virou a unidade (syncPersonaCopies, abaixo).
 //
 // As pessoas que comentam (pedido do produtor de 11/11/2026; docs/30 D75 a D78; migracao 202611140001):
-// - listPersonas: a lista do webinario (o editor, o console e as acoes), pelo nome, inteira em paginas de 1.000 (a
-//   revisao v8, achado 4); banco sem a tabela, `available` falso e a lista vazia (o editor e o console seguem com o Nome
-//   digitado, como antes); fetchPersonasByIds: as que uma leitura de antes nao trouxe;
-// - fetchPersonaRow, insertPersonaRow, updatePersonaRow e deletePersonaRow: o CRUD; o nome repetido no webinario (o
-//   indice unico pelo name_key, a coluna gerada pela webinar_persona_name_key) volta como `taken`, nunca como erro comum;
+// - listPersonas: a lista da escola (o editor, o console e as acoes de todo webinario; desde 13/11/2026, D117), pelo
+//   nome, inteira em paginas de 1.000 (a revisao v8, achado 4); banco sem a tabela, `available` falso e a lista vazia
+//   (o editor e o console seguem com o Nome digitado, como antes); fetchPersonasByIds: as que uma leitura de antes nao
+//   trouxe;
+// - fetchPersonaRow, insertPersonaRow, updatePersonaRow e deletePersonaRow: o CRUD; o nome repetido na escola (o indice
+//   unico pelo name_key da 202611180001; antes dela, o do webinario) volta como `taken`, nunca como erro comum;
 //   insertPersonaRows: varias de uma vez (a importacao do CSV), com o mesmo `taken` para o lote;
-// - syncPersonaCopies: a copia da pessoa (nome, papel e foto) em todos os itens ligados a ela, em uma escrita;
-// - countPersonaItems: quantos itens do roteiro usam a pessoa (a confirmacao do Remover);
-// - copyPersonasToWebinar: a lista copiada para outro webinario (o Duplicar), com o mapa id antigo -> id novo;
+// - syncPersonaCopies: a copia da pessoa (nome, papel e foto) em todos os itens ligados a ela, de todos os roteiros, em
+//   uma escrita;
+// - countPersonaItems: quantos itens do roteiro usam a pessoa, em todos os webinarios;
+// - o Duplicar nao copia mais a lista (copyPersonasToWebinar saiu em 13/11/2026, D117): a lista e da escola, e a copia
+//   ja enxerga todas as pessoas;
 // - loadScriptedQuestionAvatars: a foto da pergunta simulada pelo id (a copia gravada nela), com a mesma memoria do
 //   processo das mensagens (a aba Perguntas relida a cada 15 s por toda a turma).
 
@@ -36,7 +39,7 @@ import { isPendingMigrationError } from "../db/pending-migration";
 import { assertNoDbError, isMissingWebinarSchema, type WebinarsDb } from "./db";
 import { fetchAll } from "./store";
 import { PERSONA_ROLES, type PersonaRole } from "./model";
-import { isPersonaAvatarPath, personaNameKey, type PersonaList, type WebinarPersona } from "./persona-model";
+import { isPersonaAvatarPath, type PersonaList, type WebinarPersona } from "./persona-model";
 
 /**
  * As fotos e as pessoas dos itens lidas: `available` falso no banco sem a 202611100002 (nenhuma foto, e nenhuma foto pode
@@ -45,8 +48,6 @@ import { isPersonaAvatarPath, personaNameKey, type PersonaList, type WebinarPers
 export type PersonaAvatars = { available: boolean; linked: boolean; paths: Map<string, string | null>; personaIds: Map<string, string | null> };
 
 const CHUNK = 200;
-/** Quantas pessoas o Duplicar grava por vez. */
-const COPY_BATCH = 500;
 /** Quantas mensagens a memoria guarda; passou disso, ela e esvaziada. */
 const MESSAGE_CACHE_MAX = 20_000;
 /** Quanto tempo o banco sem a coluna fica lembrado. */
@@ -249,7 +250,8 @@ export type PersonaRow = {
   name: string;
   role: string;
   updated_at: string;
-  webinar_id: string;
+  /** So a origem (D117): o webinario em que a pessoa foi criada; nula quando ele foi excluido. */
+  webinar_id: string | null;
 };
 
 export function personaFromRow(row: PersonaRow): WebinarPersona {
@@ -266,15 +268,15 @@ export function personaFromRow(row: PersonaRow): WebinarPersona {
 }
 
 /**
- * A lista do webinario pelo nome, inteira: em paginas de 1.000 numa ordem total (o nome e o id), porque o PostgREST
- * corta toda resposta em 1.000 linhas sem erro e a pessoa que nao viesse seria tratada como inexistente (o Salvar
- * roteiro soltaria itens, a edicao voltaria 404 e o Duplicar copiaria so 1.000; correcao da revisao v8, achado 4).
+ * A lista da escola pelo nome, inteira (D117: uma lista so, para todo webinario): em paginas de 1.000 numa ordem total
+ * (o nome e o id), porque o PostgREST corta toda resposta em 1.000 linhas sem erro e a pessoa que nao viesse seria
+ * tratada como inexistente (o Salvar roteiro soltaria itens e a edicao voltaria 404; correcao da revisao v8, achado 4).
  * Banco sem a 202611140001: `available` falso e vazia.
  */
-export async function listPersonas(db: WebinarsDb, webinarId: string): Promise<PersonaList> {
+export async function listPersonas(db: WebinarsDb): Promise<PersonaList> {
   try {
     const rows = await fetchAll<PersonaRow>(
-      (from, to) => db.from("webinar_personas").select(PERSONA_COLUMNS).eq("webinar_id", webinarId).order("name", { ascending: true }).order("id", { ascending: true }).range(from, to),
+      (from, to) => db.from("webinar_personas").select(PERSONA_COLUMNS).order("name", { ascending: true }).order("id", { ascending: true }).range(from, to),
       "Webinarios: pessoas que comentam"
     );
     return { available: true, personas: rows.map(personaFromRow) };
@@ -287,13 +289,13 @@ export async function listPersonas(db: WebinarsDb, webinarId: string): Promise<P
 }
 
 /**
- * As pessoas do webinario pelos ids (em pedacos de 200): as que a lista lida antes nao trouxe (a que entrou na lista
- * depois da leitura, por exemplo). A de outro webinario nunca volta. Banco sem a tabela: PendingMigrationError.
+ * As pessoas da escola pelos ids (em pedacos de 200): as que a lista lida antes nao trouxe (a que entrou na lista
+ * depois da leitura, por exemplo). Banco sem a tabela: PendingMigrationError.
  */
-export async function fetchPersonasByIds(db: WebinarsDb, webinarId: string, ids: readonly string[]): Promise<WebinarPersona[]> {
+export async function fetchPersonasByIds(db: WebinarsDb, ids: readonly string[]): Promise<WebinarPersona[]> {
   const personas: WebinarPersona[] = [];
   for (const chunk of chunkIds([...new Set(ids)], CHUNK)) {
-    const { data, error } = await db.from("webinar_personas").select(PERSONA_COLUMNS).eq("webinar_id", webinarId).in("id", chunk);
+    const { data, error } = await db.from("webinar_personas").select(PERSONA_COLUMNS).in("id", chunk);
     assertNoDbError(error, "Webinarios: ler pessoas que comentam pelo id");
     personas.push(...((data ?? []) as PersonaRow[]).map(personaFromRow));
   }
@@ -307,9 +309,10 @@ export async function fetchPersonaRow(db: WebinarsDb, id: string): Promise<Perso
   return (data as PersonaRow | null) ?? null;
 }
 
-export type PersonaInsert = { avatar_path: string | null; created_by: string | null; name: string; role: PersonaRole; webinar_id: string };
+/** Uma pessoa nova; `webinar_id` e a origem (o webinario em que a equipe a criou; D117). */
+export type PersonaInsert = { avatar_path: string | null; created_by: string | null; name: string; role: PersonaRole; webinar_id: string | null };
 
-/** Grava uma pessoa nova; o nome repetido no webinario (o indice unico) volta como `taken`. */
+/** Grava uma pessoa nova; o nome repetido na escola (o indice unico) volta como `taken`. */
 export async function insertPersonaRow(db: WebinarsDb, row: PersonaInsert): Promise<{ row: PersonaRow } | { taken: true }> {
   const { data, error } = await db.from("webinar_personas").insert(row).select(PERSONA_COLUMNS).single();
   if (isUniqueViolation(error)) {
@@ -320,9 +323,9 @@ export async function insertPersonaRow(db: WebinarsDb, row: PersonaInsert): Prom
 }
 
 /**
- * Grava varias pessoas novas de uma vez (a importacao do CSV, correcao da revisao v8, achado 3). O indice unico
- * (webinar_id, name_key) recusa o lote inteiro quando um nome ja entrou (outra importacao ao mesmo tempo): `taken`, e
- * quem chama grava uma por vez e reaproveita a que ja estava.
+ * Grava varias pessoas novas de uma vez (a importacao do CSV, correcao da revisao v8, achado 3). O indice unico do nome
+ * (na escola, desde a 202611180001) recusa o lote inteiro quando um nome ja entrou (outra importacao ao mesmo tempo):
+ * `taken`, e quem chama grava uma por vez e reaproveita a que ja estava.
  */
 export async function insertPersonaRows(db: WebinarsDb, rows: readonly PersonaInsert[]): Promise<{ rows: PersonaRow[] } | { taken: true }> {
   if (rows.length === 0) {
@@ -355,7 +358,10 @@ export async function deletePersonaRow(db: WebinarsDb, id: string): Promise<bool
   return (data ?? []).length > 0;
 }
 
-/** A copia da pessoa (nome, papel e foto) em todos os itens do roteiro ligados a ela. Devolve quantos itens mudaram. */
+/**
+ * A copia da pessoa (nome, papel e foto) em todos os itens do roteiro ligados a ela, de todos os webinarios (a lista e da
+ * escola, D117). Devolve quantos itens mudaram.
+ */
 export async function syncPersonaCopies(db: WebinarsDb, persona: Pick<WebinarPersona, "avatarPath" | "id" | "name" | "role">): Promise<number> {
   const { data, error } = await db
     .from("webinar_chat_script_items")
@@ -366,43 +372,9 @@ export async function syncPersonaCopies(db: WebinarsDb, persona: Pick<WebinarPer
   return (data ?? []).length;
 }
 
-/** Quantos itens do roteiro usam a pessoa. */
+/** Quantos itens do roteiro usam a pessoa, em todos os webinarios. */
 export async function countPersonaItems(db: WebinarsDb, personaId: string): Promise<number> {
   const { count, error } = await db.from("webinar_chat_script_items").select("id", { count: "exact", head: true }).eq("persona_id", personaId);
   assertNoDbError(error, "Webinarios: itens da pessoa que comenta");
   return count ?? 0;
-}
-
-/**
- * A lista de um webinario copiada para outro (o Duplicar): as pessoas novas, com quem duplicou; devolve o mapa id antigo
- * -> id novo (para ligar itens copiados). Banco sem a tabela: o mapa vazio.
- */
-export async function copyPersonasToWebinar(db: WebinarsDb, input: { fromWebinarId: string; toWebinarId: string; userId: string }): Promise<Map<string, string>> {
-  const ids = new Map<string, string>();
-  const source = await listPersonas(db, input.fromWebinarId);
-  if (!source.available || source.personas.length === 0) {
-    return ids;
-  }
-  // A lista inteira (listPersonas le em paginas; a revisao v8, achado 4), gravada em lotes de 500.
-  const created: WebinarPersona[] = [];
-  for (let start = 0; start < source.personas.length; start += COPY_BATCH) {
-    const { data, error } = await db
-      .from("webinar_personas")
-      .insert(
-        source.personas
-          .slice(start, start + COPY_BATCH)
-          .map((persona) => ({ avatar_path: persona.avatarPath, created_by: input.userId, name: persona.name, role: persona.role, webinar_id: input.toWebinarId }))
-      )
-      .select(PERSONA_COLUMNS);
-    assertNoDbError(error, "Webinarios: copiar pessoas que comentam");
-    created.push(...((data ?? []) as PersonaRow[]).map(personaFromRow));
-  }
-  const byKey = new Map(created.map((item) => [personaNameKey(item.name), item] as const));
-  for (const persona of source.personas) {
-    const copy = byKey.get(personaNameKey(persona.name));
-    if (copy) {
-      ids.set(persona.id, copy.id);
-    }
-  }
-  return ids;
 }
