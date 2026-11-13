@@ -412,7 +412,7 @@ export async function getWebinarEditorData(id: string, now = Date.now()): Promis
     simulated && recording ? fetchTranscriptRow(db, recording.id) : Promise.resolve(null),
     listPollRows(db, { sessionId: null, webinarId: row.id }),
     loadCreatorNames(db, [...sessions.map((session) => session.simulationDecidedBy), jit.simulation?.decidedBy ?? null]),
-    listPersonas(db, row.id)
+    listPersonas(db)
   ]);
 
   return {

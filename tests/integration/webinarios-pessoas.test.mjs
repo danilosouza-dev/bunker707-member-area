@@ -34,7 +34,11 @@ import {
 //   so mostra a que ja chegou a hora; o Atendimento da equipe tambem (revisao v8, achado 2: nem na fila, nem
 //   distribuida, nem na conta de abertas);
 // - importar o CSV liga e cria as pessoas, com duas importacoes ao mesmo tempo contra o indice unico de verdade (revisao
-//   v8, achado 3); a lista com mais de 1.000 pessoas vem inteira e o Duplicar copia todas (revisao v8, achado 4).
+//   v8, achado 3); a lista com mais de 1.000 pessoas vem inteira (revisao v8, achado 4);
+// - a lista da escola (pedido do produtor de 13/11/2026; docs/30 D117; migracao 202611180001): o nome e unico na escola
+//   pelo indice de verdade, a pessoa criada numa live vale na outra, o Duplicar nao copia mais a lista, excluir o
+//   webinario de origem deixa a pessoa na lista (a origem nula), e a secao 2 da migracao junta as repetidas de
+//   webinarios diferentes numa transacao desfeita.
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
@@ -72,6 +76,12 @@ function sql(script) {
   const url = process.env.SUPABASE_DB_URL;
   assert.ok(url, "SUPABASE_DB_URL vem do .env.test.local (npm run db:start)");
   return execFileSync("psql", [url, "-v", "ON_ERROR_STOP=1", "-q", "-At", "-c", script], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
+}
+
+/** A secao 2 da 202611180001 (juntar as repetidas e o indice unico do nome), como esta no arquivo. */
+function secaoDaEscola() {
+  const texto = readFileSync(new URL("../../supabase/migrations/202611180001_webinars_pessoas_da_escola.sql", import.meta.url), "utf8");
+  return texto.slice(texto.indexOf("set lock_timeout", texto.indexOf(" * 2. ")));
 }
 
 /** A secao 5 da migracao (o preenchimento), como esta no arquivo. */
@@ -121,9 +131,13 @@ test("2. criar, editar (as copias dos itens mudam), o nome repetido recusado e r
   const criada = ok(await personaActions.savePersona({ avatarPath: FOTO, name: "Adriano Souza", role: "student", webinarId: AO_VIVO.id }));
   const repetida = await personaActions.savePersona({ avatarPath: null, name: "  adriano SOUZA ", role: "team", webinarId: AO_VIVO.id });
   assert.deepEqual([repetida.status, repetida.fieldErrors?.name?.[0]], [400, WEBINAR_COPY.pessoas.erros.nomeRepetido]);
-  // O indice unico do banco segura o mesmo nome por outro caminho.
+  // O indice unico do banco segura o mesmo nome por outro caminho, tambem noutro webinario (D117: o nome e da escola).
   const direto = await db.from("webinar_personas").insert({ name: "ADRIANO  souza", webinar_id: AO_VIVO.id });
   assert.equal(direto.error?.code, "23505");
+  const noutro = await db.from("webinar_personas").insert({ name: "Adriano Souza", webinar_id: GRAVADA.id });
+  assert.equal(noutro.error?.code, "23505", "o mesmo nome noutro webinario");
+  const naGravada = await personaActions.savePersona({ avatarPath: null, name: "adriano souza", role: "student", webinarId: GRAVADA.id });
+  assert.deepEqual([naGravada.status, naGravada.fieldErrors?.name?.[0]], [400, WEBINAR_COPY.pessoas.erros.nomeRepetido], "pela tela da outra live tambem");
 
   const [um, dois] = unwrap(
     await db
@@ -140,7 +154,7 @@ test("2. criar, editar (as copias dos itens mudam), o nome repetido recusado e r
   const copias = unwrap(await db.from("webinar_chat_script_items").select("persona_name, persona_role, persona_avatar_path").in("id", [um.id, dois.id]), "As copias");
   assert.deepEqual(copias.map((row) => [row.persona_name, row.persona_role, row.persona_avatar_path]), [["Adriano S.", "team", OUTRA_FOTO], ["Adriano S.", "team", OUTRA_FOTO]]);
 
-  const removida = ok(await personaActions.deletePersona({ id: criada.persona.id }));
+  const removida = ok(await personaActions.deletePersona({ id: criada.persona.id, webinarId: AO_VIVO.id }));
   assert.equal(removida.items, 2);
   const depois = unwrap(await db.from("webinar_chat_script_items").select("persona_id, persona_name, persona_avatar_path").in("id", [um.id, dois.id]), "Os itens sem a pessoa");
   assert.deepEqual(depois.map((row) => [row.persona_id, row.persona_name, row.persona_avatar_path]), [[null, "Adriano S.", OUTRA_FOTO], [null, "Adriano S.", OUTRA_FOTO]]);
@@ -182,14 +196,65 @@ test("3. o preenchimento da migracao (numa transacao desfeita): uma pessoa por n
   ]);
 });
 
-test("4. duplicar o webinario copia a lista de pessoas (com as fotos)", async () => {
+test("4. D117 a lista da escola: o Duplicar nao copia a lista; a pessoa criada na copia vale na outra live; excluir a copia deixa a pessoa, com a origem nula", async () => {
   actAs(produtor);
-  ok(await personaActions.savePersona({ avatarPath: FOTO, name: "Lia Copiada", role: "student", webinarId: AO_VIVO.id }));
+  const personaStore = await import("../../src/server/webinars/persona-store.ts");
+  ok(await personaActions.savePersona({ avatarPath: FOTO, name: "Lia Escola", role: "student", webinarId: AO_VIVO.id }));
   const copia = ok(await webinarActions.duplicateWebinar({ id: AO_VIVO.id }));
-  const lista = unwrap(await db.from("webinar_personas").select("name, role, avatar_path").eq("webinar_id", copia.id), "A lista da copia");
-  assert.deepEqual(lista.map((row) => [row.name, row.role, row.avatar_path]), [["Lia Copiada", "student", FOTO]]);
+  const daCopia = unwrap(await db.from("webinar_personas").select("id").eq("webinar_id", copia.id), "As pessoas com a copia de origem");
+  assert.deepEqual(daCopia, [], "nada copiado: a lista e uma so");
+  assert.ok((await personaStore.listPersonas(db)).personas.some((pessoa) => pessoa.name === "Lia Escola"), "a copia ja enxerga a Lia");
+
+  // A pessoa criada na copia vale no roteiro da live ao vivo (a lista e da escola).
+  const nasceuNaCopia = ok(await personaActions.savePersona({ avatarPath: OUTRA_FOTO, name: "Nina Copia", role: "team", webinarId: copia.id })).persona;
+  const base = { body: "Da outra live", kind: "message", offsetMs: null, phrase: null, phraseDelayMs: 0, status: "draft", triggerKind: "manual" };
+  const salvo = ok(await scriptActions.saveScriptItems({ items: [{ ...base, personaId: nasceuNaCopia.id, personaName: "Nina Copia", personaRole: "team" }], loadedIds: [], webinarId: AO_VIVO.id }));
+  const item = salvo.items.find((entry) => entry.body === "Da outra live");
+  assert.deepEqual([item.personaId, item.personaAvatarPath], [nasceuNaCopia.id, OUTRA_FOTO]);
+
+  // Excluir a copia (a origem da Nina): a Nina fica na lista, com a origem nula, e o item da live ao vivo continua ligado.
   unwrap(await db.from("webinars").delete().eq("id", copia.id), "Apagando a copia");
+  const nina = unwrap(await db.from("webinar_personas").select("id, webinar_id").eq("id", nasceuNaCopia.id).maybeSingle(), "A Nina depois");
+  assert.deepEqual(nina, { id: nasceuNaCopia.id, webinar_id: null });
+  const ligado = unwrap(await db.from("webinar_chat_script_items").select("persona_id").eq("id", item.id).single(), "O item da Nina");
+  assert.equal(ligado.persona_id, nasceuNaCopia.id);
+  unwrap(await db.from("webinar_chat_script_items").delete().eq("id", item.id), "Limpando o item");
+  unwrap(await db.from("webinar_personas").delete().in("name", ["Lia Escola", "Nina Copia"]), "Limpando as pessoas");
   actAs(null);
+});
+
+test("4b. a secao 2 da 202611180001 (numa transacao desfeita, sem o indice novo): as repetidas de webinarios diferentes viram uma, a mudada por ultimo, com a foto mais recente; os itens e as perguntas passam para ela, com a copia dela", () => {
+  const [vivo, gravada] = [AO_VIVO.id, GRAVADA.id];
+  const saida = sql(`
+    begin;
+    drop index public.webinar_personas_school_name_idx;
+    delete from public.webinar_personas;
+    insert into public.webinar_personas (id, webinar_id, name, role, avatar_path, created_at, updated_at) values
+      ('10000000-0000-4000-8000-0000000000a1', '${vivo}', 'Rui Souza', 'student', '${FOTO}', now() - interval '5 days', now() - interval '5 days'),
+      ('10000000-0000-4000-8000-0000000000a2', '${gravada}', 'rui  SOUZA', 'team', null, now() - interval '1 day', now() - interval '1 day'),
+      ('10000000-0000-4000-8000-0000000000a3', '${gravada}', 'Tais Lima', 'student', null, now() - interval '2 days', now() - interval '2 days');
+    insert into public.webinar_chat_script_items (webinar_id, trigger_kind, persona_id, persona_name, persona_role, body, kind, status, position, persona_avatar_path) values
+      ('${vivo}', 'manual', '10000000-0000-4000-8000-0000000000a1', 'Rui Souza', 'student', 'Do vivo', 'message', 'ready', 20, '${FOTO}'),
+      ('${gravada}', 'manual', '10000000-0000-4000-8000-0000000000a2', 'rui  SOUZA', 'team', 'Da gravada', 'message', 'ready', 21, null);
+    ${secaoDaEscola()}
+    select coalesce(json_agg(json_build_object('id', id, 'nome', name, 'papel', role, 'foto', avatar_path) order by name_key), '[]'::json) from public.webinar_personas;
+    select coalesce(json_agg(json_build_object('corpo', body, 'pessoa', persona_id, 'nome', persona_name, 'papel', persona_role, 'foto', persona_avatar_path) order by position), '[]'::json)
+      from public.webinar_chat_script_items where position in (20, 21);
+    select count(*) from pg_indexes where schemaname = 'public' and indexname = 'webinar_personas_school_name_idx';
+    rollback;
+  `);
+  const linhas = saida.trim().split("\n");
+  const [pessoas, itens] = linhas.filter((linha) => linha.startsWith("[")).map((linha) => JSON.parse(linha));
+  const RUI = "10000000-0000-4000-8000-0000000000a2";
+  assert.deepEqual(pessoas, [
+    { foto: FOTO, id: RUI, nome: "rui  SOUZA", papel: "team" },
+    { foto: null, id: "10000000-0000-4000-8000-0000000000a3", nome: "Tais Lima", papel: "student" }
+  ], "fica a mudada por ultimo, com a foto da outra");
+  assert.deepEqual(itens, [
+    { corpo: "Do vivo", foto: FOTO, nome: "rui  SOUZA", papel: "team", pessoa: RUI },
+    { corpo: "Da gravada", foto: FOTO, nome: "rui  SOUZA", papel: "team", pessoa: RUI }
+  ], "os itens das duas lives ligados a ela, com a copia dela");
+  assert.equal(linhas.at(-1), "1", "o indice unico do nome de novo, criado pela secao");
 });
 
 test("5. a pergunta simulada na Live ao vivo: sem aluno, com o nome e a foto da pessoa na aba; a aluna vota e nao responde no fio; a equipe responde; nada conta no relatorio nem no CSV", async () => {
@@ -295,7 +360,8 @@ test("8. importar o CSV (revisao v8, achado 3): cada linha ligada a pessoa do me
   actAs(produtor);
   const sufixo = randomUUID().slice(0, 6);
   const csv = ["Tempo;Nome;Papel;Mensagem", `12;Gil ${sufixo};Equipe;Oi ${sufixo}`, `13;gil  ${sufixo.toUpperCase()};Aluno;De novo ${sufixo}`, `14;Rafa ${sufixo};Aluno;Ola ${sufixo}`].join("\n");
-  // O indice unico (webinar_id, name_key) de verdade: as duas leem a lista sem o Gil e o Rafa e gravam ao mesmo tempo.
+  // O indice unico do nome de verdade (na escola, 202611180001): as duas leem a lista sem o Gil e o Rafa e gravam ao
+  // mesmo tempo.
   const [um, dois] = await Promise.all([scriptActions.importScriptCsv({ csv, webinarId: AO_VIVO.id }), scriptActions.importScriptCsv({ csv, webinarId: AO_VIVO.id })]);
   ok(um);
   ok(dois);
@@ -321,19 +387,12 @@ test("8. importar o CSV (revisao v8, achado 3): cada linha ligada a pessoa do me
   actAs(null);
 });
 
-test("9. a lista com mais de 1.000 pessoas (revisao v8, achado 4): listPersonas le todas pelo teto de 1.000 do PostgREST, e o Duplicar copia todas", async () => {
+test("9. a lista com mais de 1.000 pessoas (revisao v8, achado 4): listPersonas le a lista da escola inteira pelo teto de 1.000 do PostgREST", async () => {
   const personaStore = await import("../../src/server/webinars/persona-store.ts");
   const linhas = Array.from({ length: 1005 }, (_, index) => ({ name: `Pessoa ${String(index).padStart(4, "0")}`, role: "student", webinar_id: GRAVADA.id }));
   unwrap(await db.from("webinar_personas").insert(linhas), "As 1.005 pessoas");
-  const lista = await personaStore.listPersonas(db, GRAVADA.id);
+  const lista = await personaStore.listPersonas(db);
   assert.equal(lista.personas.filter((pessoa) => pessoa.name.startsWith("Pessoa ")).length, 1005);
   assert.equal(new Set(lista.personas.map((pessoa) => pessoa.id)).size, lista.personas.length, "nenhuma repetida entre as paginas");
-
-  actAs(produtor);
-  const copia = ok(await webinarActions.duplicateWebinar({ id: GRAVADA.id }));
-  const copiadas = await personaStore.listPersonas(db, copia.id);
-  assert.equal(copiadas.personas.length, lista.personas.length, "o Duplicar copia a lista inteira");
-  unwrap(await db.from("webinars").delete().eq("id", copia.id), "Apagando a copia");
   unwrap(await db.from("webinar_personas").delete().eq("webinar_id", GRAVADA.id).like("name", "Pessoa %"), "Limpando as pessoas");
-  actAs(null);
 });

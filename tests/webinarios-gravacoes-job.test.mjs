@@ -680,12 +680,12 @@ test("retencao: o video do gravador que virou aula fica na Bunny e a conferencia
  * Migracao pendente, frases, o job e o cliente da Bunny
  * ---------------------------------------------------------------------------------------------- */
 
-test("banco sem a migracao mais nova (WEBINARS_MIGRATION: a 202611170001 pela ordem dos arquivos, que inclui a 202610300005 do jit): zeros, pendingMigration e o log da migracao", async () => {
+test("banco sem a migracao mais nova (WEBINARS_MIGRATION: a 202611180001 pela ordem dos arquivos, que inclui a 202610300005 do jit): zeros, pendingMigration e o log da migracao", async () => {
   const comAdaptador = escola();
   comAdaptador.falhar("webinar_sessions", "select", { code: "42703", message: "column webinar_sessions.recorder_status does not exist" });
   const result = await rodar(comAdaptador, HORA_MARCADA - 10 * MIN, { bunny: bunnyFalsa(), dispatcher: fakeRecorderDispatcher([]) });
   assert.deepEqual(semLogs(result), resultado({ pendingMigration: true }));
-  assert.ok(result.logs.some((linha) => linha.startsWith("info:") && linha.includes("migracao 202611170001 pendente")));
+  assert.ok(result.logs.some((linha) => linha.startsWith("info:") && linha.includes("migracao 202611180001 pendente")));
 
   const soAviso = escola();
   soAviso.falhar("webinar_sessions", "select", { code: "42703", message: "column webinar_sessions.recorder_alerted_at does not exist" });

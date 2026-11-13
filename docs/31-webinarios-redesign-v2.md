@@ -427,6 +427,9 @@ que eu quero que comente." A regra inteira (a lista por webinário, a pessoa com
 simulada fora de toda métrica e o repetir) está no `docs/30` D75 a D78, §2.2, §2.4, §2.7 e §4.2. Vale sobre §5.2 onde
 houver conflito (o **Quem comenta** com o Nome digitado e o "Usar esta foto em todos os comentários de {nome}").
 
+> **Atualizado em 13/11/2026 (§18; `docs/30` D117 a D119)**: a lista passou a ser da escola, fica fechada numa linha que
+> abre em **Gerenciar pessoas**, e o roteiro do editor ficou em linhas fechadas, uma aberta por vez.
+
 - **A lista "Pessoas que comentam"** (`persona-list.tsx`, a mesma peça no editor e no console): cada pessoa numa linha
   com a foto ou as iniciais (o avatar de 24 px da sala, `RoomCommentAvatar`), o nome, "Aparece como Aluno · 2
   comentários do roteiro", e os botões **Editar** e **Remover** (com o nome no rótulo para o leitor de tela). **Nova
@@ -711,3 +714,48 @@ Depois do merge da rodada v11, o produtor perguntou por que trocar as miniaturas
 | V2-A92 | O número do Chat deve contar os comentários do roteiro (os participantes simulados)? | não: a equipe os programou; só o que uma pessoa escreveu agora |
 | V2-A93 | A chave do número de pessoas deve valer por sessão, e não pelo webinário inteiro? | pelo webinário, como no editor; por sessão pede coluna nova e migração |
 | V2-A94 | O que a página ainda sabe sobre a fileira embaixo (os selos que sobem a altura dela) deve sair do código? | fica: é a leitura do layout do motor e não custa nada com a coluna; sai junto com a moldura do motor, na camada de vídeo própria |
+
+## 18. O roteiro e as pessoas que comentam com muita gente (13/11/2026)
+
+Ao criar uma live nova em produção, o produtor pediu duas coisas sobre o card **Roteiro de chat**: "se a gente criar 30
+pessoas com 30 comentários, fica uma lista enorme, tomando muito espaço da página. Fica listando tudo aberto" e "listar
+só o que foi criado hoje não faz sentido, né? Tem que listar todos os nomes que foram criados". As regras estão no
+`docs/30` D117 a D119; aqui, o desenho. Vale sobre a §13.1 onde houver conflito (a lista "do webinário" e a lista sempre
+aberta no topo do card).
+
+### 18.1 A lista da escola (D117)
+
+- **Uma lista só**: o editor e o console de todo webinário mostram as mesmas pessoas. Quem foi criado numa live aparece
+  na próxima, sem criar de novo. A frase do card diz isso: "A lista é da escola: as mesmas pessoas aparecem em todos os
+  webinários, no editor e no console."
+- **Editar e remover valem para todos**: a dica do formulário diz "em todos os webinários", e a confirmação do
+  **Remover** conta os comentários **deste** roteiro e avisa que a pessoa sai da lista de todos os webinários.
+- **O número de cada pessoa** é o deste roteiro: "2 comentários neste roteiro".
+
+### 18.2 O roteiro em linhas fechadas (D118)
+
+- **A linha fechada**, da esquerda para a direita: o minuto (mm:ss) ou "Frase" ou "Botão", numa coluna de 48 px; a foto
+  de 24 px (a da sala, com as iniciais sem foto); o nome, com o selo **Pergunta** e a situação só quando diz algo
+  (**Rascunho**, **Desligada**, **Frase não achada** ou "Pronta · 00:32" na frase achada; a **Pronta** de sempre não
+  repete em toda linha); embaixo, o começo do texto numa linha, cortado com reticências; a seta e a lixeira à direita.
+  A linha inteira (menos a lixeira) é um botão com `aria-expanded`, e o leitor de tela ouve "Mensagem 3:" antes do nome.
+- **Uma aberta por vez**: abrir uma fecha a outra. A aberta mostra os campos de sempre (**Quem comenta**, **Tipo**,
+  **Mensagem**, **Solta em**, o minuto ou a frase) e o **Desligar** no fim.
+- **Adicionar mensagem** abre a nova, rola até ela e leva o foco ao primeiro campo; o **Salvar roteiro** com problema
+  abre a primeira linha com problema, do mesmo jeito.
+- **Com 9 mensagens ou mais**: **Buscar no roteiro** em cima da lista (pelo nome ou pelo texto, sem acento nem caixa),
+  "Mostrando 3 de 40 mensagens." enquanto há busca, e a lista numa caixa com rolagem própria (até 70% da altura da tela,
+  no máximo 640 px). Sem resultado, "Nenhuma mensagem com “...”." e nenhuma lista vazia.
+- **No celular** (375 px): os selos descem para baixo do nome, e o nome e o texto se cortam com reticências.
+
+### 18.3 A lista de pessoas numa linha (D119)
+
+- **Fechada**: as cinco primeiras fotos sobrepostas, "mais N", "30 pessoas na lista da escola" e **Gerenciar pessoas**
+  (com `aria-expanded`). Vazia: "Nenhuma pessoa na lista ainda." e **Nova pessoa**, que abre a lista com o formulário.
+- **Aberta** (**Fechar a lista**): **Buscar pessoa** a partir de 7 pessoas, as pessoas numa caixa com rolagem própria
+  (até metade da tela, no máximo 420 px), e **Nova pessoa** no fim. Cada pessoa como na §13.1 (**Editar**, **Remover**
+  e, no console, **Comentar como {nome}**).
+- **No console**: o mesmo cartão **Pessoas que comentam** embaixo da fila, fechado. A fila do roteiro do console já era
+  compacta (uma linha por item, com rolagem até metade da tela) e não mudou.
+- **Por que não uma janela**: o **Remover** abre uma confirmação, que ficaria uma janela dentro de outra, e o console em
+  tela cheia precisaria levar as duas para o portal dele. A lista que abre ali mesmo resolve o espaço sem isso.

@@ -1226,6 +1226,69 @@ sozinhos; para eles, **Publicar replay** no menu do webinário encerrado).
 
 `WEBINARS_MIGRATION` continua apontando a `202611170001` (§9.18).
 
+### 9.21 A lista de pessoas que comentam da escola: migração `202611180001` antes do merge (13/11/2026)
+
+A lista **Pessoas que comentam** passa a ser uma só da escola (`docs/30` D117; `docs/31` §18), com uma migração que vem
+**depois** da `202611170001` (§9.18) e não muda as de antes (a guarda `tests/webinarios-pessoas-da-escola.guard.test.mjs`
+prende o hash acumulado das 76 anteriores e o do arquivo novo). O roteiro em linhas fechadas e a lista numa linha
+(D118 e D119) não têm migração.
+
+| Ordem | Arquivo | O que faz | Seções | Nome em `schema_migrations` |
+|---|---|---|---|---|
+| 1 | `202611180001_webinars_pessoas_da_escola.sql` | `webinar_personas.webinar_id` vira só a origem (aceita nulo; `on delete set null` no lugar do `cascade`); as pessoas com o mesmo nome em webinários diferentes viram uma só (fica a mudada por último; sem foto, ela recebe a foto mais recente das outras; os itens do roteiro e as perguntas simuladas passam para ela, e os itens ficam com a cópia dela); e o índice único do nome na escola | 2 | `webinars_pessoas_da_escola` |
+
+**O que ela apaga**: só as linhas repetidas de `webinar_personas`, depois de nada mais apontar para elas (o único
+`delete`). Nenhum item do roteiro, mensagem ou pergunta some. O que a turma já viu não muda: a mensagem e a pergunta
+guardam a cópia de quando entraram. Os itens que ainda não entraram passam a mostrar o nome, a foto e o **Aparece
+como** da pessoa que ficou (ex.: o "Adriano Souza" de duas lives, com fotos diferentes, fica com a foto do que foi
+mudado por último).
+
+**Antes do merge na `dev`**: o app novo lê a lista inteira da escola. Sem a migração ele continua de pé: a lista mostra
+todas as pessoas (as repetidas aparecem duas vezes até a migração juntar), e o servidor recusa um nome repetido antes de
+gravar; só a corrida de duas gravações ao mesmo tempo e a pessoa que sobrevive ao webinário excluído esperam por ela.
+Ela é a mais nova dos webinários, então `WEBINARS_MIGRATION` passa a apontá-la (e `WEBINARS_PERSONAS_SCHOOL_MIGRATION`).
+Com o app de antes no ar, a migração faz a lista de cada webinário mostrar só as pessoas que ficaram com aquele webinário
+de origem (as juntadas aparecem "(fora da lista)" nos outros) até o app novo entrar, por isso ela vai junto do merge.
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: o arquivo inteiro colado no SQL Editor (é idempotente), ou pelo
+`apply_migration` do MCP do Supabase, ou as duas seções em ordem pelo `execute_sql`. Depois, gravar a versão:
+
+```sql
+insert into supabase_migrations.schema_migrations (version, name) values ('202611180001', 'webinars_pessoas_da_escola') on conflict (version) do nothing;
+```
+
+Conferência depois de aplicar (as duas linhas do cabeçalho da migração). O resultado esperado é `3` e `0`:
+
+```sql
+select (select count(*) from pg_indexes where schemaname = 'public' and indexname = 'webinar_personas_school_name_idx') + (select count(*) from pg_constraint where conname = 'webinar_personas_webinar_school' and confdeltype = 'n') + (select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'webinar_personas' and column_name = 'webinar_id' and is_nullable = 'YES') as total; -- 3
+select count(*) from (select name_key from public.webinar_personas group by name_key having count(*) > 1) as repetidas; -- 0
+```
+
+**A seção 2 é um bloco `do $$` só**: o CLI do Supabase (o `db push` do `migrate.sh` e o `db start` dos testes) aplica
+cada comando fora de uma transação, e o `lock table` que segura a lista enquanto junta só vale dentro de uma. A primeira
+versão tinha os comandos soltos; o CI da PR #186 pegou o erro (`LOCK TABLE can only be used in transaction blocks`) e o
+bloco resolveu: um comando só, que junta tudo ou nada. Pelo SQL Editor ou pelo `execute_sql`, a seção também vai inteira.
+
+Estado em 13/11/2026: escrita e rodada duas vezes seguidas num Postgres 16 só com as tabelas que ela toca, comando por
+comando e sem transação, como o CLI aplica (três
+"Adriano Souza" em webinários diferentes, uma sem foto e a mais nova: ficou uma pessoa, a mais nova, com a foto mais
+recente das outras; os itens das três lives passaram para ela com a cópia; a pergunta simulada também; a segunda vez
+não mudou nada; excluir o webinário de origem deixou a pessoa com a origem nula). A integração
+`tests/integration/webinarios-pessoas.test.mjs` (4 e 4b) roda contra o Supabase local no CI. **Na nuvem de teste,
+aplicada em 13/11/2026** (com o ok do produtor no chat: "pode subir direto para dev, main e produção"), pelo
+`execute_sql` do MCP, as duas seções em ordem, antes do merge da PR #186 na `dev`, com o `insert` da versão. A
+conferência deu `3` e `0`. Lá havia 14 pessoas, com dois nomes repetidos em 6 webinários cada (cópias do
+Duplicar): ficaram 4 pessoas, e os 7 itens do roteiro que estavam ligados continuam ligados, agora à pessoa
+que ficou.
+
+**Produção (Hetzner)**: nada manual, como na §9.13: o `deploy-membros` roda o `migrate.sh` antes de recriar o app. Com a
+produção guardada em snapshot (§10), o próximo deploy aplica esta junto das que faltarem.
+
+**Uma ressalva sobre a `202611140001`**: o preenchimento dela (a seção 5) só roda com a lista vazia e grava uma pessoa
+por nome **em cada webinário**. Rodar de novo a `202611140001` depois desta, com a lista vazia e o mesmo nome em roteiros
+de webinários diferentes, esbarra no índice único da escola. Nenhum caminho de hoje faz isso (o `migrate.sh` só aplica
+as que faltam); se for preciso, rode antes a seção 2 desta, que junta os nomes.
+
 ## 10. Producao guardada em snapshot (03/11/2026)
 
 **Decisao do produtor (03/11/2026, no chat):** a producao na Hetzner so serve para a equipe testar; ninguem de fora a

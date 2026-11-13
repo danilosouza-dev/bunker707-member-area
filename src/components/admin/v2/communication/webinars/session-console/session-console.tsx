@@ -766,7 +766,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     }
     setBusyKey("script:persona");
     setFailure(null);
-    const result = await deletePersona({ id: persona.id });
+    const result = await deletePersona({ id: persona.id, webinarId: webinar.id });
     setBusyKey(null);
     if (result.ok) {
       adminToast.success(pessoasCopy.avisos.removida(persona.name));
