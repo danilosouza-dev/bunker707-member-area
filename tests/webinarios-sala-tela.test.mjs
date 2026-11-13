@@ -807,11 +807,11 @@ test("a sala inteira: dialogo aria-modal com o titulo, as abas Chat, Perguntas e
   assert.match(live, /<iframe[^>]+mediadelivery/);
   assert.match(live, /Ativar som/);
   assert.match(live, /fixed inset-0 flex flex-col/, "tela cheia por cima da area");
-  // O painel a direita no computador com a largura da grade do YouTube (de 320 a 514 px) e o trilho "Painel da sala"
+  // O painel a direita no computador com a largura da grade do YouTube (de 320 a 400 px desde a rodada v9, P10) e o trilho "Painel da sala"
   // depois dele; abaixo de lg, as abas em pilula na lista "Painel da sala", na linha que some a partir de lg. O mesmo
   // nome em dois papeis, cada um so numa largura.
   const aside = live.match(/<aside aria-labelledby="room-panel-title" class="([^"]*)" data-testid="room-panel" id="room-panel">/)?.[1].split(" ") ?? [];
-  assert.ok(aside.includes("lg:w-[clamp(320px,27.5vw,514px)]") && aside.includes("lg:flex-none") && !aside.includes("lg:w-80"), aside.join(" "));
+  assert.ok(aside.includes("lg:w-[clamp(320px,27.5vw,400px)]") && aside.includes("lg:flex-none") && !aside.includes("lg:w-80"), aside.join(" "));
   assert.match(live, /<div class="[^"]*\blg:hidden"><div aria-label="Painel da sala" class="[^"]*" role="tablist">/);
   assert.match(live, /<\/aside><nav aria-label="Painel da sala" class="[^"]*\blg:flex\b[^"]*">/);
   assert.equal((live.match(/aria-label="Painel da sala"/g) ?? []).length, 2, "na nav e no tablist");

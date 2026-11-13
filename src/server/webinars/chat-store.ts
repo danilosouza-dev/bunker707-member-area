@@ -16,7 +16,10 @@ import {
   POLL_OPTION_COLUMNS,
   PRESENCE_COLUMNS,
   QUESTION_COLUMNS,
+  QUESTION_COLUMNS_V10,
+  QUESTION_COLUMNS_V9,
   QUESTION_REPLY_COLUMNS,
+  QUESTION_REPLY_COLUMNS_V9,
   REACTION_COLUMNS,
   SCRIPT_ITEM_COLUMNS,
   TRANSCRIPT_COLUMNS,
@@ -37,6 +40,7 @@ import {
   type TranscriptRow
 } from "./chat-rows";
 import { CHAT_LIMITS, ROOM_RULES, type DeleteReason, type DisplayNameMode } from "./model";
+import { QUESTION_LIKE_COLUMNS, type LikeTally, type QuestionLikeRow } from "./question-likes-model";
 
 const PAGE = 1000;
 
@@ -611,22 +615,58 @@ export function visibleQuestionFilter(nowIso: string): string {
   return `user_id.not.is.null,created_at.lte."${nowIso}"`;
 }
 
+/** Depois de uma leitura que esbarrou numa coluna da 202611150001 que nao existe, por quanto tempo o app le so com as listas de sempre. */
+const V9_COLUMNS_RETRY_MS = 60_000;
+/** Ate quando cada lista com colunas novas fica de fora (a chave e o proprio texto da lista). */
+const newColumnsSkipUntil = new Map<string, number>();
+
+/** Esvazia a memoria das colunas ausentes (os testes). */
+export function clearV9ColumnsMemory() {
+  newColumnsSkipUntil.clear();
+}
+
+/**
+ * Le com as colunas das migracoes novas, da lista mais nova para a mais antiga: a da 202611160001 (o fio visto pela
+ * equipe, docs/30 D94), a da 202611150001 (quem assina a resposta, D88) e, por fim, a lista de sempre. No banco sem
+ * uma das colunas, a lista que falhou fica de fora por 1 min e a leitura segue com a seguinte: a resposta aparece como
+ * "Equipe" e o aviso do fio so sai com a resposta da equipe, como antes.
+ */
+async function withNewColumns<C extends string, T>(base: C, extended: readonly string[], read: (columns: C) => Promise<T>): Promise<T> {
+  for (const columns of extended) {
+    if (Date.now() < (newColumnsSkipUntil.get(columns) ?? 0)) {
+      continue;
+    }
+    try {
+      // O tipo da lista de sempre (o PostgREST tipa o select pelo texto); a linha tem as colunas novas opcionais.
+      return await read(columns as C);
+    } catch (failure) {
+      if (!isPendingMigrationError(failure)) {
+        throw failure;
+      }
+      newColumnsSkipUntil.set(columns, Date.now() + V9_COLUMNS_RETRY_MS);
+    }
+  }
+  return read(base);
+}
+
 export async function listQuestionRows(
   db: WebinarsDb,
   input: { limit?: number; order: "recent" | "votes"; sessionId: string; statuses?: readonly string[]; visibleAt?: string }
 ): Promise<QuestionRow[]> {
-  let query = db.from("webinar_questions").select(QUESTION_COLUMNS).eq("session_id", input.sessionId).is("deleted_at", null);
-  if (input.statuses?.length) {
-    query = query.in("status", [...input.statuses]);
-  }
-  // Com `visibleAt`, so as que ja apareceram (a simulada do futuro nunca ocupa o lugar das de agora no teto da lista).
-  if (input.visibleAt) {
-    query = query.or(visibleQuestionFilter(input.visibleAt));
-  }
-  query = input.order === "votes" ? query.order("upvotes", { ascending: false }).order("created_at", { ascending: true }) : query.order("created_at", { ascending: false });
-  const { data, error } = await query.limit(Math.min(500, input.limit ?? 200));
-  assertNoDbError(error, "Webinarios: perguntas da sessao");
-  return (data ?? []) as QuestionRow[];
+  return withNewColumns(QUESTION_COLUMNS, [QUESTION_COLUMNS_V10, QUESTION_COLUMNS_V9], async (columns) => {
+    let query = db.from("webinar_questions").select(columns).eq("session_id", input.sessionId).is("deleted_at", null);
+    if (input.statuses?.length) {
+      query = query.in("status", [...input.statuses]);
+    }
+    // Com `visibleAt`, so as que ja apareceram (a simulada do futuro nunca ocupa o lugar das de agora no teto da lista).
+    if (input.visibleAt) {
+      query = query.or(visibleQuestionFilter(input.visibleAt));
+    }
+    query = input.order === "votes" ? query.order("upvotes", { ascending: false }).order("created_at", { ascending: true }) : query.order("created_at", { ascending: false });
+    const { data, error } = await query.limit(Math.min(500, input.limit ?? 200));
+    assertNoDbError(error, "Webinarios: perguntas da sessao");
+    return (data ?? []) as QuestionRow[];
+  });
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -641,17 +681,19 @@ export async function listQuestionRows(
  */
 export async function listQuestionReplyRows(db: WebinarsDb, input: { sessionId: string }): Promise<QuestionReplyRow[]> {
   try {
-    return await fetchAll<QuestionReplyRow>(
-      (from, to) =>
-        db
-          .from("webinar_question_replies")
-          .select(QUESTION_REPLY_COLUMNS)
-          .eq("session_id", input.sessionId)
-          .is("deleted_at", null)
-          .order("created_at", { ascending: true })
-          .order("id", { ascending: true })
-          .range(from, to),
-      "Webinarios: o fio das perguntas"
+    return await withNewColumns(QUESTION_REPLY_COLUMNS, [QUESTION_REPLY_COLUMNS_V9], (columns) =>
+      fetchAll<QuestionReplyRow>(
+        (from, to) =>
+          db
+            .from("webinar_question_replies")
+            .select(columns)
+            .eq("session_id", input.sessionId)
+            .is("deleted_at", null)
+            .order("created_at", { ascending: true })
+            .order("id", { ascending: true })
+            .range(from, to),
+        "Webinarios: o fio das perguntas"
+      )
     );
   } catch (failure) {
     if (isPendingMigrationError(failure)) {
@@ -673,10 +715,18 @@ export async function countQuestionReplyRows(db: WebinarsDb, questionId: string)
   return count;
 }
 
-export type QuestionReplyInsert = Pick<QuestionReplyRow, "anonymous" | "body" | "display_name" | "question_id" | "role" | "session_id" | "user_id">;
+/**
+ * `author_as` (202611150001, docs/30 D88) so vai na linha quando a equipe escolheu como aparecer: sem a chave (o aluno,
+ * a resposta de antes), a escrita nao depende da coluna.
+ */
+export type QuestionReplyInsert = Pick<QuestionReplyRow, "anonymous" | "body" | "display_name" | "question_id" | "role" | "session_id" | "user_id"> & { author_as?: string };
 
 export async function insertQuestionReplyRow(db: WebinarsDb, row: QuestionReplyInsert): Promise<QuestionReplyRow> {
-  const { data, error } = await db.from("webinar_question_replies").insert(row).select(QUESTION_REPLY_COLUMNS).single();
+  const { data, error } = await db
+    .from("webinar_question_replies")
+    .insert(row)
+    .select((row.author_as ? QUESTION_REPLY_COLUMNS_V9 : QUESTION_REPLY_COLUMNS) as typeof QUESTION_REPLY_COLUMNS)
+    .single();
   assertNoDbError(error, "Webinarios: gravar resposta no fio");
   return data as QuestionReplyRow;
 }
@@ -705,6 +755,69 @@ export async function updateQuestionRow(db: WebinarsDb, id: string, patch: Quest
   const { data, error } = await db.from("webinar_questions").update(patch).eq("id", id).select(QUESTION_COLUMNS).maybeSingle();
   assertNoDbError(error, "Webinarios: atualizar pergunta");
   return (data as QuestionRow | null) ?? null;
+}
+
+/**
+ * Grava quem assina a resposta escrita (webinar_questions.answer_author, 202611150001; docs/30 D88). A parte do
+ * atualizar de sempre: no banco sem a coluna sobe o PendingMigrationError, e quem chama decide (com "Equipe", que e o
+ * que a sala ja mostra sem a coluna, segue; com outro nome, responde com o aviso da migracao antes de gravar a resposta).
+ */
+export async function writeQuestionAnswerAuthor(db: WebinarsDb, id: string, author: { as: string; name: string | null; role: string; v: 1 } | null): Promise<void> {
+  const { error } = await db.from("webinar_questions").update({ answer_author: author }).eq("id", id);
+  assertNoDbError(error, "Webinarios: quem assina a resposta");
+}
+
+/**
+ * Marca o fio da pergunta como visto pela equipe (202611160001, docs/30 D94). Devolve se a pergunta existe; no banco
+ * sem as colunas, sobe o PendingMigrationError (a acao responde com o aviso da migracao).
+ */
+export async function markQuestionThreadSeen(db: WebinarsDb, input: { id: string; seenAt: string; seenBy: string }): Promise<boolean> {
+  const { data, error } = await db.from("webinar_questions").update({ thread_seen_at: input.seenAt, thread_seen_by: input.seenBy }).eq("id", input.id).is("deleted_at", null).select("id");
+  assertNoDbError(error, "Webinarios: marcar o fio como visto");
+  return ((data ?? []) as unknown[]).length > 0;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * As curtidas da resposta e do fio (202611170001, docs/30 D101)
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * As curtidas da resposta escrita e das respostas do fio de uma sessao, em paginas de 1000 (o PostgREST corta em 1000
+ * sem erro). Sem a 202611170001 nao ha curtida: lista vazia, e as perguntas seguem como antes.
+ */
+export async function listQuestionLikeRows(db: WebinarsDb, input: { sessionId: string }): Promise<QuestionLikeRow[]> {
+  try {
+    return await fetchAll<QuestionLikeRow>(
+      (from, to) => db.from("webinar_question_likes").select(QUESTION_LIKE_COLUMNS).eq("session_id", input.sessionId).order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to),
+      "Webinarios: curtidas das respostas"
+    );
+  } catch (failure) {
+    if (isPendingMigrationError(failure)) {
+      return [];
+    }
+    throw failure;
+  }
+}
+
+/**
+ * Alterna a curtida de uma pessoa na resposta escrita (`replyId` nulo) ou numa resposta do fio; devolve se ficou
+ * curtida e o total recontado. No banco sem a tabela, sobe o PendingMigrationError (quem chama responde com o aviso).
+ */
+export async function toggleQuestionLike(db: WebinarsDb, input: { questionId: string; replyId: string | null; sessionId: string; userId: string }): Promise<LikeTally> {
+  const inserted = await db.from("webinar_question_likes").insert({ question_id: input.questionId, reply_id: input.replyId, session_id: input.sessionId, user_id: input.userId });
+  let liked = true;
+  if (isUniqueViolation(inserted.error)) {
+    const removal = db.from("webinar_question_likes").delete().eq("question_id", input.questionId).eq("user_id", input.userId);
+    const removed = await (input.replyId ? removal.eq("reply_id", input.replyId) : removal.is("reply_id", null));
+    assertNoDbError(removed.error, "Webinarios: tirar a curtida da resposta");
+    liked = false;
+  } else {
+    assertNoDbError(inserted.error, "Webinarios: curtir a resposta");
+  }
+  const counting = db.from("webinar_question_likes").select("id", { count: "exact", head: true }).eq("question_id", input.questionId);
+  const { count, error } = await (input.replyId ? counting.eq("reply_id", input.replyId) : counting.is("reply_id", null));
+  assertNoDbError(error, "Webinarios: contar as curtidas da resposta");
+  return { liked, likes: count ?? 0 };
 }
 
 /** Alterna o voto do aluno; devolve se ficou votado e o total recontado (gravado em upvotes). */

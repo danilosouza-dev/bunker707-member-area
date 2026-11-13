@@ -5,6 +5,7 @@
 // imports relativos: tests/webinarios-console-modelo.test.mjs carrega direto pelo Node. Nada aqui le o relogio:
 // tudo recebe `nowMs`.
 
+import type { StudentScreenComment } from "./screen-comment-model";
 import { chatRoleLabel, chatTimeAt, chatTimeLabel, roleBadgeOnly } from "../../lib/webinar-room-client";
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { saoPauloDate } from "../../lib/webinar-time";
@@ -196,11 +197,17 @@ const QUESTION_ORDER: Record<WebinarQuestion["status"], number> = { answered: 1,
 /**
  * A pergunta respondida em que o aluno escreveu por ultimo no fio (docs/30 §2.4; decisao do produtor de 10/11/2026): a
  * conversa esta com a equipe. Conta junto das abertas no numero da aba e sobe para o topo do quadro, com o selo "Nova
- * resposta do aluno"; some quando a equipe responde no fio ou pelo campo de cima (ou apaga a resposta).
+ * resposta do aluno"; some quando a equipe responde no fio ou pelo campo de cima (ou apaga a resposta), e tambem
+ * quando ela marca o fio como visto (rodada v10, docs/30 D94).
  */
-export function questionAwaitsTeam(question: Pick<WebinarQuestion, "answeredAt" | "replies" | "status">): boolean {
+export function questionAwaitsTeam(question: Pick<WebinarQuestion, "answeredAt" | "replies" | "status"> & Pick<Partial<WebinarQuestion>, "threadSeenAt">): boolean {
   const last = question.replies?.[question.replies.length - 1];
   if (question.status !== "answered" || last?.role !== "student") {
+    return false;
+  }
+  // A equipe marcou o fio como visto depois da ultima fala do aluno (docs/30 D94): o aviso sai sem ela responder, e
+  // volta sozinho quando o aluno escrever de novo.
+  if (question.threadSeenAt && toTime(question.threadSeenAt) >= toTime(last.createdAt)) {
     return false;
   }
   // A resposta de cima gravada depois da ultima fala do aluno (o campo de cima no "Falar com a equipe", ou Reabrir e
@@ -234,7 +241,7 @@ export async function whileSettling(input: { key: string; set: (update: (current
 }
 
 /** A ordem do quadro: a aberta e a que espera a equipe no fio (0), a respondida (1), a dispensada (2). */
-function boardRank(question: Pick<WebinarQuestion, "answeredAt" | "replies" | "status">): number {
+function boardRank(question: Pick<WebinarQuestion, "answeredAt" | "replies" | "status"> & Pick<Partial<WebinarQuestion>, "threadSeenAt">): number {
   return questionAwaitsTeam(question) ? 0 : QUESTION_ORDER[question.status];
 }
 
@@ -242,7 +249,7 @@ function boardRank(question: Pick<WebinarQuestion, "answeredAt" | "replies" | "s
  * O quadro: primeiro o que pede a equipe (as abertas e as respondidas em que o aluno escreveu por ultimo no fio; as
  * mais votadas, depois as mais antigas), depois as respondidas e as dispensadas.
  */
-export function sortQuestionsForBoard<T extends Pick<WebinarQuestion, "answeredAt" | "createdAt" | "replies" | "status" | "upvotes">>(questions: readonly T[]): T[] {
+export function sortQuestionsForBoard<T extends Pick<WebinarQuestion, "answeredAt" | "createdAt" | "replies" | "status" | "upvotes"> & Pick<Partial<WebinarQuestion>, "threadSeenAt">>(questions: readonly T[]): T[] {
   return [...questions].sort((a, b) => {
     const byStatus = boardRank(a) - boardRank(b);
     if (byStatus !== 0) {
@@ -495,6 +502,11 @@ export type ConsolePollView = Poll & { counts: PollCounts };
  */
 export type ConsoleScreen = {
   active: ScreenDisplay[];
+  /**
+   * O comentario ou a pergunta que esta na tela (rodada v9, docs/30 D89), como a turma ve; nulo sem nada. Opcional: o
+   * retrato montado por quem ainda nao conhece o campo (os testes de tela de antes) vale como sem comentario.
+   */
+  comment?: StudentScreenComment | null;
   items: ScreenItem[];
   pending: boolean;
   stats: Record<string, ScreenStats>;
@@ -539,6 +551,11 @@ export type ConsoleSnapshot = {
    */
   presence?: ConsolePresence | null;
   presentNow: number;
+  /**
+   * Os alunos veem quantas pessoas estao na sala (`webinars.room_settings.showPresentCount`, docs/30 D102), relido a
+   * cada retrato: a chave do console (rodada v12, D107) mostra o que esta gravado. Ausente no retrato de antes: ligado.
+   */
+  showPresentCount?: boolean;
   /**
    * As pessoas que comentam do webinario (11/11/2026, D75): a mesma lista do card Roteiro do editor, que o Roteiro do
    * console cria, edita, remove e escolhe. So com o roteiro e nunca no Replay; ausente ou `available` falso (o banco sem

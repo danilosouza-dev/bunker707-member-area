@@ -39,6 +39,51 @@ test("a folha: o cartao do palco, a grade sem o cartao preto, o botao de recolhe
   assert.doesNotMatch(css, /dragHandleContainer[^}]*display: none/, "display: none tiraria 9 px da conta do motor");
 });
 
+test("a folha (rodada v9, pedido do produtor de 12/11/2026): nada do visual padrao do motor na miniatura: o menu, a mao levantada e os pontos de audio no design system", () => {
+  // O botao do menu da miniatura (o azul do motor): o circulo escuro com os tres pontos brancos.
+  assert.match(css, /#local-video-menu-trigger > button,\s*#remote-video-menu-trigger > button \{[^}]*background-color: rgba\(0, 0, 0, 0\.6\) !important;[^}]*border-radius: 9999px !important;/);
+  // A mao levantada (o amarelo do motor): o contorno e o selo no ativo do design system, nos dois temas.
+  assert.match(css, /:root \{[^}]*--bunker-hand: #ffffff;[^}]*--bunker-hand-ink: #141414;/, "no escuro, branco com a mao escura");
+  assert.match(css, /html\[data-bunker-theme="light"\] \{[^}]*--bunker-hand: #141414;[^}]*--bunker-hand-ink: #ffffff;/, "no claro, quase preto com a mao branca");
+  assert.match(
+    css,
+    /\.filmstrip__videos \.videocontainer\[class\*="raisedHand"\] \.raised-hand-border \{\s*box-shadow: inset 0 0 0 2px var\(--bunker-hand\) !important;/,
+    "o contorno so na miniatura de quem levantou a mao (a classe da regra raisedHand), com a espessura da tag"
+  );
+  assert.match(css, /\.videocontainer \[class\*="raisedHandIndicator"\] \{[^}]*background-color: var\(--bunker-hand\) !important;[^}]*border-radius: 9999px !important;/);
+  assert.match(css, /\.videocontainer \[class\*="raisedHandIndicator"\] svg \{\s*fill: var\(--bunker-hand-ink\) !important;/);
+  // O contorno da mao nao vale para toda miniatura: sem a classe da regra, o seletor nao pega.
+  assert.doesNotMatch(css, /\.videocontainer \.raised-hand-border \{/, "sem a classe raisedHand o contorno apareceria em todos");
+  // Os pontos do nivel de audio (o azul do motor): o verde de quem fala, como o anel.
+  assert.match(css, /\.audioindicator span\.audiodot-top::after,\s*\.audioindicator span\.audiodot-middle::after,\s*\.audioindicator span\.audiodot-bottom::after \{\s*background: var\(--bunker-speaking\) !important;/);
+  // Nenhum amarelo nem azul do motor sobra escrito na folha.
+  assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ""), /#44a5ff|#f8ae1a|yellow|blue/i);
+});
+
+test("a folha (rodada v10, teste do produtor de 12/11/2026): os avisos e os dialogos do motor que ainda aparecem ficam no visual da area, sem a faixa nem o azul do motor", () => {
+  // Os avisos do console (a gravacao que nao comecou, a tela negada): o cartao invertido do tema, sem a faixa colorida.
+  assert.match(css, /:root \{[^}]*--bunker-notice-bg: #f1f1f1;[^}]*--bunker-notice-ink: #0f0f0f;/, "no escuro, o aviso claro");
+  assert.match(css, /html\[data-bunker-theme="light"\] \{[^}]*--bunker-notice-bg: #0f0f0f;[^}]*--bunker-notice-ink: #f1f1f1;/, "no claro, o aviso escuro");
+  assert.match(
+    css,
+    /#notifications-container \[role="status"\],\s*#notifications-container \[role="alert"\] \{[^}]*background-color: var\(--bunker-notice-bg\) !important;[^}]*border-radius: 12px !important;[^}]*color: var\(--bunker-notice-ink\) !important;/
+  );
+  assert.match(css, /#notifications-container \[role="status"\] > div:first-child,\s*#notifications-container \[role="alert"\] > div:first-child \{\s*display: none !important;/, "a faixa colorida do motor sai");
+  assert.match(css, /#notifications-container \[role="status"\] button,\s*#notifications-container \[role="alert"\] button \{[^}]*text-decoration: underline !important;/, "o botao do aviso sublinhado, na cor do texto");
+  // Os dialogos (o da live encerrada ja nao abre, pela configuracao do iframe): o cartao do tema e o botao principal
+  // invertido, sem azul.
+  assert.match(
+    css,
+    /\[role="dialog"\]\[aria-modal="true"\] \{[^}]*background-color: var\(--bunker-tile\) !important;[^}]*border-radius: var\(--bunker-radius\) !important;[^}]*color: var\(--bunker-notice-bg\) !important;/
+  );
+  assert.match(css, /#modal-dialog-ok-button \{[^}]*background-color: var\(--bunker-notice-bg\) !important;[^}]*border-radius: 999px !important;[^}]*color: var\(--bunker-notice-ink\) !important;/);
+  // So os ids e os papeis do motor, nunca o nome das classes geradas (mudam a cada versao).
+  const avisos = css.slice(css.indexOf("#notifications-container [role=\"status\"],"));
+  assert.doesNotMatch(avisos.replace(/\/\*[\s\S]*?\*\//g, ""), /\.css-|\.jss|\.tss-/);
+  // Nenhuma cor azul do motor sobra nessas regras.
+  assert.doesNotMatch(avisos.replace(/\/\*[\s\S]*?\*\//g, ""), /#(?:0056e0|246fe5|3d7ef2|4687ed)\b/i);
+});
+
 test("a folha: nada de margem, tamanho, borda, inset ou transformacao em regra que alcance as miniaturas (a lista virtual do motor mede por JS)", () => {
   const blocks = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
     .map((m) => ({ selector: m[1].trim(), body: m[2] }))

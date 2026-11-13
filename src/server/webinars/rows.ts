@@ -50,6 +50,8 @@ import {
   OFFER_TRIGGERS,
   OFFER_VARIANT_LABELS,
   SIMULATED_COUNT_MODES,
+  simulatedCountVaryOf,
+  type SimulatedCountVaryDirection,
   SIMULATION_LIMITS,
   SOURCE_LANGUAGES,
   defaultAssistantSettings,
@@ -275,6 +277,7 @@ export function roomSettingsOfRow(value: unknown): RoomSettings {
     questions: asBoolean(raw.questions, base.questions),
     reactions: asBoolean(raw.reactions, base.reactions),
     selfUnmute: asBoolean(raw.selfUnmute, base.selfUnmute),
+    showPresentCount: asBoolean(raw.showPresentCount, base.showPresentCount),
     slowModeSeconds: (SLOW_MODE_SECONDS as readonly number[]).includes(raw.slowModeSeconds as number) ? (raw.slowModeSeconds as SlowModeSeconds) : null,
     waitingRoom: asBoolean(raw.waitingRoom, base.waitingRoom)
   };
@@ -844,11 +847,43 @@ export function simulatedCountRuleOfRow(value: unknown): SimulatedCountRule {
   const base = defaultSimulatedCountRule();
   const mode = oneOf<SimulatedCountMode>(SIMULATED_COUNT_MODES, raw.mode, base.mode);
   const lowest = asInteger(raw.base, 0, SIMULATION_LIMITS.countMax, 0);
-  return {
+  const rule: SimulatedCountRule = {
     base: lowest,
     jitter: asInteger(raw.jitter, 0, SIMULATION_LIMITS.jitterMax, 0),
     mode,
     peak: Math.max(lowest, asInteger(raw.peak, 0, SIMULATION_LIMITS.countMax, lowest))
+  };
+  // "Variar sozinho" (D90): so no numero fixo e so com os quatro numeros dentro dos limites; senao, o numero parado.
+  const varyRaw = asObject(raw.vary);
+  const vary = simulatedCountVaryOf({
+    base: rule.base,
+    mode: rule.mode,
+    vary: {
+      // O lado desconhecido nao vira "para mais e para menos": a regra fica sem a variacao.
+      direction: varyRaw.direction as SimulatedCountVaryDirection,
+      everyMaxSeconds: Number(varyRaw.every_max_seconds),
+      everyMinSeconds: Number(varyRaw.every_min_seconds),
+      percent: Number(varyRaw.percent)
+    }
+  });
+  return vary ? { ...rule, vary } : rule;
+}
+
+/**
+ * A regra do contador como fica gravada (simulated_count_rule e webinar_simulation_changes.count_rule): "Só o real"
+ * grava nulo; o "Variar sozinho" so entra quando vale (o numero fixo maior que zero).
+ */
+export function simulatedCountRuleToRow(rule: SimulatedCountRule) {
+  if (rule.mode === "off") {
+    return null;
+  }
+  const vary = simulatedCountVaryOf(rule);
+  return {
+    base: rule.base,
+    jitter: rule.jitter,
+    mode: rule.mode,
+    peak: rule.peak,
+    ...(vary ? { vary: { direction: vary.direction, every_max_seconds: vary.everyMaxSeconds, every_min_seconds: vary.everyMinSeconds, percent: vary.percent } } : {})
   };
 }
 
@@ -903,8 +938,7 @@ export function sessionSimulationFromRow(row: SessionSimulationRow): SessionSimu
 /** O que vai para as colunas (docs/30 §4.3): "off" e "desligado" gravam nulo (a sessao fica sem regra simulada). */
 export function simulationRulesToRow(input: { countRule: SimulatedCountRule; joins: SimulatedJoins; saleNotices: SimulatedSaleNotices }) {
   return {
-    simulated_count_rule:
-      input.countRule.mode === "off" ? null : { base: input.countRule.base, jitter: input.countRule.jitter, mode: input.countRule.mode, peak: input.countRule.peak },
+    simulated_count_rule: simulatedCountRuleToRow(input.countRule),
     simulated_joins: input.joins.enabled ? { enabled: true, every_seconds: input.joins.everySeconds, max: input.joins.max, names: "generic" } : null,
     simulated_sale_notices: input.saleNotices.enabled
       ? { enabled: true, items: input.saleNotices.items.map((item) => ({ offset_ms: item.offsetMs, text: item.text })) }

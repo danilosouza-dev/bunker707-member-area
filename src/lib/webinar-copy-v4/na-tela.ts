@@ -62,6 +62,13 @@ export const NA_TELA_COPY = {
     qr: (nome: string) => `QR Code · ${nome}`,
     poll: (pergunta: string) => `Enquete fixada · ${pergunta}`
   },
+  /** O comentario ou a pergunta na tela (rodada v9, docs/30 D89), em Na tela agora. */
+  exibicaoComentario: {
+    chat: (autor: string, texto: string) => `Comentário · ${autor}: ${texto}`,
+    question: (autor: string, texto: string) => `Pergunta · ${autor}: ${texto}`
+  },
+  /** O tipo na pilula do palco do console ("Na tela: Banner · Comentário"). */
+  tipoComentario: { chat: "Comentário", question: "Pergunta" },
   haTempo,
   numeros,
 
@@ -79,6 +86,10 @@ export const NA_TELA_COPY = {
     enqueteFixada: (pergunta: string) => `Enquete fixada · ${pergunta}`,
     desafixar: "Desafixar",
     tirarDaTela: "Tirar da tela",
+    /* Rodada v9 (P11): no ⋯ de cada mensagem do chat e em cada pergunta. */
+    mostrarNaTela: "Mostrar na tela",
+    /** O selo da mensagem ou da pergunta que esta na tela agora. */
+    seloComentarioNaTela: "Na tela",
     prontos: "Prontos",
     prontosVazio: "Nenhum banner ou QR Code pronto.",
     previa: "Prévia",
@@ -108,7 +119,9 @@ export const NA_TELA_COPY = {
       excluido: "Excluído dos prontos.",
       mensagemFixada: "Mensagem fixada.",
       enqueteFixada: "Enquete fixada.",
-      enqueteDesafixada: "Enquete desafixada."
+      enqueteDesafixada: "Enquete desafixada.",
+      comentarioNaTela: "Na tela dos alunos em até 5 s. Fica até você tirar ou mostrar outro.",
+      comentarioSaiu: "Saiu da tela."
     }
   },
 
@@ -145,6 +158,14 @@ export const NA_TELA_COPY = {
     texto: "Texto",
     textoDoBotao: "Texto do botão",
     textoDoBotaoDica: "Sem texto do botão, o banner inteiro abre o link.",
+    /* Rodada v9 (P3, docs/30 D87): o que abre o link do banner. */
+    oQueAbreOLink: "O que abre o link",
+    alvosDoLink: { both: "Imagem e botão", button: "Só o botão", image: "Só a imagem" },
+    alvoDoLinkDica: {
+      both: "O aluno abre o link clicando no banner ou no botão.",
+      button: "Só o botão abre o link; o resto do banner não é clicável.",
+      image: "O banner inteiro abre o link e o botão não aparece."
+    },
     link: "Link",
     linkExemplo: "https://…",
     linkPronto: "Usar um link pronto",
@@ -180,6 +201,9 @@ export const NA_TELA_COPY = {
     qrLink: "Para o QR Code, use um link de até 240 caracteres.",
     imagemOuTitulo: "Coloque uma imagem ou um título.",
     botaoSemLink: "O botão precisa de um link.",
+    soBotaoSemTexto: "Escreva o texto do botão ou escolha outra opção em O que abre o link.",
+    /* Rodada v9 (P11, docs/30 D89): o comentario ou a pergunta na tela. */
+    comentarioSumiu: "Esse comentário não está mais disponível para mostrar na tela.",
     descricao: "Descreva a imagem para quem usa leitor de tela.",
     meioGrande: "No meio e sem fechar, só nos tamanhos Pequeno e Médio.",
     curto: (max: number) => `Use até ${max} caracteres.`,
@@ -229,7 +253,17 @@ export const NA_TELA_COPY = {
     /** O leitor de tela ouve tambem, quando o banner nao pode ser fechado. */
     semFechar: "Este banner sai quando a equipe tirar.",
     /** O nome do desenho do QR Code (role="img"). */
-    qrNome: (dominio: string) => `QR Code do link ${dominio}`
+    qrNome: (dominio: string) => `QR Code do link ${dominio}`,
+    /* Rodada v9 (P11, docs/30 D89): o comentario ou a pergunta que a equipe trouxe para a tela. */
+    /** A linha pequena em cima do cartao. */
+    comentarioNaTela: "Comentário na tela",
+    perguntaNaTela: "Pergunta na tela",
+    /** O nome da secao (nao modal) do cartao e da linha da faixa. */
+    secaoComentario: (nome: string) => `Comentário de ${nome} na tela`,
+    secaoPergunta: (nome: string) => `Pergunta de ${nome} na tela`,
+    /** Um anuncio educado por chegada; a saida e silenciosa. */
+    anuncioComentario: (nome: string, texto: string) => `A equipe mostrou na tela o comentário de ${nome}: ${texto}`,
+    anuncioPergunta: (nome: string, texto: string) => `A equipe mostrou na tela a pergunta de ${nome}: ${texto}`
   },
 
   /* O roteiro de comentarios prontos na Live ao vivo e a foto de quem comenta (adendo de 10/11/2026, R8 e R9). */

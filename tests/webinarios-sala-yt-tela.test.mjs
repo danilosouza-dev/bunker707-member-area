@@ -240,7 +240,7 @@ const comFio = (extra = {}, reply = responder()) =>
     serverNowMs: AGORA
   });
 
-test("o fio continua: as respostas em ordem (a foto ou as iniciais, 'Você' na minha, o selo do papel da equipe), o botao conta todas e so quem perguntou tem o Responder", () => {
+test("o fio continua: as respostas em ordem (a foto ou as iniciais, 'Você' na minha, o selo do papel da equipe), o botao conta todas e so quem perguntou tem o Responder, no fim do fio aberto", () => {
   const novas = WEBINAR_COPY.salaV2.perguntas;
   assert.deepEqual(
     [novas.responder, novas.adicioneResposta, novas.suaResposta, novas.respostaFechada],
@@ -248,18 +248,45 @@ test("o fio continua: as respostas em ordem (a foto ou as iniciais, 'Você' na m
   );
   const html = comFio();
   const q6 = itemDe(html, "q6");
-  // A minha pergunta com a minha foto; o Responder na linha de acoes, depois do numero, fechado.
+  // A minha pergunta com a minha foto. O Responder fica onde a pessoa quer responder (teste do produtor de 12/11/2026,
+  // docs/30 D93): com o fio aberto, no fim dele, logo abaixo da ultima resposta, e nunca tambem la em cima, na linha
+  // de acoes da pergunta.
   assert.match(q6, /<img[^>]*src="https:\/\/exemplo\.test\/ana\.jpg"/, "a foto de quem perguntou");
-  const acao = q6.match(/<span class="sr-only">0 curtidas<\/span><button aria-expanded="false" data-room-reply-open="" class="([^"]*)" type="button">Responder<\/button>/);
-  assert.ok(acao, "o Responder depois do numero, com o estado do campo");
-  for (const classe of ["h-8", "rounded-full", "bg-transparent", "text-xs", "ml-1"]) {
+  assert.equal((q6.match(/data-room-reply-open=""/g) ?? []).length, 1, "um Responder so");
+  assert.doesNotMatch(q6, /<span class="sr-only">0 curtidas<\/span><button[^>]*data-room-reply-open/, "nao na linha de acoes da pergunta");
+  const acao = q6.match(/<div class="flex min-w-0" data-room-reply-row=""><button aria-expanded="false" data-room-reply-open="" class="([^"]*)" type="button">Responder<\/button><\/div>/);
+  assert.ok(acao, "o Responder no fim do fio, com o estado do campo");
+  assert.ok(q6.indexOf('data-room-reply="r2"') < q6.indexOf("data-room-reply-row"), "depois da ultima resposta");
+  for (const classe of ["h-8", "rounded-full", "bg-transparent", "text-xs", "ml-6"]) {
     assert.ok(classesDe(`<b class="${acao[1]}">`).includes(classe), `o Responder tem ${classe}`);
+  }
+  // Mais um item do fio, com a curva dele.
+  assert.match(q6, /<div class="relative mt-4"><span aria-hidden="true"[^>]*><\/span><div class="flex min-w-0" data-room-reply-row="">/);
+  // Com o fio recolhido (ou sem fio: a pergunta respondida so ao vivo), o Responder fica na linha de acoes, depois do numero.
+  for (const [nome, extra, aberto] of [
+    ["o fio recolhido", {}, false],
+    ["respondida so ao vivo", { answerText: null, replies: [], status: "answered" }, true]
+  ]) {
+    const item = render(questionsModule.RoomQuestionItem, {
+      look: "comment",
+      onToggleThread: noop,
+      onVote: noop,
+      question: pergunta("q8", { answerSource: "team", answerText: "Fica 7 dias.", answeredAt: new Date(AGORA - 3 * 60_000).toISOString(), canReply: true, mine: true, replies: FIO, status: "answered", ...extra }),
+      reply: responder(),
+      serverNowMs: AGORA,
+      threadOpen: aberto
+    });
+    const linha = item.match(/<span class="sr-only">0 curtidas<\/span>(?:<span[^>]*>[^<]*<\/span>)?<button aria-expanded="false" data-room-reply-open="" class="([^"]*)" type="button">Responder<\/button>/);
+    assert.ok(linha, `${nome}: o Responder depois do numero`);
+    assert.ok(classesDe(`<b class="${linha[1]}">`).includes("ml-1"), nome);
+    assert.doesNotMatch(item, /data-room-reply-row/, `${nome}: nenhum Responder dentro do fio`);
+    assert.equal((item.match(/data-room-reply-open=""/g) ?? []).length, 1, nome);
   }
   // O fio aberto (a minha): a resposta da Equipe, depois as duas respostas, cada uma com a propria curva.
   const fio = q6.slice(q6.indexOf('id="resposta-q6"'));
   const ordem = [...fio.matchAll(/data-room-(answer|reply)="([^"]+)"/g)].map((match) => `${match[1]}:${match[2]}`);
   assert.deepEqual(ordem, ["answer:q6", "reply:r1", "reply:r2"]);
-  assert.equal((fio.match(/<div class="relative mt-4"><span aria-hidden="true" class="[^"]*\brounded-bl-\[16px\][^"]*-left-6 -top-4 h-7"><\/span>/g) ?? []).length, 2, "cada resposta seguinte com a curva dela");
+  assert.equal((fio.match(/<div class="relative mt-4"><span aria-hidden="true" class="[^"]*\brounded-bl-\[16px\][^"]*-left-6 -top-4 h-7"><\/span>/g) ?? []).length, 3, "cada resposta seguinte com a curva dela, e a linha do Responder tambem");
   assert.match(fio, /<span class="sr-only">Você, há 2 minutos: <\/span>E fica no app\?/, "a minha resposta e Você");
   assert.match(fio, /<span class="truncate[^"]*">Danilo S\.<\/span><span class="inline-flex h-5 [^"]*">Apresentador<\/span><time[^>]*>há 1 minuto<\/time>/, "a equipe com o nome, o selo do papel e a hora");
   assert.match(fio, /<span class="sr-only">Danilo S\., Apresentador, há 1 minuto: <\/span>Fica sim\./);
@@ -281,6 +308,9 @@ test("o fio continua: as respostas em ordem (a foto ou as iniciais, 'Você' na m
 test("o campo de responder do fio: abre no fim do fio da minha pergunta, com o meu avatar, o texto com a linha, o Cancelar e o Responder desligado sem texto; o erro numa regiao viva", () => {
   const aberto = itemDe(comFio({}, responder({ openId: "q6" })), "q6");
   assert.match(aberto, /<button aria-expanded="true" data-room-reply-open=""[^>]*>Responder<\/button>/);
+  // O Responder do fim do fio fica logo acima do campo que ele abre (D93).
+  assert.ok(aberto.indexOf("data-room-reply-row") < aberto.indexOf("data-room-reply-field"), "o Responder e, logo abaixo, o campo");
+  assert.equal((aberto.match(/data-room-reply-open=""/g) ?? []).length, 1);
   const campo = aberto.slice(aberto.indexOf("data-room-reply-field"));
   assert.ok(aberto.indexOf('data-room-reply="r2"') < aberto.indexOf("data-room-reply-field"), "o campo vem depois da ultima resposta");
   assert.match(aberto, /<div class="relative mt-4"><span aria-hidden="true"[^>]*><\/span><form class="flex items-start" data-room-reply-field="">/, "o campo e mais um item do fio, com a curva dele");

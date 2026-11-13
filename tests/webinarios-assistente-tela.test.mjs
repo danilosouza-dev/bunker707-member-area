@@ -162,7 +162,7 @@ test("o selo Assistente no palco (docs/31 V2-4): aparece com o Assistente ligado
   const selo = ligado.match(/<span [^>]*data-room-badge="assistant">[\s\S]*?<\/span>/)?.[0] ?? "";
   assert.match(selo, /lucide-sparkles/);
   assert.match(textOf(selo), /^Assistente$/);
-  assert.match(selo, /class="[^"]*\bbottom-4 right-\[calc\(var\(--room-video-right\)\+16px\)\][^"]*\bhidden lg:inline-flex"/, "antes da coluna e so no computador (no celular o canto e do Modo cinema)");
+  assert.match(selo, /class="[^"]*bottom-\[calc\(1rem\+var\(--room-video-bottom,0px\)\)\] right-\[calc\(var\(--room-video-right\)\+16px\)\][^"]*\bhidden lg:inline-flex"/, "antes da coluna e so no computador (no celular o canto e do Modo cinema)");
   assert.match(selo, /bg-room-on-video-bg[^"]*text-room-on-video-fg/, "os tokens de cima do video (a pilula branca no claro)");
   assert.equal(render(RoomStageBadges, { assistantOn: false, presenterName: null, recording: false, topLeft: null }), "", "desligado (e sem mais nada), nenhum selo");
 });

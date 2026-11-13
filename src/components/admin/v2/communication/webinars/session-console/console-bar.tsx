@@ -8,6 +8,7 @@ import type { ConsoleBarItem } from "@/components/member/webinars/room/room-layo
 import { RoomButton } from "@/components/member/webinars/room/room-ui";
 import { RoomViewMenu } from "@/components/member/webinars/room/room-view-menu";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
+import type { RoomThumbs } from "@/lib/webinar-room-prefs";
 import { cn } from "@/lib/utils";
 import { consoleBarItemsFor, consoleRecordButton, type ConsolePanelView } from "@/server/webinars/console-v2-model";
 import { lobbyNotice, recorderCard, type LiveConsoleSnapshot } from "@/server/webinars/live-console-model";
@@ -70,13 +71,17 @@ export type ConsoleBarProps = {
   onStopRecording: () => void;
   /** Mãos, Lançar enquete e o Gravar por preparar: abre o painel na aba ou na entrada do ⋯ (o foco vai a ela). */
   onOpenPanel: (view: ConsolePanelView) => void;
+  /** Escolher onde as miniaturas ficam (rodada v9, docs/30 D91); sem ele, o menu fica so com Palco e Grade. */
+  onThumbs?: (thumbs: RoomThumbs) => void;
   /** O balao: abre e fecha o painel do console. */
   onTogglePanel: () => void;
   panelOpen: boolean;
   session: Pick<WebinarSession, "status">;
+  /** A escolha guardada das miniaturas (Lateral por padrao). */
+  thumbs?: RoomThumbs;
 };
 
-export function ConsoleBar({ busyKey, canPublish, handle, handsCount, live: snapshot, nowMs, onOpenPanel, onRecord, onStopRecording, onTogglePanel, panelOpen, session }: ConsoleBarProps) {
+export function ConsoleBar({ busyKey, canPublish, handle, handsCount, live: snapshot, nowMs, onOpenPanel, onRecord, onStopRecording, onThumbs, onTogglePanel, panelOpen, session, thumbs = "side" }: ConsoleBarProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const { joined, room } = handle;
@@ -249,8 +254,12 @@ export function ConsoleBar({ busyKey, canPublish, handle, handsCount, live: snap
               }
               setViewMenuOpen(next);
             }}
+            onThumbs={onThumbs}
             open={viewMenuOpen}
             shown={room.viewShown}
+            thumbs={thumbs}
+            // Para quem apresenta, o Esconder sai tambem da gravacao (o seguir a visao leva ao gravador).
+            thumbsNote={handle.role === "host" && thumbs === "hidden" ? WEBINAR_COPY.salaV2.visao.miniaturas.escondidasNaGravacao : null}
           />
         );
       case "settings":

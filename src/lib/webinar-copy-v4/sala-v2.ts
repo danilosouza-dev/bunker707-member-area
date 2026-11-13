@@ -4,6 +4,15 @@
 
 export const SALA_V2_COPY = {
   /**
+   * A janela que avisa que a live acabou, quando o aluno estava na sala (docs/30 D104): no lugar do dialogo do motor de
+   * video, com o desenho da area.
+   */
+  encerrada: {
+    titulo: "A live foi encerrada",
+    texto: "Obrigado por participar. Você já pode sair da sala.",
+    ok: "OK"
+  },
+  /**
    * Os avisos da sala no estilo do YouTube (o aviso invertido, RoomSnackbar): os do motor somem, e so estes, mais os
    * passageiros da barra de antes e os sucessos do chat e das Perguntas, aparecem no aviso. A acao do microfone sem som
    * e o "Configurações" da barra (WEBINAR_COPY.aoVivo.configuracoes), que abre o painel. As duas da tela sao do console.
@@ -91,6 +100,12 @@ export const SALA_V2_COPY = {
     fioCheio: "Esta conversa chegou ao limite de respostas.",
     responder: "Responder",
     respostaEnviada: "Resposta enviada.",
+    /** O aviso da sala quando a equipe fala numa pergunta do aluno com a aba Perguntas fora da tela (docs/30 D100). */
+    respostaNova: "Responderam a sua pergunta.",
+    /** A acao do aviso: abre a aba Perguntas. */
+    verResposta: "Ver",
+    /** O nome do item Perguntas com resposta nova ("Perguntas, 2 respostas novas"). */
+    respostasNovas: (n: number) => (n === 1 ? "1 resposta nova" : `${n} respostas novas`),
     /* O campo de responder fechou porque a pergunta deixou de aceitar resposta (reaberta, dispensada, apagada ou o fio cheio). */
     respostaFechada: "Esta pergunta não aceita respostas agora.",
     soQuemPerguntou: "Só quem fez a pergunta e a equipe respondem aqui.",
@@ -137,6 +152,17 @@ export const SALA_V2_COPY = {
     atual: (nome: string) => `Visão do vídeo: ${nome}`,
     grade: "Grade",
     palco: "Palco",
-    rotulo: "Visão do vídeo"
+    rotulo: "Visão do vídeo",
+    /*
+     * As miniaturas das cameras onde a pessoa escolher (rodada v9, pedido do produtor de 12/11/2026; docs/30 D91). Desde
+     * a rodada v12 (docs/30 D105) so Lateral e Esconder, que trocam na hora: o Embaixo saiu, e com ele as frases da
+     * recarga do vídeo.
+     */
+    miniaturas: {
+      rotulo: "Miniaturas",
+      opcoes: { hidden: "Esconder", side: "Lateral" },
+      /** Só no console de quem apresenta, com o Esconder marcado. */
+      escondidasNaGravacao: "Escondidas para você e na gravação. Cada aluno escolhe as dele."
+    }
   }
 } as const;

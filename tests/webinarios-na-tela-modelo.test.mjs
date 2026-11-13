@@ -217,6 +217,8 @@ test("o item do aluno: o id da exibicao, a imagem com o endereco da nossa origem
     displayId: EXIBICAO,
     image: { alt: "Foguete subindo", height: 360, url: `${ORIGEM}/storage/v1/object/public/content-assets/${IMAGEM}`, width: 640 },
     kind: "banner",
+    // A copia gravada antes da 202611150001 nao diz o que abre o link: so o botao, como a turma viu (docs/30 D87).
+    linkTarget: "button",
     linkUrl: "https://bunker707.com.br/turma",
     place: "bottom_left",
     shownAt: "2026-11-10T20:05:00.000Z",
@@ -353,6 +355,9 @@ test("as frases da Na tela entram em WEBINAR_COPY.naTela, passam pela PROIBIDAS_
   assert.equal(NA_TELA_COPY.console.prontosVazio, "Nenhum banner ou QR Code pronto.");
   assert.equal(NA_TELA_COPY.console.pilulaPalco(["Banner", "QR Code"]), "Na tela: Banner · QR Code");
   assert.deepEqual({ ...NA_TELA_COPY.console.avisos }, {
+    // Rodada v9 (docs/30 D89): o comentario ou a pergunta na tela.
+    comentarioNaTela: "Na tela dos alunos em até 5 s. Fica até você tirar ou mostrar outro.",
+    comentarioSaiu: "Saiu da tela.",
     enqueteDesafixada: "Enquete desafixada.",
     enqueteFixada: "Enquete fixada.",
     excluido: "Excluído dos prontos.",

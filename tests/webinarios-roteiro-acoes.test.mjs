@@ -98,6 +98,9 @@ const DEFAULTS = {
 const UNIQUE = {
   webinar_chat_messages: (row, rows) => row.script_item_id != null && rows.some((other) => other.session_id === row.session_id && other.script_item_id === row.script_item_id),
   webinar_poll_answers: (row, rows) => rows.some((other) => other.poll_id === row.poll_id && other.user_id === row.user_id),
+  // Uma curtida por pessoa em cada alvo (os dois indices unicos parciais da 202611170001) e um voto por pessoa na pergunta.
+  webinar_question_likes: (row, rows) => rows.some((other) => other.question_id === row.question_id && other.user_id === row.user_id && (other.reply_id ?? null) === (row.reply_id ?? null)),
+  webinar_question_votes: (row, rows) => rows.some((other) => other.question_id === row.question_id && other.user_id === row.user_id),
   webinar_sessions: (row, rows) => row.kind === "replay" && rows.some((other) => other.webinar_id === row.webinar_id && other.kind === "replay")
 };
 
@@ -391,6 +394,8 @@ test("sem permissão: 403 em toda ação do roteiro e do console, sem tocar no b
     () => roomActions.closePoll({ pollId: randomUUID(), sessionId: SESSAO_NO_AR }),
     () => roomActions.answerQuestion({ answerText: "x", questionId: randomUUID() }),
     () => roomActions.setQuestionStatus({ questionId: randomUUID(), status: "dismissed" }),
+    () => roomActions.markQuestionSeen({ questionId: randomUUID() }),
+    () => roomActions.likeQuestionItem({ questionId: randomUUID(), target: "question" }),
     () => roomActions.saveSimulation({ sessionId: SESSAO_MARCADA, showLiveBadge: false }),
     () => roomActions.createReplaySession({ webinarId: WEBINAR }),
     () => roomActions.cancelReplaySession({ webinarId: WEBINAR }),
@@ -654,11 +659,13 @@ test("o Co-apresentador no chat (docs/31 V2-A12): quem e co-apresentador do webi
   assert.equal((await como(CO_DE_OUTRO, "De outro")).role, "team", "co-apresentador de outro webinario");
   assert.equal(ok(await roomActions.sendTeamMessage({ body: "Do Apresentador", sessionId: SESSAO_NO_AR })).message.role, "host");
 
-  // A resposta escrita a uma pergunta tambem vai com o papel de quem responde.
+  // A resposta escrita a uma pergunta tambem leva o papel de quem responde, agora em quem assina (rodada v9: a
+  // resposta nao entra mais no chat, docs/30 D85; o papel fica em answer_author, D88).
   actionStubs.role = { ...original, user: { ...original.user, id: CO, user_metadata: { full_name: "Rui Pereira" } } };
   try {
-    const resposta = ok(await roomActions.answerQuestion({ answerText: "Vai, fica 7 dias.", questionId: pergunta.id }));
-    assert.equal(resposta.message.role, "co_host");
+    const resposta = ok(await roomActions.answerQuestion({ answerText: "Vai, fica 7 dias.", author: { as: "self" }, questionId: pergunta.id }));
+    assert.equal(resposta.message, null, "nenhuma linha no chat");
+    assert.deepEqual(resposta.question.answerAuthor, { as: "self", name: "Rui P.", role: "co_host" });
   } finally {
     actionStubs.role = original;
   }
@@ -1089,7 +1096,7 @@ test("Na tela: fixar numa sessao encerrada e recusado (409) e desafixar continua
   assert.deepEqual(escritas(), ["update webinar_sessions"], "encerrar de novo nao muda a enquete, mas o carimbo sim");
 });
 
-test("perguntas: responder por escrito vira linha da equipe no chat e marca respondida; ao vivo so marca; sem nada, erro no campo; dispensar e reabrir", async () => {
+test("perguntas (rodada v9, P1 e P8): responder por escrito marca respondida e fica so na pergunta, nunca no chat; quem assina vai junto (Equipe sem a escolha, Meu nome, Outro nome); ao vivo so marca; sem nada, erro no campo; dispensar e reabrir", async () => {
   const pergunta = { ...DEFAULTS.webinar_questions, body: "Vai ter replay?", created_at: agora(), display_name: "Ana M.", id: randomUUID(), offset_ms: 2_000, session_id: SESSAO_NO_AR, updated_at: agora(), upvotes: 3, user_id: ALUNA };
   const outra = { ...pergunta, body: "E certificado?", id: randomUUID() };
   const db = usar(bancoEmMemoria(cenario({ webinar_questions: [pergunta, outra] })));
@@ -1099,10 +1106,33 @@ test("perguntas: responder por escrito vira linha da equipe no chat e marca resp
 
   const escrita = ok(await roomActions.answerQuestion({ answerText: "Vai, fica 7 dias.", questionId: pergunta.id }));
   assert.deepEqual([escrita.question.status, escrita.question.answerText, escrita.question.answeredBy, escrita.question.answeredLive], ["answered", "Vai, fica 7 dias.", HOST, false]);
-  assert.equal(escrita.message.kind, "answer");
-  assert.equal(escrita.message.source, "team");
-  assert.equal(escrita.message.role, "host");
-  assert.equal(db.tables.webinar_chat_messages.length, 1);
+  // P1 (decisao do produtor em 12/11/2026: "Chat e chat, pergunta e pergunta"): antes a resposta era gravada tambem
+  // como linha da equipe no chat (kind 'answer') e aparecia como comentario do Apresentador.
+  assert.equal(escrita.message, null, "a resposta nao volta mais como mensagem do chat");
+  assert.equal(db.tables.webinar_chat_messages.length, 0, "nada gravado no chat");
+  // P8: sem a escolha (a pagina aberta antes da troca), a resposta e assinada como Equipe, o que a sala sempre mostrou.
+  const gravada = db.tables.webinar_questions.find((row) => row.id === pergunta.id);
+  assert.deepEqual(gravada.answer_author, { as: "team", name: null, role: "host", v: 1 });
+  assert.deepEqual(escrita.question.answerAuthor, { as: "team", name: null, role: "host" });
+  const auditoria = db.tables.admin_audit_log.find((row) => row.action === "webinar.question_answered");
+  assert.deepEqual([auditoria.metadata.answered_as, "message_id" in auditoria.metadata, auditoria.metadata.written], ["team", false, true]);
+
+  // "Meu nome": o nome com que a pessoa escreve para a turma e o papel; "Outro nome": o nome escrito, limpo.
+  ok(await roomActions.setQuestionStatus({ questionId: pergunta.id, status: "open" }));
+  const comNome = ok(await roomActions.answerQuestion({ answerText: "Fica 7 dias.", author: { as: "self" }, questionId: pergunta.id }));
+  assert.deepEqual([comNome.question.answerAuthor.as, comNome.question.answerAuthor.role, typeof comNome.question.answerAuthor.name], ["self", "host", "string"]);
+  assert.ok(comNome.question.answerAuthor.name.length > 0);
+  ok(await roomActions.setQuestionStatus({ questionId: pergunta.id, status: "open" }));
+  const outroNome = ok(await roomActions.answerQuestion({ answerText: "Fica 7 dias.", author: { as: "custom", name: "  Equipe   Bunker 707 " }, questionId: pergunta.id }));
+  assert.deepEqual(outroNome.question.answerAuthor, { as: "custom", name: "Equipe Bunker 707", role: "host" });
+  assert.deepEqual(db.tables.webinar_questions.find((row) => row.id === pergunta.id).answer_author, { as: "custom", name: "Equipe Bunker 707", role: "host", v: 1 });
+  // "Outro nome" sem um nome valido (vazio, 1 letra, mais de 40): erro no campo, nada muda.
+  for (const name of ["", "A", "x".repeat(41)]) {
+    const recusada = await roomActions.answerQuestion({ answerText: "Outra", author: { as: "custom", name }, questionId: pergunta.id });
+    assert.equal(recusada.status, 400, JSON.stringify(name));
+  }
+  assert.equal(db.tables.webinar_questions.find((row) => row.id === pergunta.id).answer_text, "Fica 7 dias.");
+  assert.equal(db.tables.webinar_chat_messages.length, 0, "nenhuma das respostas foi para o chat");
 
   const aoVivo = ok(await roomActions.answerQuestion({ answeredLive: true, questionId: outra.id }));
   assert.deepEqual([aoVivo.question.status, aoVivo.question.answeredLive, aoVivo.message], ["answered", true, null]);
@@ -1145,26 +1175,210 @@ test("banco sem a 202611100001: responder e apagar no fio pela equipe voltam 409
 
   const resposta = await roomActions.replyToQuestion({ body: "E fica no Replay tambem.", questionId: pergunta.id });
   assert.deepEqual([resposta.ok, resposta.status], [false, 409]);
-  // A frase aponta a mais nova dos webinarios (WEBINARS_MIGRATION, hoje a 202611140002 dos participantes simulados): aplicar ate ela
+  // A frase aponta a mais nova dos webinarios (WEBINARS_MIGRATION, hoje a 202611170001 da rodada v11): aplicar ate ela
   // inclui a do fio.
-  assert.equal(resposta.error, "Esta parte precisa da atualização do banco (migração 202611140002).");
+  assert.equal(resposta.error, "Esta parte precisa da atualização do banco (migração 202611170001).");
   const apagar = await roomActions.deleteQuestionReply({ replyId: randomUUID() });
-  assert.deepEqual([apagar.ok, apagar.status, apagar.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611140002)."]);
+  assert.deepEqual([apagar.ok, apagar.status, apagar.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611170001)."]);
   assert.equal(db.tables.admin_audit_log.length, 0);
   assert.equal(db.tables.notifications.length, 0);
 });
 
-test("D31 na Live ao vivo: a mensagem da equipe e a resposta escrita nascem na linha mestre (o replay toca o chat da live); na Live gravada nao", async () => {
+test("Marcar como vista (rodada v10, D94): grava quando e quem viu o fio, nada mais muda na pergunta e nada vai ao chat, ao sino nem a auditoria; a apagada e a que nao existe, 404; banco sem a 202611160001, 409 com a frase dela", async () => {
+  const antes = new Date(Date.now() - 3 * MIN).toISOString();
+  const pergunta = { ...DEFAULTS.webinar_questions, answer_text: "Fica 7 dias.", answered_at: antes, answered_by: HOST, body: "Vai ter replay?", created_at: antes, display_name: "Ana M.", id: randomUUID(), offset_ms: 2_000, session_id: SESSAO_NO_AR, status: "answered", updated_at: antes, user_id: ALUNA };
+  const apagada = { ...pergunta, deleted_at: antes, id: randomUUID() };
+  const db = usar(bancoEmMemoria(cenario({ webinar_questions: [pergunta, apagada] })));
+
+  const inicio = Date.now();
+  const marcada = ok(await roomActions.markQuestionSeen({ questionId: pergunta.id }));
+  assert.equal(marcada.questionId, pergunta.id);
+  const linha = db.tables.webinar_questions.find((row) => row.id === pergunta.id);
+  assert.equal(linha.thread_seen_at, marcada.seenAt, "a hora do servidor");
+  assert.ok(Date.parse(linha.thread_seen_at) >= inicio && Date.parse(linha.thread_seen_at) <= Date.now());
+  assert.equal(linha.thread_seen_by, HOST, "quem marcou");
+  // A pergunta continua respondida, com a resposta e o autor de antes; nada vai ao chat nem ao sino.
+  assert.deepEqual([linha.status, linha.answer_text, linha.answered_at, linha.answered_by], ["answered", "Fica 7 dias.", antes, HOST]);
+  assert.equal(db.tables.webinar_chat_messages.length, 0);
+  assert.equal(db.tables.notifications.length, 0);
+  assert.ok(estado.revalidados.length > 0, "o console recarrega");
+
+  // Marcar de novo so atualiza a hora (o aluno escreveu outra vez e a equipe viu de novo).
+  const deNovo = ok(await roomActions.markQuestionSeen({ questionId: pergunta.id }));
+  assert.ok(Date.parse(deNovo.seenAt) >= Date.parse(marcada.seenAt));
+
+  // A apagada e a que nao existe: 404, sem gravar.
+  for (const questionId of [apagada.id, randomUUID()]) {
+    const result = await roomActions.markQuestionSeen({ questionId });
+    assert.deepEqual([result.ok, result.status], [false, 404], questionId);
+  }
+  assert.equal(db.tables.webinar_questions.find((row) => row.id === apagada.id).thread_seen_at, undefined);
+  const invalido = await roomActions.markQuestionSeen({ questionId: "nao-e-um-id" });
+  assert.equal(invalido.ok, false);
+
+  // O banco sem as colunas (o PostgREST responde PGRST204 ao update): 409 com a frase da migracao, e nada muda.
+  const semColunas = usar(bancoEmMemoria(cenario({ webinar_questions: [pergunta] })));
+  const from = semColunas.from;
+  semColunas.from = (table) => {
+    const query = from(table);
+    if (table !== "webinar_questions") {
+      return query;
+    }
+    const update = query.update;
+    query.update = (payload) => {
+      if (!("thread_seen_at" in payload)) {
+        return update(payload);
+      }
+      const falha = { data: null, error: { code: "PGRST204", message: "Could not find the 'thread_seen_at' column of 'webinar_questions' in the schema cache" } };
+      const self = new Proxy({}, { get: (_target, prop) => (prop === "then" ? (resolve, reject) => Promise.resolve(falha).then(resolve, reject) : () => self) });
+      return self;
+    };
+    return query;
+  };
+  const semMigracao = await roomActions.markQuestionSeen({ questionId: pergunta.id });
+  assert.deepEqual([semMigracao.ok, semMigracao.status, semMigracao.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611160001)."]);
+  assert.equal(semColunas.tables.webinar_questions[0].thread_seen_at, undefined);
+});
+
+test("Curtir pela equipe (rodada v11, D101): a pergunta alterna o voto de quem esta no console; a resposta escrita e a resposta do fio alternam a curtida; a pergunta sem resposta escrita, a resposta apagada ou de outra pergunta, 404; banco sem a 202611170001, 409 com a frase dela", async () => {
+  const antes = new Date(Date.now() - 3 * MIN).toISOString();
+  const pergunta = { ...DEFAULTS.webinar_questions, answer_text: "Fica 7 dias.", answered_at: antes, answered_by: HOST, body: "Vai ter replay?", created_at: antes, display_name: "Ana M.", id: randomUUID(), offset_ms: 2_000, session_id: SESSAO_NO_AR, status: "answered", updated_at: antes, upvotes: 0, user_id: ALUNA };
+  const aberta = { ...pergunta, answer_text: null, answered_at: null, answered_by: null, body: "E o material?", id: randomUUID(), status: "open" };
+  const resposta = { anonymous: false, body: "Obrigada!", created_at: antes, deleted_at: null, display_name: "Ana M.", id: randomUUID(), question_id: pergunta.id, role: "student", session_id: SESSAO_NO_AR, user_id: ALUNA };
+  const apagada = { ...resposta, deleted_at: antes, id: randomUUID() };
+  const deOutra = { ...resposta, id: randomUUID(), question_id: aberta.id };
+  const db = usar(bancoEmMemoria(cenario({ webinar_question_likes: [], webinar_question_replies: [resposta, apagada, deOutra], webinar_question_votes: [], webinar_questions: [pergunta, aberta] })));
+  const curtidas = () => db.tables.webinar_question_likes;
+
+  // A pergunta: o mesmo voto do aluno, com o total gravado na pergunta.
+  const votou = ok(await roomActions.likeQuestionItem({ questionId: pergunta.id, target: "question" }));
+  assert.deepEqual([votou.liked, votou.likes, votou.target, votou.replyId], [true, 1, "question", null]);
+  assert.deepEqual(db.tables.webinar_question_votes.map((row) => [row.question_id, row.user_id]), [[pergunta.id, HOST]]);
+  assert.equal(db.tables.webinar_questions.find((row) => row.id === pergunta.id).upvotes, 1);
+  const desvotou = ok(await roomActions.likeQuestionItem({ questionId: pergunta.id, target: "question" }));
+  assert.deepEqual([desvotou.liked, desvotou.likes], [false, 0]);
+  assert.equal(db.tables.webinar_question_votes.length, 0);
+  assert.equal(curtidas().length, 0, "o voto da pergunta nunca vira curtida de resposta");
+
+  // A resposta escrita: reply_id nulo, com a sessao na linha.
+  const curtiu = ok(await roomActions.likeQuestionItem({ questionId: pergunta.id, target: "answer" }));
+  assert.deepEqual([curtiu.liked, curtiu.likes, curtiu.replyId], [true, 1, null]);
+  assert.deepEqual(curtidas().map((row) => [row.question_id, row.reply_id ?? null, row.session_id, row.user_id]), [[pergunta.id, null, SESSAO_NO_AR, HOST]]);
+  // A resposta do fio: outra linha, sem mexer na da resposta escrita.
+  const noFio = ok(await roomActions.likeQuestionItem({ questionId: pergunta.id, replyId: resposta.id, target: "reply" }));
+  assert.deepEqual([noFio.liked, noFio.likes, noFio.replyId], [true, 1, resposta.id]);
+  assert.equal(curtidas().length, 2);
+  // De novo: tira so a do alvo tocado.
+  const tirou = ok(await roomActions.likeQuestionItem({ questionId: pergunta.id, target: "answer" }));
+  assert.deepEqual([tirou.liked, tirou.likes], [false, 0]);
+  assert.deepEqual(curtidas().map((row) => row.reply_id ?? null), [resposta.id]);
+  assert.ok(estado.revalidados.length > 0, "o console recarrega");
+  assert.equal(db.tables.webinar_chat_messages.length, 0, "nada vai ao chat");
+  assert.equal(db.tables.notifications.length, 0, "nem ao sino");
+
+  // O que nao existe para curtir: 404, sem gravar.
+  const total = curtidas().length;
+  for (const input of [
+    { questionId: aberta.id, target: "answer" },
+    { questionId: pergunta.id, replyId: apagada.id, target: "reply" },
+    { questionId: pergunta.id, replyId: deOutra.id, target: "reply" },
+    { questionId: pergunta.id, replyId: randomUUID(), target: "reply" },
+    { questionId: randomUUID(), target: "question" }
+  ]) {
+    const result = await roomActions.likeQuestionItem(input);
+    assert.deepEqual([result.ok, result.status], [false, 404], JSON.stringify(input));
+  }
+  assert.equal(curtidas().length, total);
+  // O pedido torto nem chega ao banco.
+  assert.equal((await roomActions.likeQuestionItem({ questionId: pergunta.id, target: "reply" })).ok, false);
+
+  // O banco sem a tabela (o PostgREST responde PGRST205): 409 com a frase da migracao; o voto da pergunta continua valendo.
+  const semTabela = usar(bancoEmMemoria(cenario({ webinar_question_replies: [resposta], webinar_question_votes: [], webinar_questions: [pergunta] })));
+  const from = semTabela.from;
+  semTabela.from = (table) => {
+    if (table !== "webinar_question_likes") {
+      return from(table);
+    }
+    const falha = { data: null, error: { code: "PGRST205", message: "Could not find the table 'public.webinar_question_likes' in the schema cache" } };
+    const self = new Proxy({}, { get: (_target, prop) => (prop === "then" ? (resolve, reject) => Promise.resolve(falha).then(resolve, reject) : () => self) });
+    return self;
+  };
+  for (const input of [{ questionId: pergunta.id, target: "answer" }, { questionId: pergunta.id, replyId: resposta.id, target: "reply" }]) {
+    const semMigracao = await roomActions.likeQuestionItem(input);
+    assert.deepEqual([semMigracao.ok, semMigracao.status, semMigracao.error], [false, 409, "Esta parte precisa da atualização do banco (migração 202611170001)."], input.target);
+  }
+  assert.equal(ok(await roomActions.likeQuestionItem({ questionId: pergunta.id, target: "question" })).liked, true);
+});
+
+test("a leitura das perguntas tolera o banco sem as colunas novas (D94): tenta a lista da v10, depois a da v9, depois a de sempre; a lista que falhou fica de fora por 1 min", async () => {
+  const chatStore = await import("../src/server/webinars/chat-store.ts");
+  const chatRows = await import("../src/server/webinars/chat-rows.ts");
+  const antes = new Date(Date.now() - 3 * MIN).toISOString();
+  const pergunta = { ...DEFAULTS.webinar_questions, answer_text: "Fica 7 dias.", answered_at: antes, answered_by: HOST, body: "Vai ter replay?", created_at: antes, display_name: "Ana M.", id: randomUUID(), offset_ms: 2_000, session_id: SESSAO_NO_AR, status: "answered", thread_seen_at: antes, updated_at: antes, user_id: ALUNA };
+
+  /** O banco em memoria que recusa (42703) o select com uma das colunas em `faltam`, e anota as listas pedidas. */
+  const banco = (faltam) => {
+    const db = bancoEmMemoria(cenario({ webinar_questions: [pergunta] }));
+    const from = db.from;
+    const pedidas = [];
+    db.from = (table) => {
+      const query = from(table);
+      if (table !== "webinar_questions") {
+        return query;
+      }
+      const select = query.select;
+      query.select = (columns, options) => {
+        pedidas.push(columns);
+        const falta = faltam.find((column) => String(columns).includes(column));
+        if (!falta) {
+          return select(columns, options);
+        }
+        const falha = { data: null, error: { code: "42703", message: `column webinar_questions.${falta} does not exist` } };
+        const self = new Proxy({}, { get: (_target, prop) => (prop === "then" ? (resolve, reject) => Promise.resolve(falha).then(resolve, reject) : () => self) });
+        return self;
+      };
+      return query;
+    };
+    return { db, pedidas };
+  };
+  const ler = (db) => chatStore.listQuestionRows(db, { order: "recent", sessionId: SESSAO_NO_AR });
+
+  // Com tudo aplicado: uma leitura so, com a lista mais nova, e a marca chega.
+  chatStore.clearV9ColumnsMemory();
+  const completo = banco([]);
+  const [linha] = await ler(completo.db);
+  assert.deepEqual(completo.pedidas, [chatRows.QUESTION_COLUMNS_V10]);
+  assert.equal(chatRows.questionFromRow(linha).threadSeenAt, antes);
+
+  // Sem a 202611160001: cai para a lista da v9 e as perguntas continuam chegando (so sem a marca de vista).
+  chatStore.clearV9ColumnsMemory();
+  const semV10 = banco(["thread_seen_at"]);
+  assert.equal((await ler(semV10.db)).length, 1);
+  assert.deepEqual(semV10.pedidas, [chatRows.QUESTION_COLUMNS_V10, chatRows.QUESTION_COLUMNS_V9]);
+  // Na leitura seguinte (a consulta de 5 s), a lista que falhou nem e tentada: nenhum erro por consulta.
+  assert.equal((await ler(semV10.db)).length, 1);
+  assert.deepEqual(semV10.pedidas.slice(2), [chatRows.QUESTION_COLUMNS_V9]);
+
+  // Sem a 202611150001 tambem: a lista de sempre.
+  chatStore.clearV9ColumnsMemory();
+  const semV9 = banco(["thread_seen_at", "answer_author"]);
+  assert.equal((await ler(semV9.db)).length, 1);
+  assert.deepEqual(semV9.pedidas, [chatRows.QUESTION_COLUMNS_V10, chatRows.QUESTION_COLUMNS_V9, chatRows.QUESTION_COLUMNS]);
+  chatStore.clearV9ColumnsMemory();
+});
+
+test("D31 na Live ao vivo: a mensagem da equipe nasce na linha mestre (o replay toca o chat da live); a resposta escrita nao e mais mensagem do chat (rodada v9, D85); na Live gravada nao", async () => {
   const SESSAO_LIVE = "bbbbbbbb-2222-4222-8222-444444444444";
   const noAr = new Date(Date.now() - 5 * MIN).toISOString();
   const live = { ...DEFAULTS.webinar_sessions, id: SESSAO_LIVE, kind: "live", recording_id: null, scheduled_at: noAr, started_at: noAr, status: "live", webinar_id: WEBINAR };
   const pergunta = { ...DEFAULTS.webinar_questions, body: "Vai ter replay?", created_at: agora(), display_name: "Ana M.", id: randomUUID(), offset_ms: 2_000, session_id: SESSAO_LIVE, updated_at: agora(), upvotes: 0, user_id: ALUNA };
-  usar(bancoEmMemoria(cenario({ webinar_questions: [pergunta], webinar_sessions: [...cenario().webinar_sessions, live] })));
+  const db = usar(bancoEmMemoria(cenario({ webinar_questions: [pergunta], webinar_sessions: [...cenario().webinar_sessions, live] })));
 
   const daEquipe = ok(await roomActions.sendTeamMessage({ body: "Bem-vindos!", sessionId: SESSAO_LIVE }));
   assert.equal(daEquipe.message.master, true, "a mensagem da equipe na live e da linha mestre");
   const resposta = ok(await roomActions.answerQuestion({ answerText: "Vai sim.", questionId: pergunta.id }));
-  assert.equal(resposta.message.master, true, "a resposta escrita na live tambem");
+  assert.equal(resposta.message, null, "a resposta escrita fica so na pergunta");
+  assert.equal(db.tables.webinar_chat_messages.filter((row) => row.kind === "answer").length, 0, "nenhuma linha de resposta no chat nem na linha mestre");
   const naGravada = ok(await roomActions.sendTeamMessage({ body: "Oi", sessionId: SESSAO_NO_AR }));
   assert.equal(naGravada.message.master, false, "na Live gravada so a equipe promove");
 });

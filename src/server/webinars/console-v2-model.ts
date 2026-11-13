@@ -34,13 +34,16 @@ export function consoleSessionOptionLabel(session: { kind: SessionKind; schedule
  * o pico mostrado e o maior dos dois: sem isso o selo poderia dizer "12 presentes · pico 10". Sem pico (o Replay, antes
  * de comecar ou sem a leitura), so "12 presentes". Com o contador simulado ligado (adendo de 10/11/2026, R7), a parte
  * simulada vem separada no fim, "· +300 simulados", para a equipe nunca confundir com o real (o aluno ve a soma); sem
- * ela (desligado, zero, sessao encerrada), nada a mais.
+ * ela (desligado, zero, sessao encerrada), nada a mais. Com a chave "Mostrar quantas pessoas estão na sala" desligada
+ * (`hiddenFromStudents`; docs/30 D102 e D107), o selo termina em "· só a equipe vê": quem apresenta sabe, sem abrir
+ * nada, que a turma nao esta vendo o numero.
  */
-export function consolePresenceBadge(input: { peak: number | null; presentNow: number; simulated?: number | null }): string {
+export function consolePresenceBadge(input: { hiddenFromStudents?: boolean; peak: number | null; presentNow: number; simulated?: number | null }): string {
   const present = Number.isFinite(input.presentNow) ? Math.max(0, Math.round(input.presentNow)) : 0;
   const simulated = typeof input.simulated === "number" && Number.isFinite(input.simulated) ? Math.round(input.simulated) : 0;
   const real = input.peak === null || !Number.isFinite(input.peak) ? copy.presentes(present) : copy.presentesComPico(present, Math.max(Math.round(input.peak), present));
-  return simulated > 0 ? `${real} · ${WEBINAR_COPY.simulacao.console.simulados(simulated)}` : real;
+  const counted = simulated > 0 ? `${real} · ${WEBINAR_COPY.simulacao.console.simulados(simulated)}` : real;
+  return input.hiddenFromStudents === true ? `${counted} · ${copy.numeroDePessoas.soEquipe}` : counted;
 }
 
 /** Os botoes de situacao do topo do console, na ordem em que aparecem. */
@@ -179,6 +182,24 @@ export function consoleStageBadgeFor(input: {
  */
 export function consoleColumnPolicy(role: ConsoleRoomRole): "engine" | "width" {
   return role === "host" ? "engine" : "width";
+}
+
+/**
+ * As miniaturas que o console quer no iframe agora (rodada v9, pedido do produtor de 12/11/2026; docs/30 D91), ou nulo
+ * quando ele nao mexe (o motor decide). `byWidth` e a conta da sala do aluno (columnWanted com a largura e o
+ * Esconder). O co-apresentador e a Equipe seguem essa conta, como o aluno. O Apresentador continua sem mandar nada
+ * pela largura (V2-A5); so a escolha dele vale, e so no Palco: com Esconder as miniaturas saem (o seguir a visao leva
+ * isso ao gravador, e a sala de cada aluno volta a escolha do aluno), e com Lateral elas voltam se ele as tinha
+ * escondido. Na Grade ele nao manda nada (a grade para todos fica como esta).
+ */
+export function consoleThumbsWanted(input: { byWidth: boolean; role: ConsoleRoomRole; thumbs: "hidden" | "side"; view: "grid" | "stage" }): boolean | null {
+  if (consoleColumnPolicy(input.role) === "width") {
+    return input.byWidth;
+  }
+  if (input.view !== "stage") {
+    return null;
+  }
+  return input.thumbs !== "hidden";
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -322,9 +343,11 @@ export function consoleRailFit(input: { available: number | null; count: number 
 
 /**
  * As entradas do ⋯ (V2-15), na ordem: Na tela na Live ao vivo e na gravada (nunca no Replay: la nada aparece na frente
- * da turma); Enquetes sempre; Roteiro no webinario gravado e na sessao da Live ao vivo (R8); Oferta fora da live; Atendimento sempre; Presença com a
- * leitura da presenca no retrato (nunca no Replay nem antes de comecar) ou, desde 11/11/2026 (docs/30 D79), com o
- * controle dos participantes simulados no retrato (`audience`: a gravada e a live, tambem na espera); Gravação so na live.
+ * da turma); Enquetes sempre; Roteiro no webinario gravado e na sessao da Live ao vivo (R8); Oferta fora da live; Atendimento sempre; Presença na
+ * sessao da live e da gravada, tambem antes de comecar (desde a rodada v12, docs/30 D107: la fica a chave "Mostrar
+ * quantas pessoas estão na sala", depois os participantes simulados, D79, e a leitura da presenca, quando existem), e
+ * no Replay so com a leitura da presenca no retrato; Gravação so na live. O `audience` continua aceito e nao muda mais
+ * a lista.
  */
 export function consoleMoreEntriesFor(input: { audience?: boolean; hasPresence: boolean; kind: SessionKind; webinarKind: WebinarKind }): ConsoleMoreEntry[] {
   const entries: ConsoleMoreEntry[] = input.kind === "replay" ? ["enquetes"] : ["tela", "enquetes"];
@@ -337,7 +360,9 @@ export function consoleMoreEntriesFor(input: { audience?: boolean; hasPresence: 
     entries.push("oferta");
   }
   entries.push("atendimento");
-  if (input.hasPresence || (input.audience === true && input.kind !== "replay")) {
+  // A Presença: sempre na sessao da live e da gravada, desde a rodada v12 (docs/30 D107): e onde fica a chave "Mostrar
+  // quantas pessoas estão na sala", que a equipe muda tambem antes de a sessao comecar. No Replay, so com a leitura.
+  if (input.kind !== "replay" || input.hasPresence) {
     entries.push("presenca");
   }
   if (input.kind === "live") {
@@ -347,13 +372,66 @@ export function consoleMoreEntriesFor(input: { audience?: boolean; hasPresence: 
 }
 
 /**
- * Os numeros das abas (V2-15 e V2-A37): "Perguntas 3" conta so as abertas (a fila que espera a equipe) e "Mãos 2" as
- * maos levantadas (a fila de handRows, o mesmo numero do circulo Mãos da barra). O Chat fica sem numero na aba (o
- * "{n} aguardando" vai no cabecalho dele) e Pessoas tambem.
+ * As maos que subiram desde a ultima leitura (rodada v11, docs/30 D99): os ids da fila de agora que nao estavam na de
+ * antes, na ordem da fila. O console avisa cada uma ("Ana M. levantou a mão."); a mao que so mudou de lugar (o Pular)
+ * ou que continua levantada nao avisa de novo.
  */
-export function consoleTabCounts(input: { hands: number; questions: readonly Pick<WebinarQuestion, "answeredAt" | "replies" | "status">[] }): { maos: number; perguntas: number } {
+export function newRaisedHands(previous: readonly string[], current: readonly string[]): string[] {
+  const before = new Set(previous);
+  return current.filter((id) => !before.has(id));
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O Chat do console com mensagens novas (rodada v12, docs/30 D106)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** O que a conta das mensagens novas le de cada mensagem do retrato. */
+export type ConsoleChatNewsMessage = { authorUserId: string | null; id: string; kind: string; source: string };
+
+/**
+ * A mensagem avisa quem esta no console (teste do produtor de 12/11/2026: "um usuário comenta no chat e o apresentador
+ * não recebe notificação no ícone de mensagem"): so a que uma pessoa escreveu agora, o aluno da turma (`audience`,
+ * tambem a que espera a equipe liberar no chat moderado) ou um colega da equipe (`team`). Nunca a de quem esta olhando,
+ * nem o que a propria equipe programou ou que so repete o passado (o roteiro, o chat original da gravacao), nem a
+ * resposta do assistente, nem a linha de sistema.
+ */
+export function consoleChatNotifies(message: ConsoleChatNewsMessage, viewerId: string | null): boolean {
+  if (message.kind === "system" || (message.source !== "audience" && message.source !== "team")) {
+    return false;
+  }
+  return message.authorUserId === null || message.authorUserId !== viewerId;
+}
+
+/** Os ids das mensagens do retrato: a marca do que ja estava no Chat quando ele saiu da tela. */
+export function consoleChatSeenIds(messages: readonly Pick<ConsoleChatNewsMessage, "id">[]): ReadonlySet<string> {
+  return new Set(messages.map(({ id }) => id));
+}
+
+/**
+ * Quantas mensagens novas o item Chat mostra: as que avisam (consoleChatNotifies) e nao estavam na marca. Com o Chat na
+ * tela (`seenIds` nulo: nada marcado), zero.
+ */
+export function consoleChatNewCount(input: { messages: readonly ConsoleChatNewsMessage[]; seenIds: ReadonlySet<string> | null; viewerId: string | null }): number {
+  const { seenIds } = input;
+  if (!seenIds) {
+    return 0;
+  }
+  return input.messages.filter((message) => !seenIds.has(message.id) && consoleChatNotifies(message, input.viewerId)).length;
+}
+
+/**
+ * Os numeros das abas (V2-15 e V2-A37): "Perguntas 3" conta so as abertas (a fila que espera a equipe) e "Mãos 2" as
+ * maos levantadas (a fila de handRows, o mesmo numero do circulo Mãos da barra). O Chat leva so as mensagens novas de
+ * outras pessoas enquanto ele nao esta na tela (consoleChatNewCount, D106; o "{n} aguardando" continua no cabecalho
+ * dele) e Pessoas fica sem numero.
+ */
+export function consoleTabCounts(input: {
+  hands: number;
+  questions: readonly (Pick<WebinarQuestion, "answeredAt" | "replies" | "status"> & Pick<Partial<WebinarQuestion>, "threadSeenAt">)[];
+}): { maos: number; perguntas: number } {
   const hands = Number.isFinite(input.hands) ? Math.max(0, Math.floor(input.hands)) : 0;
   // O numero das Perguntas: as abertas e as respondidas em que o aluno escreveu por ultimo no fio (o que pede a equipe).
+  // A que a equipe marcou como vista (docs/30 D94) sai da conta ate o aluno escrever de novo.
   return { maos: hands, perguntas: input.questions.filter((question) => question.status === "open" || questionAwaitsTeam(question)).length };
 }
 

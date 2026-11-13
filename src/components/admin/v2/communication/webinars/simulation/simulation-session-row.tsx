@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { formatSaoPauloDateTime } from "@/server/communications/campaign-model";
 import { consoleAckSentence } from "@/server/webinars/console-model";
 import { WEBINAR_ADMIN_COPY } from "@/server/webinars/editor-model";
-import type { WebinarSession } from "@/server/webinars/model";
+import type { SimulatedCountVary, WebinarSession } from "@/server/webinars/model";
 import { saveSimulation } from "@/server/webinars/room-actions";
 import { saveSessionSimulation, saveSimulatedAudience, type SessionSimulationView } from "@/server/webinars/simulation-actions";
 import type { SimulationAudienceView } from "@/server/webinars/simulation-audience-model";
@@ -28,10 +28,11 @@ import {
 import { SimulationRulesFields } from "./simulation-rules-fields";
 
 // Uma sessao gravada no card Simulacao (docs/30 §2.2, §4.3 e §8.6; D10): a data, o selo "Ao vivo", os tres blocos da
-// fase 4 (contador, entradas e saidas, avisos de venda; simulation-rules-fields.tsx), a frase de §8.6 do que vai ser
-// gravado com a caixa de confirmacao (so quando algo mudou), quem decidiu e quando, a frase gravada e o que a sessao
-// mostrou (congelado no fim). Salva tudo de uma vez por saveSessionSimulation (o servidor confere a frase e grava quem
-// e quando). Banco sem a 202610300003 ("v2"): so o selo, como na fase 2 (saveSimulation, a frase sem os numeros).
+// fase 4 (contador, entradas e saidas, avisos de venda; simulation-rules-fields.tsx), o Salvar direto quando algo
+// mudou (sem frase nem caixa desde 12/11/2026, decisao do produtor, docs/30 D86), quem decidiu e quando e o que a
+// sessao mostrou (congelado no fim). Salva tudo de uma vez por saveSessionSimulation (o servidor monta a frase da
+// decisao e grava quem e quando). Banco sem a 202610300003 ("v2"): so o selo, como na fase 2 (saveSimulation, que
+// ainda recebe a frase: o card a manda sem mostrar).
 // Enquanto o card le as regras ("loading"), nada muda. A sessao encerrada fica so para ler. A sessao da Live ao vivo
 // (adendo de 10/11/2026, R7): "Live de {quando}", sem o selo "Ao vivo" (a live ja e ao vivo; o servidor recusa), o minuto
 // do aviso contado da live, a frase da live e o "ja comecou" pelo started_at (na espera ainda muda); so no modo "v4".
@@ -112,7 +113,6 @@ export function SimulationSessionRow({
   session
 }: SimulationSessionRowProps) {
   const [form, setForm] = useState<SimulationForm>(() => initialForm ?? simulationFormOf(saved, session.showLiveBadge));
-  const [acknowledged, setAcknowledged] = useState(false);
   const ended = session.status === "ended";
   const v4 = mode === "v4";
   const live = session.kind === "live";
@@ -122,13 +122,9 @@ export function SimulationSessionRow({
   const changed = v4 ? simulationFormChanged(form, savedSimulationRules(saved, session.showLiveBadge)) : form.showLiveBadge !== session.showLiveBadge;
   const sentence = v4 ? simulationFormSentence(form, { live, nowMs: now, responsible }) : consoleAckSentence({ badgeOn: form.showLiveBadge, nowMs: now, responsible });
   const fieldsLocked = locked || ended || started || mode === "loading";
-  const checkboxId = `${idBase}-ack`;
   const summary = v4 ? simulationSummaryLine(saved?.summary ?? null) : null;
 
-  const edit = (next: SimulationForm) => {
-    setForm(next);
-    setAcknowledged(false);
-  };
+  const edit = (next: SimulationForm) => setForm(next);
 
   async function save() {
     if (!sentence) {
@@ -142,8 +138,6 @@ export function SimulationSessionRow({
         return;
       }
       const result = await saveSessionSimulation({
-        ackText: sentence,
-        acknowledged: true,
         countRule: rules.countRule,
         // A decisao que este formulario carregou: o servidor recusa se o console (ou outra aba) gravou outra depois.
         expectedDecidedAt: simulationExpectedDecidedAt(saved, session),
@@ -170,15 +164,16 @@ export function SimulationSessionRow({
   }
 
   /** O Aplicar e o Tirar do controle (D79), pelo card: a origem "editor"; a falha vai ao banner do card. */
-  async function applyAudience(input: { ackText: string | null; extra: number }): Promise<boolean> {
+  async function applyAudience(input: { extra: number; vary: SimulatedCountVary | null }): Promise<boolean> {
     onSaving(true);
-    const result = await saveSimulatedAudience({ ackText: input.ackText ?? undefined, acknowledged: input.ackText !== null, extra: input.extra, sessionId: session.id, source: "editor" });
+    // Com o "Variar sozinho" (rodada v9, docs/30 D90), o pedido leva a variacao junto do numero.
+    const result = await saveSimulatedAudience({ extra: input.extra, sessionId: session.id, source: "editor", vary: input.vary });
     onSaving(false);
     if (!result.ok) {
       onFailure({ message: firstFieldError(result.fieldErrors) ?? result.error, status: result.status });
       return false;
     }
-    onSaved({ audience: result.data.audience, deciderName: result.data.deciderName, notice: PLATEIA.aplicado(input.extra), session: result.data.session, simulation: null });
+    onSaved({ audience: result.data.audience, deciderName: result.data.deciderName, notice: input.vary && input.extra > 0 ? PLATEIA.variar.aplicado(input.extra, input.vary.percent) : PLATEIA.aplicado(input.extra), session: result.data.session, simulation: null });
     return true;
   }
 
@@ -201,12 +196,9 @@ export function SimulationSessionRow({
           busy={busy || locked}
           canPublish={canPublish}
           idBase={`${idBase}-plateia`}
-          live={live}
-          nowMs={now}
           offsetMs={simulationClockMs(session, now)}
           onApply={applyAudience}
           phase="on_air"
-          responsible={responsible}
         />
       ) : null}
       {live ? null : (
@@ -225,26 +217,9 @@ export function SimulationSessionRow({
       {started ? <p className="text-xs leading-5 text-[var(--text-secondary)]">{live ? COPY.liveComecou : COPY.sessaoComecou}</p> : null}
       {changed && !ended && !started ? (
         <div className="flex min-w-0 flex-col gap-3 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-2)] p-3" data-simulation-confirm="">
-          {sentence ? (
-            <p className="text-[13px] leading-5 text-[var(--text-primary)]" data-simulation-sentence="">
-              {sentence}
-            </p>
-          ) : (
-            <p className="text-[13px] leading-5 text-[var(--error)]">{parsed?.errors.form ?? COPY.corrijaOsCampos}</p>
-          )}
-          <label className="flex min-w-0 items-start gap-2 text-[13px] leading-5 text-[var(--text-primary)]" htmlFor={checkboxId}>
-            <input
-              checked={acknowledged}
-              className="mt-0.5 size-4 shrink-0 accent-[var(--text-primary)]"
-              disabled={locked || !sentence}
-              id={checkboxId}
-              onChange={(event) => setAcknowledged(event.target.checked)}
-              type="checkbox"
-            />
-            {v4 ? COPY.caixa : ADMIN.ackLabel}
-          </label>
+          {sentence ? null : <p className="text-[13px] leading-5 text-[var(--error)]">{parsed?.errors.form ?? COPY.corrijaOsCampos}</p>}
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <Button className="px-4" disabled={locked || !acknowledged || !sentence} onClick={() => void save()} type="button">
+            <Button className="px-4" disabled={locked || !sentence} onClick={() => void save()} type="button">
               {busy ? COPY.salvando : v4 ? COPY.salvar : ADMIN.confirm}
             </Button>
             <Button
@@ -256,14 +231,12 @@ export function SimulationSessionRow({
             >
               {COPY.descartar}
             </Button>
-            {!acknowledged && sentence ? <span className="text-xs leading-5 text-[var(--text-secondary)]">{COPY.marqueACaixa}</span> : null}
           </div>
         </div>
       ) : null}
       <p className={cn("text-xs leading-5", session.simulationDecidedAt ? "text-[var(--text-secondary)]" : "text-[var(--text-tertiary)]")} data-simulation-decision="">
         {session.simulationDecidedAt && deciderName ? ADMIN.decidedBy(deciderName, formatSaoPauloDateTime(session.simulationDecidedAt)) : live ? ADMIN.undecidedLive : ADMIN.undecided}
       </p>
-      {session.simulationAckText ? <p className="text-xs leading-5 text-[var(--text-tertiary)]">{session.simulationAckText}</p> : null}
       {summary ? (
         <p className="text-xs leading-5 text-[var(--text-secondary)]" data-simulation-summary="">
           {summary}

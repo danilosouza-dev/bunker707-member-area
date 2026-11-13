@@ -9,6 +9,15 @@
 export type RoomTheme = "dark" | "light";
 /** A visao do video que o aluno escolheu: Palco (o padrao) ou Grade (por comando, docs/31 V2-16). */
 export type RoomView = "grid" | "stage";
+/**
+ * Onde as miniaturas das cameras ficam (rodada v9, pedido do produtor de 12/11/2026; docs/30 D91): Lateral (a coluna
+ * ao lado do video, o padrao) ou Esconder. As duas trocam na hora, por comando, sem recarregar o video. A opcao
+ * Embaixo saiu na rodada v12 (docs/30 D105): o motor so troca coluna por fileira montando o video de novo, e o
+ * produtor nao quer o aluno correndo o risco de reconectar.
+ */
+export type RoomThumbs = "hidden" | "side";
+/** Na ordem do menu. */
+export const ROOM_THUMBS: readonly RoomThumbs[] = ["side", "hidden"];
 /** As enquetes da sessao que o aluno deixou para depois (`later`) e os resultados que ele ja viu no palco (`seen`). */
 export type DeferredPolls = { later: string[]; seen: string[] };
 
@@ -16,6 +25,8 @@ export const ROOM_THEME_KEY = "bunker707:webinar-sala-tema";
 export const ROOM_PANEL_KEY = "bunker707:webinar-sala-painel";
 export const ROOM_VIEW_KEY = "bunker707:webinar-sala-visao";
 export const ROOM_POLLS_KEY = "bunker707:webinar-sala-enquetes";
+export const ROOM_THUMBS_KEY = "bunker707:webinar-sala-miniaturas";
+export const CONSOLE_THUMBS_KEY = "bunker707:webinar-console-miniaturas";
 export const CONSOLE_THEME_KEY = "bunker707:webinar-console-tema";
 export const CONSOLE_PANEL_KEY = "bunker707:webinar-console-painel";
 
@@ -39,6 +50,14 @@ export function storedPanelOpen(value: string | null | undefined): boolean {
 /** A visao guardada: Grade so com "grid"; o resto e o Palco. */
 export function storedRoomView(value: string | null | undefined): RoomView {
   return value === "grid" ? "grid" : "stage";
+}
+
+/**
+ * As miniaturas guardadas (a sala e o console, cada um na sua chave): Esconder pelo nome; o resto e a Lateral, inclusive
+ * o "bottom" que o navegador de quem escolheu Embaixo antes da rodada v12 ainda guarda (docs/30 D105).
+ */
+export function storedRoomThumbs(value: string | null | undefined): RoomThumbs {
+  return value === "hidden" ? "hidden" : "side";
 }
 
 function idsOf(value: unknown): string[] {

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { StudentChatMessage } from "@/server/webinars/model";
+import type { StudentScreenComment } from "@/server/webinars/screen-comment-model";
 import type { ScreenEventForm, StudentScreenItem, StudentScreenState } from "@/server/webinars/screen-model";
 import { beaconScreenEvents, postScreenEvents } from "../room-api";
 import {
@@ -40,6 +41,8 @@ export type { ScreenEvent };
 export type RoomScreen = {
   /** Fecha o banner ou o QR Code para este aluno (so os que podem ser fechados). */
   closeItem: (displayId: string) => void;
+  /** O comentario ou a pergunta que a equipe trouxe para a tela (rodada v9, docs/30 D89); nulo sem nada. */
+  comment: StudentScreenComment | null;
   /** O carimbo que a sala tem (vai na consulta de 5 s do chat). */
   getStamp: () => string | null;
   /** O banner e o QR Code que continuam na tela para este aluno. */
@@ -132,6 +135,7 @@ export function useRoomScreen(input: { sessionId: string; sessionPinned: Student
 
   return {
     closeItem,
+    comment: state?.comment ?? null,
     getStamp,
     items,
     onChatScreen,

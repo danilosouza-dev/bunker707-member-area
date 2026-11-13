@@ -27,11 +27,13 @@ const replyField = semComentarios(readFileSync(path.join(root, "src/components/m
 test("o painel do chat e o palco da live saem das regras puras: o takeover do celular so abaixo de lg, o painel por roomPanelShown e o esqueleto por liveSkeletonState", () => {
   assert.match(room, /const settingsTakeover = settingsShown && !desktop;/, "Configurações toma o lugar do chat so no celular");
   assert.match(room, /const panelShown = roomPanelShown\(\{ barShown, panelOpen, settingsTakeover \}\);/);
-  assert.match(room, /const skeletonState = liveSkeletonState\(\{ blocked, cinema: cinemaOn, panelShown, settingsTakeover \}\);\s*const skeleton = roomSkeleton\("normal", skeletonState\);/, "o minimo de 96 px na caixa do palco");
+  // Rodada v9 (P12): o esqueleto segue o painel que ainda ocupa lugar (panelMotion.laid): fechando, o palco so cresce no fim da saida.
+  assert.match(room, /const panelMotion = usePanelMotion\(panelShown\);\s*const skeletonState = liveSkeletonState\(\{ blocked, cinema: cinemaOn, panelShown: panelMotion\.laid, settingsTakeover \}\);\s*const skeleton = roomSkeleton\("normal", skeletonState\);/, "o minimo de 96 px na caixa do palco");
   assert.doesNotMatch(room, /min-h-24/, "o minimo do palco fica so no esqueleto (a caixa), nunca no palco dentro dela");
   // As pilulas do chat (V2-8) pela regra pura: fora do palco pequeno (Configurações no celular) e da frase de removido.
   // As pilulas do chat pela regra pura; com um item da Na tela embaixo, so no palco estreito (RoomWideHidden, so CSS).
-  assert.match(room, /chatPillsShown\(\{ blocked, design: "normal", offerShown: false, panelShown, settingsTakeover \}\) \? \(\s*<RoomWideHidden hidden=\{!placement\.chatPills\}>\s*<RoomChatPills kind="live" messages=\{overlayMessages\(translation\.messages\)\} \/>/);
+  // Rodada v9 (docs/30 D89): com o comentario ou a pergunta na tela, as pilulas tambem saem do palco largo.
+  assert.match(room, /chatPillsShown\(\{ blocked, design: "normal", offerShown: false, panelShown, settingsTakeover \}\) \? \(\s*<RoomWideHidden hidden=\{!placement\.chatPills \|\| screenComment !== null\}>\s*<RoomChatPills kind="live" messages=\{overlayMessages\(translation\.messages\)\} \/>/);
   assert.doesNotMatch(room, /LiveChatOverlay/, "o chat por cima do palco so no celular saiu");
 });
 
@@ -46,7 +48,8 @@ test("o balao com Configurações aberto no celular: fecha Configurações e mos
     ["webinar-room", recorded]
   ]) {
     assert.match(fonte, /function onRail\(item: RoomPanelTab\) \{\s*const step = railStep\(\{ closable: barShown, item, panelShown, tab \}\);\s*setTab\(step\.tab\);\s*setPanelOpen\(step\.panelOpen\);/, nome);
-    assert.match(fonte, /<RoomRail kind=\{?[^ ]+ onItem=\{onRail\} panelShown=\{panelShown\} pollOpen=\{openPolls\.length > 0\} tab=\{tab\} tabs=\{tabs\} unread=\{unread\} \/>/, nome);
+    // O trilho leva tambem as respostas novas das perguntas do aluno (rodada v11, docs/30 D100).
+    assert.match(fonte, /<RoomRail kind=\{?[^ ]+ onItem=\{onRail\} panelShown=\{panelShown\} pollOpen=\{openPolls\.length > 0\} questionsNew=\{questionNews\.count\} tab=\{tab\} tabs=\{tabs\} unread=\{unread\} \/>/, nome);
     // O X devolve o foco ao item do trilho da aba que estava aberta.
     assert.match(fonte, /returnFocusFromPanel\(rootRef\.current, document\.activeElement, document\.getElementById\(ROOM_PANEL_ID\), tab\);/, nome);
   }
@@ -84,11 +87,14 @@ test("a gravada: Participantes com quem apresenta e o numero do selo do palco (d
   // D79 (11/11/2026): no "ver como", a aba diz que a simulacao nao aparece na previa (o numero ali e so o real).
   assert.match(
     recorded,
-    /<LiveParticipantsTab note=\{readOnly && kind === "simulated" \? WEBINAR_COPY\.simulacao\.plateia\.previa : null\} presenterKnown=\{[^}]+\} stage=\{panelStageNames\(presenterName\)\} students=\{momentBadge\.showCount \? shownCount : null\} \/>/,
+    /<LiveParticipantsTab note=\{readOnly && kind === "simulated" \? WEBINAR_COPY\.simulacao\.plateia\.previa : null\} presenterKnown=\{[^}]+\} stage=\{panelStageNames\(presenterName\)\} students=\{presentShown\} \/>/,
     "o mesmo numero do selo do palco, pela mesma condicao"
   );
   // O numero de quem assiste: no palco, ao lado do selo do momento (roomPresentBadge), e fora do cabecalho nas duas salas.
-  assert.match(recorded, /const presentBadge = roomPresentBadge\(momentBadge\.showCount \? shownCount : null\);/, "a gravada: o selo do palco");
+  // Um numero so para o selo, a aba e o titulo dela; nulo quando o momento nao mostra ou a equipe escondeu (docs/30 D102).
+  assert.match(recorded, /const presentShown = momentBadge\.showCount && !presentHidden \? shownCount : null;\s*const presentBadge = roomPresentBadge\(presentShown\);/, "a gravada: o selo do palco");
+  // Escondido pelo ultimo sinal de 15 s (a chave muda pelo console com a sessao no ar, D107) ou, antes dele, pela sessao.
+  assert.match(recorded, /const presentHidden = heartbeatHidden \?\? session\.presentHidden === true;/);
   assert.match(recorded, /<RoomStageBadges[\s\S]*?present=\{presentBadge\}/);
   assert.match(
     room,
@@ -96,7 +102,7 @@ test("a gravada: Participantes com quem apresenta e o numero do selo do palco (d
     "a live: o numero do selo do palco, que some com a live encerrada (no ver como, a frase da previa sem a simulacao, D79)"
   );
   // Com a Simulacao na live (adendo de 10/11/2026, R7): o real mais a parte simulada, como na gravada.
-  assert.match(room, /const presentShown = phase === "ended" \? null : simulation\.displayCount\(presentNow, simulationOffsetMs\);\s*const presentBadge = roomPresentBadge\(presentShown\);/);
+  assert.match(room, /const presentHidden = heartbeatHidden \?\? session\.presentHidden === true;\s*const presentShown = phase === "ended" \|\| presentHidden \? null : simulation\.displayCount\(presentNow, simulationOffsetMs\);\s*const presentBadge = roomPresentBadge\(presentShown\);/);
   assert.match(room, /<RoomStageBadges[\s\S]*?present=\{presentBadge\}/);
   for (const [nome, fonte] of [
     ["live-room", room],
@@ -117,7 +123,7 @@ test("a gravada: Participantes com quem apresenta e o numero do selo do palco (d
   assert.match(recorded, /assistantOn=\{stageAssistantShown\(\{ assistantEnabled: assistant\.state\.enabled, bottomBadges, offerShown \}\)\}\s*assistantWideHidden=\{!placement\.assistant\}/);
   assert.match(
     recorded,
-    /chatPillsShown\(\{ blocked: unavailable, design, offerShown, panelShown, settingsTakeover: false \}\) \? \(\s*<RoomWideHidden hidden=\{!placement\.chatPills\}>\s*<RoomChatPills kind=\{kind\} messages=\{overlayMessages\(translation\.messages\)\} \/>/,
+    /chatPillsShown\(\{ blocked: unavailable, design, offerShown, panelShown, settingsTakeover: false \}\) \? \(\s*<RoomWideHidden hidden=\{!placement\.chatPills \|\| screenComment !== null\}>\s*<RoomChatPills kind=\{kind\} messages=\{overlayMessages\(translation\.messages\)\} \/>/,
     "no Replay acima da barra da Bunny e com o nome Chat da live"
   );
 });
@@ -139,7 +145,8 @@ test("a correcao final da fase 1: as duas salas ligadas as regras puras do Esc, 
     assert.match(fonte, /rememberLeaveOpener\(\);\s*setConfirmLeave\(true\);/, nome);
     // A janela no centro (RoomLeaveDialog): o Voltar fecha, o Sair sai, e o Tab fica preso nela enquanto esta aberta.
     assert.match(fonte, /\{confirmLeave \? <RoomLeaveDialog onCancel=\{\(\) => setConfirmLeave\(false\)\} onLeave=\{leave\} \/> : null\}/, nome);
-    assert.match(fonte, /trapRoomFocus\(event, confirmLeave \? \(rootRef\.current\?\.querySelector<HTMLElement>\("\[data-room-confirm\]"\) \?\? rootRef\.current\) : rootRef\.current\);/, nome);
+    // Na live, a janela de live encerrada (docs/30 D104) tambem prende o Tab.
+    assert.match(fonte, /trapRoomFocus\(event, confirmLeave(?: \|\| endedNotice)? \? \(rootRef\.current\?\.querySelector<HTMLElement>\("\[data-room-confirm\]"\) \?\? rootRef\.current\) : rootRef\.current\);/, nome);
   }
   // O chat reaberto vai ao fim (chatListOnShow) nas duas salas; a gaveta do vertical monta de novo a cada abertura.
   assert.match(room, /shown=\{panelShown\}/);
@@ -155,7 +162,7 @@ test("a gravada: a capa Ativar som pela regra pura e a tela cheia da caixa do pa
 
 test("a live: o selo do apresentador, a coluna so dentro do iframe, o Microfone ligado e o pedido do microfone pelas regras puras", () => {
   assert.match(room, /presenterName=\{phase === "live" \? presenterBadgeFor\(\{ joined, presenterName, signals: room\.signals \}\) : null\}/);
-  assert.match(room, /stageColumnShown\(room\.signals, joined\)/);
+  assert.match(room, /stageColumnShown\(room\.signals, joined, room\.thumbsRow\)/);
   // Com o microfone sozinho (docs/31 caminho A), o Microfone fica tambem sem o Liberar.
   assert.match(room, /const micShown = barShown && ourBar && \(room\.signals\.micAllowed \|\| room\.signals\.audioOn \|\| live\.selfUnmute === true\);/, "o mesmo criterio de liveBarItems");
   // O onEvent: o iframe novo volta ao padrao do motor no primeiro sinal; o video grande pelo id lido do IFrame API; o
@@ -196,7 +203,7 @@ test("a Na tela nas duas salas pelas regras puras (especificacao de 10/11/2026, 
   assert.match(recorded, /const placement = screenPlacement\(\{ items: screenForced \|\| vertical \? \[\] : screenItems, offerShown, pinnedPills: !screenForced && pinnedPillsOn \}\);/, "a Oferta no palco empurra o item de baixo a direita");
   assert.match(recorded, /useRoomScreenEvents\(\{ enabled: !readOnly && pinnedOn, pollOver: stagePoll !== null, sessionId, webinarId \}\)/);
   assert.match(recorded, /topLeftExtra=\{<RoomSimulationSales layout="cell"/, "o aviso de venda na celula de cima a esquerda da camada");
-  assert.match(recorded, /screen=\{vertical && pinnedOn \? <RoomScreenDock handlers=\{screenHandlers\} items=\{screenItems\} \/> : null\}/, "a doca do vertical");
+  assert.match(recorded, /screen=\{vertical && pinnedOn \? <RoomScreenDock comment=\{screenComment\} handlers=\{screenHandlers\} items=\{screenItems\} \/> : null\}/, "a doca do vertical");
   // Na Tela cheia de verdade o painel fica fora do palco: a pilula, a linha e o Ver da fixada saem dela antes (A3).
   assert.match(recorded, /function showPinned\(target: PinnedFocusTarget\) \{\s*leaveStageFullscreen\(document, stageBoxRef\.current\);\s*if \(target === "message"\)/);
   assert.match(room, /function showPinned\(target: PinnedFocusTarget\) \{\s*leaveStageFullscreen\(document, stageRef\.current\);\s*if \(target === "message"\)/);

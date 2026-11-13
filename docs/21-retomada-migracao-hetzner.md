@@ -1063,6 +1063,152 @@ gravada à parte depois da renumeração e conferida.
 
 **Produção (Hetzner)**: nada manual, como na §9.13: o `deploy-membros` roda o `migrate.sh` antes de recriar o app.
 
+### 9.16 Rodada v9 dos webinários: migração `202611150001` antes do merge (12/11/2026)
+
+O link do banner, quem assina a resposta de uma pergunta e o comentário ou a pergunta na tela (`docs/30` D87 a D89, §4.1
+e §4.2; `docs/31` §14) têm uma migração só, que vem **depois** da `202611140002` (§9.15) e não muda as de antes (a guarda
+`tests/webinarios-v9.guard.test.mjs` prende o hash acumulado das 73 anteriores e o do arquivo novo). O **Variar
+sozinho** dos participantes simulados (D90) e as miniaturas (D91) não têm migração.
+
+| Ordem | Arquivo | O que faz | Seções | Nome em `schema_migrations` |
+|---|---|---|---|---|
+| 1 | `202611150001_webinars_v9.sql` | `webinar_screen_items.link_target` (o que abre o link do banner; padrão `both`); `webinar_questions.answer_author` e `webinar_question_replies.author_as` (quem assina a resposta); cria `webinar_screen_comments` (o comentário ou a pergunta na tela, só a referência, um ativo por sessão), com dois índices, RLS e só o `service_role`. Os três checks das tabelas que já existem entram `not valid` e são validados na última seção | 4: o banner; as perguntas; a tabela nova; a validação dos checks | `webinars_v9` |
+
+**Antes do merge na `dev`**: sem a migração o app novo continua de pé. As três colunas ficam fora das listas que o app
+sempre lê; ele as lê à parte e, sem elas, cai de volta na lista de sempre (com memória de 60 s). O banner abre pelo botão
+como antes, a resposta aparece como **Equipe** e nada vai para a tela. Só escolher **O que abre o link**, **Responder
+como** com outra opção que não a de sempre e **Mostrar na tela** voltam 409 com o aviso da migração `202611150001`,
+antes de gravar qualquer coisa. Ela é a mais nova dos webinários, então `WEBINARS_MIGRATION` passa a apontá-la (e
+`WEBINARS_V9_MIGRATION`). A migração sozinha não atrapalha o app de antes: as colunas têm padrão ou são nulas, e a
+tabela é nova.
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: o arquivo inteiro colado no SQL Editor (é idempotente, sem `drop`), ou
+pelo `apply_migration` do MCP do Supabase. Depois, gravar a versão:
+
+```sql
+insert into supabase_migrations.schema_migrations (version, name) values ('202611150001', 'webinars_v9') on conflict (version) do nothing;
+```
+
+Conferência depois de aplicar (uma linha só; a do cabeçalho da migração). O resultado esperado é `9`:
+
+```sql
+select (select count(*) from information_schema.columns where table_schema = 'public' and (table_name, column_name) in (('webinar_screen_items', 'link_target'), ('webinar_questions', 'answer_author'), ('webinar_question_replies', 'author_as'))) + (select count(*) from information_schema.tables where table_schema = 'public' and table_name = 'webinar_screen_comments') + (select count(*) from pg_constraint where conname in ('webinar_screen_items_link_target_v9', 'webinar_questions_answer_author_v9', 'webinar_question_replies_author_as_v9') and convalidated) + (select count(*) from pg_indexes where schemaname = 'public' and indexname in ('webinar_screen_comments_active_idx', 'webinar_screen_comments_session_idx')) as total; -- 9
+```
+
+Estado em 12/11/2026: escrita e aplicada só no Supabase local, onde a integração `tests/integration/webinarios-v9.test.mjs`
+roda contra ela (rodou em 12/11/2026; a conferência deu `9`). **Na nuvem de teste, aplicada em 12/11/2026** pelo
+produtor, no SQL Editor, com o `insert` da versão, antes do merge da PR #176 na `dev`: a conferência deu `9`.
+
+**Produção (Hetzner)**: nada manual, como na §9.13: o `deploy-membros` roda o `migrate.sh` antes de recriar o app.
+
+**O servidor de vídeo**: a folha `infra/jitsi/web/bunker707.css` mudou nesta rodada (a mão levantada e os pontos do nível
+de áudio, `docs/31` §14.8) e o ajuste do ⋯ de 10/11/2026 ainda não tinha chegado ao servidor. Ela só chega pela etapa
+`deploy-meet` (`.github/workflows/infra.yml`), com `SEM_LIVE_2H=sim` e o ok do produtor no chat (`docs/20`). A etapa
+rodou em 12/11/2026 (§9.18).
+
+### 9.17 Rodada v10 dos webinários: migração `202611160001` antes do merge (12/11/2026)
+
+O **Marcar como vista** das Perguntas do console (`docs/30` D94, §4.1 e §4.2; `docs/31` §15.2) tem uma migração só, que
+vem **depois** da `202611150001` (§9.16) e não muda as de antes (a guarda `tests/webinarios-v10.guard.test.mjs` prende o
+hash acumulado das 74 anteriores e o do arquivo novo). O resto da rodada (o painel do console, o **Responder** no fim do
+fio, os avisos do motor, **Embaixo** valendo na hora e a live encerrada sem o diálogo do motor; D92, D93, D95 a D97) não
+tem migração.
+
+| Ordem | Arquivo | O que faz | Seções | Nome em `schema_migrations` |
+|---|---|---|---|---|
+| 1 | `202611160001_webinars_v10.sql` | `webinar_questions.thread_seen_at` (quando a equipe marcou o fio como visto) e `thread_seen_by` (quem marcou; chave para `auth.users`, `on delete set null`). As duas nulas por padrão, sem check e sem índice | 1 | `webinars_v10` |
+
+**Antes do merge na `dev`**: sem a migração o app novo continua de pé. A coluna fica fora das listas que o app sempre lê;
+ele a lê à parte e, sem ela, cai para a lista da v9 e depois para a de sempre (com memória de 60 s). As perguntas
+continuam chegando ao console e à sala; só o **Marcar como vista** volta 409 com o aviso da migração `202611160001`,
+antes de gravar qualquer coisa. Ela é a mais nova dos webinários, então `WEBINARS_MIGRATION` passa a apontá-la (e
+`WEBINARS_V10_MIGRATION`). A migração sozinha não atrapalha o app de antes: as duas colunas são nulas.
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: o arquivo inteiro colado no SQL Editor (é idempotente, sem `drop`), ou
+pelo `apply_migration` do MCP do Supabase. Depois, gravar a versão:
+
+```sql
+insert into supabase_migrations.schema_migrations (version, name) values ('202611160001', 'webinars_v10') on conflict (version) do nothing;
+```
+
+Conferência depois de aplicar (uma linha só; a do cabeçalho da migração). O resultado esperado é `2`:
+
+```sql
+select count(*) as total from information_schema.columns where table_schema = 'public' and table_name = 'webinar_questions' and column_name in ('thread_seen_at', 'thread_seen_by'); -- 2
+```
+
+Estado em 12/11/2026: escrita e aplicada só no Supabase local (duas vezes seguidas, sem erro), onde a integração
+`tests/integration/webinarios-v10.test.mjs` roda contra ela (rodou em 12/11/2026; a conferência deu `2`). **Na nuvem de
+teste, aplicada em 12/11/2026** pelo produtor, no SQL Editor, com o `insert` da versão, antes do merge da PR #177 na
+`dev`: a conferência deu `2`.
+
+**Produção (Hetzner)**: nada manual, como na §9.13: o `deploy-membros` roda o `migrate.sh` antes de recriar o app.
+
+**O servidor de vídeo**: a folha `infra/jitsi/web/bunker707.css` mudou de novo nesta rodada (os avisos e os diálogos do
+motor no visual da área, `docs/31` §15.5), e as mudanças da rodada v9 e de 10/11/2026 também ainda não chegaram ao
+servidor. Tudo chega junto pela etapa `deploy-meet` (`.github/workflows/infra.yml`), com `SEM_LIVE_2H=sim` e o ok do
+produtor no chat (`docs/20`). O que saiu pela configuração do iframe (o aviso da mão levantada e o selo do motor no
+console, o diálogo da live encerrada) vale no merge, sem essa etapa. A etapa rodou em 12/11/2026 (§9.18).
+
+### 9.18 Rodada v11 dos webinários: migração `202611170001` antes do merge (12/11/2026)
+
+As curtidas da resposta e do fio de uma pergunta (`docs/30` D101, §4.1 e §4.2; `docs/31` §16.3) têm uma migração só, que
+vem **depois** da `202611160001` (§9.17) e não muda as de antes (a guarda `tests/webinarios-v11.guard.test.mjs` prende o
+hash acumulado das 75 anteriores e o do arquivo novo). O resto da rodada (a troca das miniaturas sem duplicar a pessoa,
+a mão levantada no palco do console, o aviso de resposta nova e a opção de esconder o número de pessoas; D98 a D100,
+D102 e D103) não tem migração: a opção fica em `webinars.room_settings`.
+
+| Ordem | Arquivo | O que faz | Seções | Nome em `schema_migrations` |
+|---|---|---|---|---|
+| 1 | `202611170001_webinars_v11.sql` | cria `webinar_question_likes` (a curtida da resposta escrita, com `reply_id` nulo, e de cada resposta do fio), com dois índices únicos parciais (uma curtida por pessoa em cada alvo), um índice por sessão, RLS e só o `service_role` | 1 | `webinars_v11` |
+
+**Antes do merge na `dev`**: sem a migração o app novo continua de pé. A leitura das curtidas devolve vazio, e a sala e o
+console mostram as perguntas como antes, com os polegares em zero. Só curtir a resposta ou uma resposta do fio volta 409
+com o aviso da migração `202611170001`, antes de gravar qualquer coisa; curtir a pergunta continua valendo, porque usa
+a tabela de sempre. Ela é a mais nova dos webinários, então `WEBINARS_MIGRATION` passa a apontá-la (e
+`QUESTION_LIKES_MIGRATION`). A migração sozinha não atrapalha o app de antes: é só uma tabela nova.
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: o arquivo inteiro colado no SQL Editor (é idempotente, sem `drop`), ou
+pelo `apply_migration` do MCP do Supabase. Depois, gravar a versão:
+
+```sql
+insert into supabase_migrations.schema_migrations (version, name) values ('202611170001', 'webinars_v11') on conflict (version) do nothing;
+```
+
+Conferência depois de aplicar (uma linha só; a do cabeçalho da migração). O resultado esperado é `4`:
+
+```sql
+select (select count(*) from information_schema.tables where table_schema = 'public' and table_name = 'webinar_question_likes') + (select count(*) from pg_indexes where schemaname = 'public' and indexname in ('webinar_question_likes_answer_idx', 'webinar_question_likes_reply_idx', 'webinar_question_likes_session_idx')) as total; -- 4
+```
+
+Estado em 12/11/2026: escrita e aplicada só no Supabase local (duas vezes seguidas, sem erro), onde a integração
+`tests/integration/webinarios-v11.test.mjs` roda contra ela (rodou em 12/11/2026; a conferência deu `4`). **Na nuvem de
+teste, aplicada em 12/11/2026** pelo produtor, no SQL Editor, com o `insert` da versão, antes do merge da PR #178 na
+`dev`: a conferência deu `4`.
+
+**Produção (Hetzner)**: nada manual, como na §9.13: o `deploy-membros` roda o `migrate.sh` antes de recriar o app.
+
+**O servidor de vídeo**: a folha `infra/jitsi/web/bunker707.css` não mudou nesta rodada. A das rodadas v9 e v10 e a de
+10/11/2026 **chegaram ao servidor em 12/11/2026**: a etapa `deploy-meet` (`.github/workflows/infra.yml`) rodou da `dev`
+(commit `715a482`, execução 124 do fluxo de infra), com `SEM_LIVE_2H=sim` e o ok do produtor no chat (`docs/20`), e
+terminou com sucesso. O visual novo dos cartões e dos diálogos do motor no ar não foi conferido com o motor de verdade
+por quem fez a rodada: fica com o teste do produtor na `dev`. Uma mudança nova na folha pede outro `deploy-meet`, com
+outro ok do produtor.
+
+### 9.19 Rodada v12 dos webinários: sem migração (12/11/2026)
+
+A rodada v12 (`docs/30` D105 a D107; `docs/31` §17) não tem migração e não muda a folha do servidor de vídeo:
+
+- as miniaturas sem o **Embaixo** (D105) são só código da página;
+- o número de mensagens novas no **Chat** do console (D106) sai do retrato que o console já lê;
+- a chave **Mostrar quantas pessoas estão na sala** no console (D107) grava a mesma chave `showPresentCount` de
+  `webinars.room_settings` que o card **Sala** do editor já gravava (rodada v11, sem coluna nova).
+
+**Antes do merge na `dev`**: nada a aplicar no SQL Editor. **Produção (Hetzner)**: nada manual. **O servidor de vídeo**:
+nenhuma etapa `deploy-meet` é necessária para esta rodada.
+
+`WEBINARS_MIGRATION` continua apontando a `202611170001` (§9.18), a mais nova dos webinários.
+
 ## 10. Producao guardada em snapshot (03/11/2026)
 
 **Decisao do produtor (03/11/2026, no chat):** a producao na Hetzner so serve para a equipe testar; ninguem de fora a

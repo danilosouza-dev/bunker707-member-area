@@ -21,6 +21,7 @@ import {
   fetchLastPresenceRow,
   fetchPollRow,
   countQuestionReplyRows,
+  fetchQuestionReplyRow,
   fetchQuestionRow,
   insertChatMessage,
   insertPollAnswerRow,
@@ -31,9 +32,12 @@ import {
   recordPresenceSample,
   revokeConsentRow,
   softDeleteStudentContent,
+  toggleQuestionLike,
   toggleQuestionVote,
   upsertConsentRow
 } from "./chat-store";
+import { isPendingMigrationError } from "../db/pending-migration";
+import { QUESTION_LIKES_MIGRATION, type LikeTally } from "./question-likes-model";
 import { chatMessageFromRow, pollAnswerFromRow, pollFromRow, questionFromRow, questionReplyFromRow, type ChatMessageRow } from "./chat-rows";
 import { CHAT_MESSAGES, refusesLegacyIdentity, type ChatPostInput, type HeartbeatInput, type QuestionPostInput, type QuestionReplyPostInput } from "./chat-schemas";
 import { assertNoDbError, WebinarError, type WebinarsDb } from "./db";
@@ -68,6 +72,7 @@ import {
 } from "./room-rules";
 import { loadStudentIdentity, studentDisplayName, type RoomContext, type StudentIdentity } from "./room-queries";
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
+import { takeDownScreenComments } from "./screen-comment-store";
 
 /**
  * Os motivos do 409. Da fase 3: `banned` nas escritas da live (removido desta sessao ou banido de todas), `muted` no
@@ -330,6 +335,8 @@ export async function removeStudentChat(input: { db: WebinarsDb; now?: number; u
   const now = input.now ?? Date.now();
   const nowIso = new Date(now).toISOString();
   const counts = await softDeleteStudentContent(input.db, { nowIso, reason: "consent_revoked", userId: input.userId });
+  // O que era do aluno e estava na tela de alguma sessao sai na hora (rodada v9, docs/30 D89).
+  await takeDownScreenComments(input.db, { nowIso, userId: input.userId });
   await revokeConsentRow(input.db, input.userId, nowIso);
   forgetAuthorPhoto(input.userId);
   return {
@@ -342,7 +349,11 @@ export async function removeStudentChat(input: { db: WebinarsDb; now?: number; u
  * Presenca
  * ---------------------------------------------------------------------------------------------- */
 
-export type HeartbeatContext = Pick<RoomContext, "durationMs" | "session"> & { recordingId: string | null };
+export type HeartbeatContext = Pick<RoomContext, "durationMs" | "session"> & {
+  recordingId: string | null;
+  /** Falso quando a equipe escolheu nao mostrar aos alunos quantas pessoas estao na sala (docs/30 D102); ausente, mostra. */
+  showPresentCount?: boolean;
+};
 export type HeartbeatResult = { ended: boolean; events: StudentEventInsert[]; offsetMs: number | null; presentNow: number; serverTime: string };
 
 /**
@@ -399,7 +410,8 @@ export async function recordStudentHeartbeat(input: { body: HeartbeatInput; cont
     events.push(webinarEvent(userId, session.id, "webinar_left", { kind: session.kind, reason, seconds_present: buckets * ROOM_RULES.bucketSeconds }));
   }
 
-  const presentNow = session.kind === "replay" ? 0 : (await listPresentUserIds(db, { currentBucket: bucket, sessionId: session.id })).length;
+  // Com o numero de pessoas escondido dos alunos (docs/30 D102), a contagem nem e lida e o numero nao sai do servidor.
+  const presentNow = session.kind === "replay" || context.showPresentCount === false ? 0 : (await listPresentUserIds(db, { currentBucket: bucket, sessionId: session.id })).length;
 
   return { ended, events, offsetMs: Number.isFinite(serverOffset) ? Math.round(serverOffset) : null, presentNow, serverTime: nowIso };
 }
@@ -596,6 +608,38 @@ export async function voteStudentQuestion(input: { context: RoomContext; db: Web
     throw new WebinarError("Pergunta não encontrada.", 404);
   }
   return toggleQuestionVote(input.db, { questionId: input.questionId, userId: input.userId });
+}
+
+/**
+ * Curtir / Tirar a curtida da resposta escrita de uma pergunta (`replyId` nulo) ou de uma resposta do fio, por um aluno
+ * que ve a pergunta na sessao (docs/30 D101). As mesmas recusas do voto na pergunta (fora da hora 409; removido ou
+ * banido 409; a dispensada de outro aluno 404); a resposta apagada, de outra pergunta, ou a pergunta sem resposta
+ * escrita, 404. Banco sem a 202611170001: 409 com o aviso dela.
+ */
+export async function likeStudentQuestionItem(input: { context: RoomContext; db: WebinarsDb; now?: number; questionId: string; replyId: string | null; userId: string }): Promise<LikeTally> {
+  const now = input.now ?? Date.now();
+  refuse(input.context, now, "interaction");
+  await refuseBanned({ context: input.context, db: input.db, kind: "interaction", now, userId: input.userId });
+  const row = await fetchQuestionRow(input.db, input.questionId);
+  if (!row || row.session_id !== input.context.session.id || row.deleted_at || !questionVisibleAt(questionFromRow(row), now) || !toStudentQuestion(questionFromRow(row), input.userId, false)) {
+    throw new WebinarError("Pergunta não encontrada.", 404);
+  }
+  try {
+    if (input.replyId) {
+      const reply = await fetchQuestionReplyRow(input.db, input.replyId);
+      if (!reply || reply.question_id !== row.id || reply.deleted_at) {
+        throw new WebinarError("Resposta não encontrada.", 404);
+      }
+    } else if (row.status !== "answered" || !row.answer_text?.trim()) {
+      throw new WebinarError("Resposta não encontrada.", 404);
+    }
+    return await toggleQuestionLike(input.db, { questionId: row.id, replyId: input.replyId, sessionId: row.session_id, userId: input.userId });
+  } catch (error) {
+    if (isPendingMigrationError(error)) {
+      throw new WebinarError(WEBINAR_COPY.exportar.migracaoPendente(QUESTION_LIKES_MIGRATION), 409);
+    }
+    throw error;
+  }
 }
 
 export type PollAnswerResult = { events: StudentEventInsert[]; poll: StudentPoll };

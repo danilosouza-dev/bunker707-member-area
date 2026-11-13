@@ -70,10 +70,13 @@ test.describe("aluna e produtor", () => {
 
     await controle.getByRole("button", { exact: true, name: PLATEIA.atalhoRotulo(300) }).click();
     await expect(controle.getByLabel(PLATEIA.campo, { exact: true })).toHaveValue("300");
+    // Sem frase nem caixa (decisao do produtor em 12/11/2026, docs/30 D86): com o numero no campo, o Aplicar ja liga.
     const aplicar = controle.getByRole("button", { exact: true, name: PLATEIA.aplicar });
-    await expect(aplicar).toBeDisabled();
-    await expect(controle.locator("[data-simulation-audience-sentence]")).toContainText("A partir de agora, os participantes simulados somam +300 ao número de quem assiste.");
-    await controle.getByLabel(PLATEIA.caixa, { exact: true }).check();
+    await expect(controle.locator("[data-simulation-audience-sentence]")).toHaveCount(0);
+    // A unica caixa do controle e a do "Variar sozinho" (rodada v9, docs/30 D90), desligada: nenhuma de confirmacao.
+    await expect(controle.getByRole("checkbox")).toHaveCount(1);
+    await expect(controle.getByRole("checkbox", { name: new RegExp(`^${PLATEIA.variar.titulo}`) })).not.toBeChecked();
+    await expect(aplicar).toBeEnabled();
     await aplicar.click();
     await expect(consolePage.getByText(PLATEIA.aplicado(300))).toBeVisible();
     await expect(controle.locator("[data-simulation-audience-now]")).toHaveText("+300");
@@ -84,7 +87,7 @@ test.describe("aluna e produtor", () => {
     // ...e chega ao real +300 depois da rampa de 90 s (os pontos de 15 s), sem pular de uma vez.
     await expect.poll(numero, { intervals: [2_000], timeout: 150_000 }).toBeGreaterThanOrEqual(real + 300);
 
-    // A mudanca no banco, com o offset desde o Começar para todos e a frase confirmada.
+    // A mudanca no banco, com o offset desde o Começar para todos e a frase que o servidor grava sozinho.
     const db = createLocalAdminClient();
     const mudanca = unwrap(await db.from("webinar_simulation_changes").select("at_offset_ms, count_rule, ack_text, source").eq("session_id", sessaoId).single(), "Lendo a mudanca");
     expect(mudanca?.at_offset_ms).toBeGreaterThan(3 * 60_000);

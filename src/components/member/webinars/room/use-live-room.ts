@@ -5,7 +5,7 @@ import { useJitsiDevices, type DeviceSwitchHooks, type UseJitsiDevices } from "@
 import { useJitsiMeet, type JitsiMeetApi, type JitsiStatus } from "@/components/webinars/use-jitsi-meet";
 import { DEVICE_SWITCH_MAX_MS, type DeviceKind } from "@/lib/jitsi-device-settings";
 import { liveConfigOverwrite, liveInterfaceConfigOverwrite, toRoomEvent, type JitsiListenedEvent, type LiveEmbedLook, type RoomEventItem } from "@/lib/jitsi-room-config";
-import type { RoomView } from "@/lib/webinar-room-prefs";
+import type { RoomThumbs, RoomView } from "@/lib/webinar-room-prefs";
 import type { JoinTokenReply } from "@/server/webinars/live-model";
 import {
   acceptMic,
@@ -30,6 +30,7 @@ import {
   expectDeviceSwitch,
   expectVideoToggle,
   filmstripStep,
+  mountedThumbsRow,
   gateSwitchDone,
   gateSwitchStarted,
   gateToggle,
@@ -269,6 +270,11 @@ export type UseLiveRoomInput = {
    * de novo, a volta depois da queda). Trocar no meio nao remonta: o useJitsiMeet le a config ao montar.
    */
   look: LiveEmbedLook;
+  /**
+   * Onde a pessoa quer as miniaturas (rodada v9, docs/30 D91; so Lateral ou Esconder desde a rodada v12, D105):
+   * Esconder tira a coluna por comando, com qualquer largura. Sem ele, Lateral.
+   */
+  thumbs?: RoomThumbs;
   nonce: string | null;
   /** Um erro de camera encerrou o aceite pendente do aviso de gravacao: o proximo clique em Câmera abre o aviso de novo. */
   onCameraConsentEnded: () => void;
@@ -314,6 +320,12 @@ export type LiveRoomController = {
   toggleHand: () => void;
   toggleMic: () => void;
   toggleSound: () => void;
+  /**
+   * O iframe de agora foi montado com a fileira de miniaturas embaixo (o layout `stage_bottom` do motor; falso sem
+   * iframe ou com a coluna). Desde a rodada v12 (docs/30 D105) a sala nunca pede esse layout: a pessoa escolhe so
+   * Lateral ou Esconder, e nada aqui tira ninguem da sala de video para mudar as miniaturas.
+   */
+  thumbsRow: boolean;
   /** A visao que o aluno escolheu (guardada; Palco por padrao): volta depois de cada entrada. */
   view: RoomView;
   /** O que o motor mostra agora (o ultimo tileViewChanged): o botao diz isto, porque a equipe pode mudar a de todos. */
@@ -321,7 +333,7 @@ export type LiveRoomController = {
 };
 
 export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
-  const { allowed, container, frameTitle, frameWidth, lobby, look, nonce, sessionId, webinarId } = input;
+  const { allowed, container, frameTitle, frameWidth, lobby, look, nonce, sessionId, thumbs = "side", webinarId } = input;
   const [reply, setReply] = useState<JoinTokenReply | null>(null);
   const [entry, setEntry] = useState<LiveEntry>("idle");
   const [signals, setSignals] = useState<LiveSignalState>(INITIAL_LIVE_SIGNALS);
@@ -518,7 +530,6 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
   useEffect(() => {
     dropRef.current = handleDrop;
   });
-
   /** Le quem esta no palco pelo getRoomsInfo (o participantJoined nao traz o papel de quem ja era moderador). */
   const readRoomsInfo = useCallback(() => {
     if (roomsInfoPendingRef.current) {
@@ -1095,7 +1106,11 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
   // ou fecha, girar, a janela). So o toggleFilmStrip que muda o que o motor mostra, e um por vez.
   const joinedNow = entry === "joined";
   const filmstripVisible = signals.filmstripVisible;
-  const wantColumn = columnWanted({ frameWidth, view: signals.viewShown });
+  // As miniaturas onde a pessoa escolheu (D91; so Lateral ou Esconder desde a rodada v12, D105): o Esconder tira a
+  // coluna com qualquer largura, por comando. O iframe montado com a fileira embaixo (o layout do motor) nao depende
+  // da largura.
+  const thumbsRow = mountedThumbsRow(jitsi.mountedInterfaceConfig) === true;
+  const wantColumn = columnWanted({ frameWidth, row: thumbsRow, thumbs, view: signals.viewShown });
   useEffect(() => {
     if (!joinedNow || frameWidth <= 0 || filmstripStep({ visible: filmstripVisible, wanted: wantColumn }) === null) {
       return;
@@ -1129,6 +1144,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     toggleHand,
     toggleMic,
     toggleSound,
+    thumbsRow,
     view,
     viewShown: signals.viewShown
   };

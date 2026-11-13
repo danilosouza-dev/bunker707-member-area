@@ -594,7 +594,23 @@ export function dropExcerpts(drops: readonly ReportBucket[], cues: readonly Tran
  * Uma mudanca dos participantes simulados (docs/30 D80; webinar_simulation_changes): quando valeu (o minuto do relogio
  * da Simulacao, nulo antes do comeco), o +N (nulo na faixa que varia), quem e de onde. So o bloco Simulacao le.
  */
-export type SimulationReportChange = { atMs: number | null; changedAt: string; changedByName: string; extra: number | null; source: "console" | "editor" };
+export type SimulationReportChange = {
+  atMs: number | null;
+  changedAt: string;
+  changedByName: string;
+  extra: number | null;
+  source: "console" | "editor";
+  /** O "Variar sozinho" da mudanca (rodada v9, docs/30 D90); ausente ou nulo, o numero parado. */
+  vary?: { direction: "both" | "down" | "up"; everyMaxSeconds: number; everyMinSeconds: number; percent: number } | null;
+};
+
+/** O valor de uma mudanca no bloco: "+300" ou "+300, variando até 5% para mais e para menos, a cada 20 a 60 s". */
+export function simulationChangeValue(change: Pick<SimulationReportChange, "extra" | "vary">): string {
+  const SIM = WEBINAR_COPY.exportar.simulacao;
+  const value = SIM.valor(change.extra);
+  const vary = change.vary;
+  return vary && change.extra !== null && change.extra > 0 ? SIM.valorQueVaria(value, vary.percent, SIM.direcoesDaVariacao[vary.direction], vary.everyMinSeconds, vary.everyMaxSeconds) : value;
+}
 
 /** As regras da fase 4 (202610300003) na sessao: o que a equipe ligou (o resumo congelado vem da RPC). */
 export type SimulationRulesSummary = {
@@ -673,7 +689,7 @@ export function simulationLines(summary: SimulationSummary): string[] {
     if (changes.length > 0) {
       lines.push(SIM.mudancas(changes.length));
       for (const change of changes) {
-        lines.push(SIM.mudanca(change.atMs === null ? SIM.antesDoComeco : screenEnteredLabel(change.atMs), SIM.valor(change.extra), change.changedByName, SIM.origens[change.source]));
+        lines.push(SIM.mudanca(change.atMs === null ? SIM.antesDoComeco : screenEnteredLabel(change.atMs), simulationChangeValue(change), change.changedByName, SIM.origens[change.source]));
       }
     }
     lines.push(`${SIM.entradas}: ${rules.joins.enabled || totals.joinsShown ? SIM.apareceram(totals.joinsShown ?? 0) : COPY.desligado}`);

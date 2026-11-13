@@ -172,7 +172,7 @@ test("microfone sozinho (docs/31 caminho A): o room_settings sem a chave le desl
 
 test("D64 (10/11/2026), card Sala sem anonimato: o padrao e a leitura nao tem anonymousQuestions nem displayName; o rascunho que ainda traz as duas chaves passa e sai sem elas", async () => {
   const { roomSettingsOfRow } = await import("../src/server/webinars/rows.ts");
-  const CHAVES = ["chatMode", "newCommentsVisible", "polls", "practiceSession", "questions", "reactions", "selfUnmute", "slowModeSeconds", "waitingRoom"];
+  const CHAVES = ["chatMode", "newCommentsVisible", "polls", "practiceSession", "questions", "reactions", "selfUnmute", "showPresentCount", "slowModeSeconds", "waitingRoom"];
   assert.deepEqual(Object.keys(model.defaultRoomSettings()).sort(), CHAVES);
   assert.deepEqual([...model.DISPLAY_NAME_MODES], ["first_name_initial"]);
 

@@ -123,7 +123,8 @@ export function useRoomHeartbeat(input: {
   getState: () => PresenceState;
   /** O sinal respondeu 404: a pessoa saiu do "Quem pode" (o acesso guardado no servidor vale ate 10 min). */
   onAccessLost?: () => void;
-  onAnswer?: (answer: { ended: boolean; presentNow: number }) => void;
+  /** `presentHidden` (docs/30 D107): a equipe escondeu o numero de pessoas; ausente na resposta do servidor de antes. */
+  onAnswer?: (answer: { ended: boolean; presentHidden?: boolean; presentNow: number }) => void;
   sessionId: string;
   webinarId: string;
 }) {
@@ -149,7 +150,7 @@ export function useRoomHeartbeat(input: {
       postHeartbeat(webinarId, body())
         .then((answer) => {
           if (!stopped) {
-            readRef.current.onAnswer?.({ ended: answer.ended, presentNow: answer.presentNow });
+            readRef.current.onAnswer?.({ ended: answer.ended, presentHidden: answer.presentHidden, presentNow: answer.presentNow });
           }
         })
         .catch((error: unknown) => {

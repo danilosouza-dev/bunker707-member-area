@@ -570,6 +570,11 @@ test("heartbeat: o balde pelo offset do servidor (nao o do corpo), webinar_joine
   assert.equal(amostra.bucket, 3, "95 s = balde 3 (30 s cada), nunca o 5 s do corpo");
   assert.equal(amostra.user_id, userId);
   assert.deepEqual(eventos(db, "webinar_joined").map((row) => [row.entity_id, row.metadata]), [[SESSION, { device: "mobile", kind: "simulated" }]]);
+  // O primeiro sinal le o webinario duas vezes: o acesso (guardado 10 min) e a chave do numero de pessoas, relida a
+  // parte e guardada 15 s por webinario (docs/30 D107: a equipe a muda pelo console com a sessao no ar).
+  const leiturasNoPrimeiro = db.calls.from.filter((name) => name === "webinars").length;
+  assert.equal(leiturasNoPrimeiro, 2, "o acesso e a chave do numero de pessoas");
+  assert.equal(primeiro.body.data.presentHidden, false, "o sinal diz se a equipe escondeu o numero");
 
   const segundo = await json(await bater({ offsetSeconds: 6 }));
   assert.equal(segundo.status, 200);
@@ -577,7 +582,7 @@ test("heartbeat: o balde pelo offset do servidor (nao o do corpo), webinar_joine
   assert.equal(db.tables.webinar_presence_samples[0].samples, 2);
   assert.equal(eventos(db, "webinar_joined").length, 1, "nao e uma entrada nova");
   const leiturasDoWebinario = db.calls.from.filter((name) => name === "webinars").length;
-  assert.equal(leiturasDoWebinario, 1, "o acesso foi conferido uma vez: o segundo sinal veio do cache");
+  assert.equal(leiturasDoWebinario, leiturasNoPrimeiro, "o acesso foi conferido uma vez e a chave lida uma vez: o segundo sinal veio da memoria");
 
   const saida = await json(await bater({ leave: true, offsetSeconds: 7, state: "hidden", visible: false }));
   assert.equal(saida.status, 200);

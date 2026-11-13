@@ -824,9 +824,9 @@ test("15. R7 pelo app: o produtor decide a Simulacao da live na espera com a fra
   const frase = simulationModel.simulationAckFor({ live: true, nowMs: Date.now(), responsible: contas.produtor.nome, rules: simulationModel.normalizeSimulationRules(regras) });
 
   actAs(usuarioDeTeste(contas.produtor));
-  const comSelo = await simulationActions.saveSessionSimulation({ ...regras, ackText: frase, acknowledged: true, sessionId: AO_VIVO.sessaoId, showLiveBadge: true });
+  const comSelo = await simulationActions.saveSessionSimulation({ ...regras, sessionId: AO_VIVO.sessaoId, showLiveBadge: true });
   assert.equal(comSelo.ok, false, "o selo Ao vivo nunca na live");
-  const salvo = await simulationActions.saveSessionSimulation({ ...regras, ackText: frase, acknowledged: true, sessionId: AO_VIVO.sessaoId });
+  const salvo = await simulationActions.saveSessionSimulation({ ...regras, sessionId: AO_VIVO.sessaoId });
   assert.equal(salvo.ok, true, JSON.stringify(salvo));
   const linha = unwrap(await db.from("webinar_sessions").select("simulated_count_rule, simulation_ack_text, show_live_badge").eq("id", AO_VIVO.sessaoId).single(), "Lendo a decisao da live");
   assert.deepEqual([linha.simulated_count_rule.base, linha.simulation_ack_text, linha.show_live_badge], [300, frase, false]);

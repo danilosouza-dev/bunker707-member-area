@@ -41,6 +41,7 @@ import {
   presenterBadgeFor,
   screenBlocksRoom,
   stageColumnShown,
+  stageRowShown,
   stageNames,
   usesOurBar,
   viewMenuFocusLost,
@@ -50,6 +51,7 @@ import {
 import { LiveSettings } from "./live-settings";
 import { LiveStage } from "./live-stage";
 import { ROOM_PANEL_ID } from "./room-bar";
+import { RoomEndedDialog, endedDialogOpens } from "./room-ended-dialog";
 import { RoomLeaveDialog } from "./room-leave-dialog";
 import { RoomChatMoreButton, RoomChatPanel } from "./room-chat";
 import { RoomChatPills } from "./room-chat-pills";
@@ -74,6 +76,7 @@ import {
   roomMobileLine,
   roomPresentBadge,
   roomPanelShown,
+  stageVideoBottomPx,
   stageVideoRightPx,
   unpinnedPolls,
   type RoomPanelTab
@@ -85,6 +88,8 @@ import { RoomPollsTab } from "./room-polls";
 import { RoomQuestionsOrderButton, RoomQuestionsTab } from "./room-questions";
 import type { QuestionsFilter, QuestionsOrder } from "./room-questions-model";
 import { RoomRail } from "./room-rail";
+import { QUESTION_NEWS_SNACK_ACTION } from "./room-question-news-model";
+import { useRoomQuestionNews } from "./use-room-question-news";
 import { RoomReactionBubbles } from "./room-reactions";
 import { RoomSimulationJoins, RoomSimulationSales } from "./room-simulation";
 import { RoomSnackbarHost, RoomSnackbarProvider, useRoomSnackbarController } from "./room-snackbar";
@@ -97,14 +102,17 @@ import { entryInRoom, useLiveRoom } from "./use-live-room";
 import { useRoomPolls } from "./use-room-polls";
 import { RoomPinnedArea, RoomPinnedPills, usePinnedFocus, type PinnedFocusTarget } from "./screen/room-pinned";
 import type { ScreenItemHandlers } from "./screen/room-screen-card";
+import { RoomScreenCommentAnnouncer, RoomScreenCommentLayer } from "./screen/room-screen-comment";
 import { RoomScreenAnnouncer, RoomScreenLayer } from "./screen/room-screen-layer";
 import { screenFocusKey, screenPlacement, screenStripForcedLive } from "./screen/room-screen-model";
 import { RoomScreenStrip } from "./screen/room-screen-strip";
 import { RoomWideHidden } from "./screen/room-wide-hidden";
 import { useRoomScreen, useRoomScreenEvents } from "./screen/use-room-screen";
 import { useRoomSimulation } from "./use-room-simulation";
-import { useDeferredPolls, useRoomHydrated, useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
+import { useDeferredPolls, useRoomHydrated, useRoomPanelOpen, useRoomTheme, useRoomThumbs } from "./use-room-prefs";
+import { usePanelMotion } from "./use-panel-motion";
 import { useStageGeometry } from "./use-stage-geometry";
+import { screenCommentPlace } from "@/server/webinars/screen-comment-model";
 import { leaveStageFullscreen, refocusRoom, returnFocusFromPanel, returnFocusFromPoll, roomFocusTarget, trapRoomFocus, useRoomConfirmFocus, useRoomDialogLock, useRoomReducedMotion } from "./webinar-room";
 import { roomSkeleton } from "./vertical/vertical-model";
 
@@ -303,6 +311,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const [removeOpen, setRemoveOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useRoomPanelOpen();
   const [confirmLeave, setConfirmLeave] = useState(false);
+  // A live acabou com o aluno na sala (docs/30 D104): a janela da area avisa (o dialogo do motor continua desligado).
+  const [endedNotice, setEndedNotice] = useState(false);
   const [reactionsOpen, setReactionsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // O menu da Visão do vídeo (docs/31 V2-16): aberto pela sala, para nunca ficar junto com Reagir ou Configurações.
@@ -316,6 +326,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const [cinemaOn, setCinemaOn] = useState(false);
   const [local, setLocal] = useState<LocalState>(NO_LOCAL);
   const [heartbeatPresent, setHeartbeatPresent] = useState<number | null>(null);
+  /** O ultimo sinal de 15 s disse que a equipe escondeu o numero de pessoas (nulo antes dele): vale sobre a sessao. */
+  const [heartbeatHidden, setHeartbeatHidden] = useState<boolean | null>(null);
   const reducedMotion = useRoomReducedMotion();
   const cinemaPreferred = useSyncExternalStore(subscribeNothing, readCinemaPreferred, () => false);
   const isIOS = useSyncExternalStore(subscribeNothing, readIOS, () => false);
@@ -324,7 +336,11 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const geometry = useStageGeometry(frameRef);
   const desktop = useSyncExternalStore(subscribeDesktop, readDesktop, () => false);
   const [theme, setTheme] = useRoomTheme();
-  // O tema que o iframe recebe na proxima montagem (o guardado ja vale no primeiro Entrar na sala).
+  // Onde a pessoa quer as miniaturas (rodada v9, docs/30 D91): Lateral ou Esconder (o Embaixo saiu na rodada v12, D105),
+  // guardado no navegador. As duas valem por comando, sem recarregar o video.
+  const [thumbs, setThumbs] = useRoomThumbs();
+  // O tema que o iframe recebe na proxima montagem (o guardado ja vale no primeiro Entrar na sala), sempre no Palco com
+  // a coluna.
   const look = useMemo<LiveEmbedLook>(() => ({ layout: "stage", theme }), [theme]);
 
   const info = liveInfoOf(session);
@@ -336,6 +352,14 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   // O iframe pode montar quando a sala esta aberta para a pessoa (a tranca so barra quem ainda nao entrou).
   const allowed = !readOnly && liveRoomScreen({ ...screenInput, inRoom: true }) === "open";
   const phase = livePhaseOf(status);
+  // A fase mudou de "no ar" para "encerrada" com a pagina aberta: a janela abre (a decisao na renderizacao, sem efeito).
+  const [phaseSeen, setPhaseSeen] = useState(phase);
+  if (phaseSeen !== phase) {
+    setPhaseSeen(phase);
+    if (endedDialogOpens(phaseSeen, phase)) {
+      setEndedNotice(true);
+    }
+  }
   const writable = liveAcceptsWrites(status);
 
   /** O join-token (ou um lote de sinais) recusou: a tela muda na hora e a sessao e relida. 404: fora do acesso, de vez. */
@@ -381,6 +405,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     onCameraConsentEnded,
     onRefused,
     sessionId,
+    thumbs,
     settingsOpen,
     webinarId
   });
@@ -606,6 +631,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     onAccessLost: () => setLocal((previous) => (previous.unavailable ? previous : { ...previous, unavailable: true })),
     onAnswer: (answer) => {
       setHeartbeatPresent(answer.presentNow);
+      setHeartbeatHidden(typeof answer.presentHidden === "boolean" ? answer.presentHidden : null);
       if (answer.ended) {
         setLocal((previous) => (previous.ended ? previous : { ...previous, ended: true }));
       }
@@ -632,6 +658,14 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   // O contador do balao e do Chat do trilho: as mensagens novas desde que o Chat saiu da tela. Na live so os ids contam
   // (o zero do offset anda quando a live comeca atrasada e com a ancora da gravacao: panelUnreadMark).
   const unread = useRoomPanelUnread({ chatLoaded: chat.loaded, kind: "live", messages: translation.messages, offsetMs: nowMs + skewMs - zeroMs, chatShown });
+  // As respostas novas nas perguntas do aluno (docs/30 D100): contam com a aba Perguntas fora da tela.
+  const questionNews = useRoomQuestionNews({
+    enabled: !readOnly && !blocked && phase !== "ended" && tabs.includes("perguntas"),
+    sessionId,
+    shown: panelShown && tab === "perguntas",
+    tabMounted: tab === "perguntas",
+    webinarId
+  });
   const firstFocus = firstFocusTarget({ panelShown });
   const replayHref = session.webinar.replaySessionId ? roomHref(session.webinar.slug, session.webinar.replaySessionId) : null;
   const scheduledMs = Date.parse(session.session.scheduledAt);
@@ -654,13 +688,19 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const simulationOffsetMs = simulationClockMs({ kind: "live", scheduledAt, startedAt }, nowMs + skewMs);
   // O numero de quem assiste some com a live encerrada; no palco ele e o selo ao lado do selo do momento (docs/31 §11.5).
   // Com a Simulacao (R7), o real mais a parte simulada daquele instante, como na gravada (o selo e a aba Participantes).
-  const presentShown = phase === "ended" ? null : simulation.displayCount(presentNow, simulationOffsetMs);
+  // A equipe pode esconder dos alunos quantas pessoas estao na sala (docs/30 D102): sem numero no palco, no titulo e na aba.
+  // A chave muda tambem pelo console com a live no ar (D107): o ultimo sinal de 15 s diz se o numero esta escondido; antes
+  // dele (ou com o servidor de antes), a sessao.
+  const presentHidden = heartbeatHidden ?? session.presentHidden === true;
+  const presentShown = phase === "ended" || presentHidden ? null : simulation.displayCount(presentNow, simulationOffsetMs);
   const presentBadge = roomPresentBadge(presentShown);
   const metaLine = roomDateLine({ durationMinutes: session.webinar.durationMinutes, kind: "live", presenterName, scheduledAt: session.session.scheduledAt }).join(" · ");
   const mobileLine = roomMobileLine(presenterName);
   // A coluna de miniaturas do iframe a direita do video, quando o motor a mostra (o Palco, com a coluna na tela pela
   // largura do iframe, V2-A5): os selos de baixo e as pilulas param antes dela. Fora do iframe, nenhuma coluna.
-  const videoRightPx = stageVideoRightPx({ columnShown: stageColumnShown(room.signals, joined), touch: geometry.touch });
+  const videoRightPx = stageVideoRightPx({ columnShown: stageColumnShown(room.signals, joined, room.thumbsRow), touch: geometry.touch });
+  // A fileira de miniaturas embaixo (D91): o que fica na base do palco sobe a altura dela.
+  const videoBottomPx = stageVideoBottomPx({ rowShown: stageRowShown(room.signals, joined, room.thumbsRow) });
   // O selo de cima a esquerda do palco: no ar, o tempo; na espera com a sala aberta, "Aguardando o apresentador".
   const stageMoment = liveStageMoment({ phase, screen });
   // As fixadas com o painel fechado: as pilulas no palco largo e as linhas abaixo do palco estreito.
@@ -671,6 +711,9 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const screenForced = screenStripForcedLive({ entry: room.entry, screen });
   const pinnedPillsOn = pinnedShortcuts && (pinnedMessage !== null || pinnedPoll !== null);
   const placement = screenPlacement({ items: screenForced ? [] : screenItems, offerShown: false, pinnedPills: !screenForced && pinnedPillsOn });
+  // O comentario ou a pergunta que a equipe trouxe para a tela (rodada v9, docs/30 D89): pelas mesmas regras da Na tela.
+  const screenComment = pinnedOn && !blocked ? naTela.comment : null;
+  const screenCommentAt = screenCommentPlace(placement.cells.map((cell) => cell.place));
   const screenEvents = useRoomScreenEvents({ enabled: !readOnly && pinnedOn, pollOver: stagePoll !== null, sessionId, webinarId });
   const sendScreenEvent = screenEvents.sendEvent;
   const closeScreenItem = naTela.closeItem;
@@ -709,10 +752,26 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
 
   // A confirmacao de Sair: o foco entra no Voltar dela e volta para quem a abriu.
   const rememberLeaveOpener = useRoomConfirmFocus(rootRef, confirmLeave);
+  // A janela "A live foi encerrada": o foco entra no OK dela e, ao fechar, volta para a sala.
+  useRoomConfirmFocus(rootRef, endedNotice && !confirmLeave);
 
   // O aviso da barra (ou o da troca de aparelho) entra no aviso da sala; quando ele sai daqui (o microfone abriu depois
   // do aviso do prazo, a troca acabou), sai de la tambem.
   const snackbarApi = snackbar.api;
+
+  // A equipe falou numa pergunta do aluno com a aba Perguntas fora da tela (docs/30 D100): o numero no item Perguntas
+  // (o trilho) ou o ponto na aba, e o aviso da sala com Ver, que abre a aba. So quando o numero sobe.
+  const questionNewsCount = questionNews.count;
+  const questionNewsShownRef = useRef(0);
+  useEffect(() => {
+    const before = questionNewsShownRef.current;
+    questionNewsShownRef.current = questionNewsCount;
+    if (questionNewsCount > before) {
+      snackbarApi.show({ action: { key: QUESTION_NEWS_SNACK_ACTION, label: WEBINAR_COPY.salaV2.perguntas.verResposta }, key: "question_news", text: WEBINAR_COPY.salaV2.perguntas.respostaNova });
+    } else if (questionNewsCount === 0 && before > 0) {
+      snackbarApi.clear("question_news");
+    }
+  }, [questionNewsCount, snackbarApi]);
   const shownNoticeRef = useRef<string | null>(null);
   useEffect(() => {
     if (notice) {
@@ -763,6 +822,16 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   function onSnackAction(key: string) {
     if (key === PINNED_SNACK_ACTION) {
       showPinned("message");
+      return;
+    }
+    if (key === QUESTION_NEWS_SNACK_ACTION) {
+      // Ver: a aba Perguntas abre (a Tela cheia do palco sai antes, senao o painel abriria escondido).
+      leaveStageFullscreen(document, stageRef.current);
+      setTab("perguntas");
+      setPanelOpen(true);
+      if (settingsTakeover) {
+        closeSettings();
+      }
       return;
     }
     if (key !== SNACK_SETTINGS_ACTION) {
@@ -972,6 +1041,11 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
       event.stopPropagation();
+      // A janela "A live foi encerrada" e a camada de cima: o Esc so a fecha.
+      if (endedNotice && !confirmLeave) {
+        setEndedNotice(false);
+        return;
+      }
       // A camada de cima primeiro (roomEscapeStep): a confirmacao, os paineis da barra, a enquete no palco; so entao o Sair.
       const step = roomEscapeStep({ confirmLeave, popoverOpen: reactionsShown || settingsShown || viewMenuShown, stagePoll: stagePoll?.mode ?? null });
       if (step === "close_confirm") {
@@ -994,7 +1068,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
       return;
     }
     if (event.key === "Tab") {
-      trapRoomFocus(event, confirmLeave ? (rootRef.current?.querySelector<HTMLElement>("[data-room-confirm]") ?? rootRef.current) : rootRef.current);
+      trapRoomFocus(event, confirmLeave || endedNotice ? (rootRef.current?.querySelector<HTMLElement>("[data-room-confirm]") ?? rootRef.current) : rootRef.current);
       return;
     }
     const target = event.target as HTMLElement | null;
@@ -1087,7 +1161,9 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   // O palco cresce com o painel do chat fechado, no Modo cinema (o chat fica embaixo, menor) e na frase de removido /
   // banido; no celular com o painel Configurações aberto (o chat escondido), a caixa do palco divide a coluna com o
   // painel e fica com no minimo 96 px: o painel rola por dentro e a barra continua na tela (liveSkeletonState).
-  const skeletonState = liveSkeletonState({ blocked, cinema: cinemaOn, panelShown, settingsTakeover });
+  // Fechando, o painel continua no lugar ate a saida terminar (rodada v9, P12): o palco muda de tamanho uma vez so.
+  const panelMotion = usePanelMotion(panelShown);
+  const skeletonState = liveSkeletonState({ blocked, cinema: cinemaOn, panelShown: panelMotion.laid, settingsTakeover });
   const skeleton = roomSkeleton("normal", skeletonState);
 
   // A sala inteira dentro do aviso da sala (o chat e as Perguntas mostram o sucesso nele).
@@ -1117,6 +1193,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
       />
 
       {confirmLeave ? <RoomLeaveDialog onCancel={() => setConfirmLeave(false)} onLeave={leave} /> : null}
+      {endedNotice && !confirmLeave ? <RoomEndedDialog onClose={() => setEndedNotice(false)} /> : null}
 
       <div className={skeleton.body} data-room-slot="body">
         <div className={skeleton.stageColumn} data-room-slot="stage-column">
@@ -1144,6 +1221,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               sessionId={sessionId}
               stageRef={stageRef}
               title={session.webinar.title}
+              videoBottomPx={videoBottomPx}
               videoRightPx={videoRightPx}
             >
               {/* Os selos ficam com a sala de pe, como a barra: a live encerrada, removido ou banido os tiram. */}
@@ -1171,10 +1249,13 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                   topLeftExtra={blocked ? null : <RoomSimulationSales layout="cell" offsetMs={simulationOffsetMs} reducedMotion={reducedMotion} state={simulation} />}
                 />
               ) : null}
+              {/* O comentario ou a pergunta na tela (docs/30 D89): o cartao no palco de 640 px ou mais; no estreito, na faixa. */}
+              <RoomScreenCommentLayer comment={screenComment} engineBar={joined && !ourBar} forced={screenForced} place={screenCommentAt} />
               <RoomReactionBubbles bubbles={reactions.bubbles} overflow={reactions.overflow} />
-              {/* Com o painel fechado, as 2 ultimas mensagens em pilulas sobre o palco (V2-8); com um item embaixo, so no palco estreito. */}
+              {/* Com o painel fechado, as 2 ultimas mensagens em pilulas sobre o palco (V2-8); com um item embaixo ou o
+                  comentario na tela, so no palco estreito. */}
               {chatPillsShown({ blocked, design: "normal", offerShown: false, panelShown, settingsTakeover }) ? (
-                <RoomWideHidden hidden={!placement.chatPills}>
+                <RoomWideHidden hidden={!placement.chatPills || screenComment !== null}>
                   <RoomChatPills kind="live" messages={overlayMessages(translation.messages)} />
                 </RoomWideHidden>
               ) : null}
@@ -1204,6 +1285,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
           {/* O palco mais estreito (ou com uma capa): as fixadas, o banner e o QR Code em linhas logo abaixo dele, acima da barra. */}
           {pinnedOn ? (
             <RoomScreenStrip
+              comment={screenComment}
               forced={screenForced}
               handlers={screenHandlers}
               items={screenItems}
@@ -1211,6 +1293,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
             />
           ) : null}
           {pinnedOn ? <RoomScreenAnnouncer items={screenItems} /> : null}
+          {pinnedOn ? <RoomScreenCommentAnnouncer comment={screenComment} /> : null}
           {!barShown ? null : (
             <LiveControls
               allowStudentCamera={room.reply ? room.reply.settings.allowStudentCamera : null}
@@ -1234,6 +1317,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               onTogglePanel={togglePanel}
               onToggleReactions={toggleReactions}
               onToggleSettings={toggleSettings}
+              onThumbs={setThumbs}
               onView={room.setView}
               onViewMenu={setViewMenu}
               panelFirstFocus={firstFocus === "panel-toggle"}
@@ -1258,6 +1342,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               selfUnmute={live.selfUnmute === true}
               soundOn={room.soundOn}
               videoOn={room.signals.videoOn}
+              thumbs={thumbs}
               viewMenuOpen={viewMenuShown}
               viewShown={room.viewShown}
             />
@@ -1274,6 +1359,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               firstFocus={firstFocus === "tab"}
               id={ROOM_PANEL_ID}
               kind="live"
+              motion={panelMotion}
               onClose={() => setPanelOpen(false)}
               onTab={setTab}
               open={panelShown}
@@ -1283,6 +1369,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                 ) : null
               }
               pollOpen={openPolls.length > 0}
+              questionsNew={questionNews.count}
               tab={tab}
               tabs={tabs}
               titleAction={
@@ -1351,6 +1438,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
                   onCount={setQuestionsCount}
                   onFilter={setQuestionsFilter}
                   onOrder={setQuestionsOrder}
+                  onQuestions={questionNews.ingest}
                   onRefused={onWriteRefused}
                   order={questionsOrder}
                   readOnly={readOnly || phase === "ended"}
@@ -1366,7 +1454,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
               ) : null}
             </RoomPanel>
             {/* O trilho a direita, a partir de lg: abre e fecha o painel em cada aba. */}
-            <RoomRail kind="live" onItem={onRail} panelShown={panelShown} pollOpen={openPolls.length > 0} tab={tab} tabs={tabs} unread={unread} />
+            <RoomRail kind="live" onItem={onRail} panelShown={panelShown} pollOpen={openPolls.length > 0} questionsNew={questionNews.count} tab={tab} tabs={tabs} unread={unread} />
           </>
         )}
       </div>

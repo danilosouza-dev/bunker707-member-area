@@ -30,6 +30,10 @@
   --bunker-radius: 16px;
   --bunker-radius-tile: 12px;
   --bunker-speaking: #34d399;
+  --bunker-hand: #ffffff;
+  --bunker-hand-ink: #141414;
+  --bunker-notice-bg: #f1f1f1;
+  --bunker-notice-ink: #0f0f0f;
 }
 
 html[data-bunker-theme="light"] {
@@ -37,6 +41,10 @@ html[data-bunker-theme="light"] {
   --bunker-tile: #e4e4e7;
   --bunker-tile-border: rgba(0, 0, 0, 0.08);
   --bunker-speaking: #16a34a;
+  --bunker-hand: #141414;
+  --bunker-hand-ink: #ffffff;
+  --bunker-notice-bg: #0f0f0f;
+  --bunker-notice-ink: #f1f1f1;
 }
 
 /* O fundo da pagina do iframe e o da area, nos dois temas: na coluna, as miniaturas ficam soltas sobre ele. */
@@ -166,6 +174,40 @@ body {
 }
 
 /*
+ * Os pontos do nivel de audio na lateral da miniatura (AudioLevelIndicator.tsx: span.audioindicator com os
+ * span.audiodot-top, -middle e -bottom; _videolayout_default.scss pinta o ::after de cada um de azul): no verde de
+ * quem fala, como o anel, nos dois temas. So a cor: o tamanho e o lugar sao os da tag.
+ */
+.audioindicator span.audiodot-top::after,
+.audioindicator span.audiodot-middle::after,
+.audioindicator span.audiodot-bottom::after {
+  background: var(--bunker-speaking) !important;
+}
+
+/*
+ * A mao levantada (pedido do produtor de 12/11/2026: o contorno amarelo era o padrao do motor). Thumbnail.tsx poe na
+ * miniatura de quem levantou a mao a classe da regra raisedHand (tss-react, com o nome da regra no fim, por isso o
+ * [class*=]), e ela pinta o contorno .raised-hand-border de amarelo com !important; RaisedHandIndicator.tsx desenha no
+ * topo da miniatura o selo amarelo quadrado com a mao. Aqui, nos dois temas, o contorno e o selo no ativo do design
+ * system (branco no escuro, quase preto no claro, docs/12), com a mao na cor contraria e o selo redondo como o botao do
+ * menu. So cor e canto: a espessura do contorno (2 px) e o tamanho do selo continuam os da tag. O anel verde de quem
+ * fala fica por cima deste (vem depois no DOM), como na tag.
+ */
+.filmstrip__videos .videocontainer[class*="raisedHand"] .raised-hand-border {
+  box-shadow: inset 0 0 0 2px var(--bunker-hand) !important;
+}
+
+.filmstrip__videos .videocontainer [class*="raisedHandIndicator"] {
+  background-color: var(--bunker-hand) !important;
+  border-radius: 9999px !important;
+  color: var(--bunker-hand-ink) !important;
+}
+
+.filmstrip__videos .videocontainer [class*="raisedHandIndicator"] svg {
+  fill: var(--bunker-hand-ink) !important;
+}
+
+/*
  * O botao do menu da miniatura (LocalVideoMenuTriggerButton.tsx e RemoteVideoMenuTriggerButton.tsx: o Button
  * "primary" da tag, azul, quadrado de raio 4, filho direto do Popover #local-video-menu-trigger ou
  * #remote-video-menu-trigger, que so aparece com o ponteiro na miniatura): vira o circulo escuro translucido dos
@@ -189,4 +231,85 @@ body {
 #local-video-menu-trigger > button svg,
 #remote-video-menu-trigger > button svg {
   fill: #fff !important;
+}
+
+/*
+ * Os avisos do motor que ainda aparecem no console de quem apresenta (a gravacao que nao comecou, a tela negada; a
+ * pagina da sala do aluno nao mostra nenhum, e o console tira o da mao levantada pela configuracao). Pedido do
+ * produtor de 12/11/2026: o aviso estava no visual do motor (cartao branco com a faixa e o link azuis). Aqui ele
+ * fica como o aviso da area: o cartao invertido do tema (claro no escuro, escuro no claro), canto de 12 px, sem a
+ * faixa colorida, com o icone, o texto, o botao e o X na cor do texto e o botao sublinhado.
+ * NotificationsContainer.tsx poe os avisos em #notifications-container; cada um (Notification.tsx) e o no com
+ * role status ou alert, que tem a faixa como primeiro filho. Os seletores usam so o id e os papeis, nunca o nome das
+ * classes geradas. So cor, canto e sombra: o tamanho e o lugar sao os da tag.
+ */
+#notifications-container [role="status"],
+#notifications-container [role="alert"] {
+  background-color: var(--bunker-notice-bg) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) !important;
+  color: var(--bunker-notice-ink) !important;
+}
+
+#notifications-container [role="status"] > div:first-child,
+#notifications-container [role="alert"] > div:first-child {
+  display: none !important;
+}
+
+#notifications-container [role="status"] span,
+#notifications-container [role="status"] div,
+#notifications-container [role="status"] button,
+#notifications-container [role="alert"] span,
+#notifications-container [role="alert"] div,
+#notifications-container [role="alert"] button {
+  color: var(--bunker-notice-ink) !important;
+}
+
+#notifications-container [role="status"] svg,
+#notifications-container [role="alert"] svg {
+  color: var(--bunker-notice-ink) !important;
+  fill: var(--bunker-notice-ink) !important;
+}
+
+#notifications-container [role="status"] button,
+#notifications-container [role="alert"] button {
+  text-decoration: underline !important;
+  text-underline-offset: 2px;
+}
+
+/*
+ * Os dialogos do motor que ainda podem abrir dentro do palco (o da live encerrada ja nao abre: a configuracao do
+ * iframe manda notifyOnConferenceDestruction em falso). Pedido do produtor de 12/11/2026: o dialogo estava no visual
+ * do motor (cartao cinza com o botao azul). Aqui ele fica como os dialogos da area: o cartao do tema com o canto de
+ * 16 px e o botao principal invertido (claro no escuro, escuro no claro), sem azul.
+ * BaseDialog.tsx desenha o no com role dialog e aria-modal; Dialog.tsx poe o titulo em #dialog-title, o X em
+ * #modal-header-close-button e o botao principal em #modal-dialog-ok-button. So esses, nunca as classes geradas.
+ */
+[role="dialog"][aria-modal="true"] {
+  background-color: var(--bunker-tile) !important;
+  border: 1px solid var(--bunker-tile-border) !important;
+  border-radius: var(--bunker-radius) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45) !important;
+  color: var(--bunker-notice-bg) !important;
+}
+
+[role="dialog"][aria-modal="true"] #dialog-title,
+[role="dialog"][aria-modal="true"] p,
+[role="dialog"][aria-modal="true"] span,
+[role="dialog"][aria-modal="true"] label {
+  color: var(--bunker-notice-bg) !important;
+}
+
+#modal-header-close-button svg {
+  fill: var(--bunker-notice-bg) !important;
+}
+
+#modal-dialog-ok-button {
+  background-color: var(--bunker-notice-bg) !important;
+  border-radius: 999px !important;
+  color: var(--bunker-notice-ink) !important;
+}
+
+#modal-dialog-ok-button span {
+  color: var(--bunker-notice-ink) !important;
 }

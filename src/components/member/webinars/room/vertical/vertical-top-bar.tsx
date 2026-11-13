@@ -18,7 +18,8 @@ export type VerticalTopBarProps = {
   onLeave: () => void;
   phase: "ended" | "live" | "waiting";
   /** O numero do contador ja somado (simulation.displayCount). */
-  presentNow: number;
+  /** Quantos assistem; nulo quando a equipe escolheu nao mostrar (docs/30 D102). */
+  presentNow: number | null;
   showLiveBadge: boolean;
   timeLabel: string;
   title: string;
@@ -56,7 +57,7 @@ export function VerticalTopBar({ getOffsetMs, kind, onLeave, phase, presentNow, 
               </span>
             </MemberChip>
           )}
-          {badge.showCount ? (
+          {badge.showCount && presentNow !== null ? (
             <p className="inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full bg-black/45 px-2 text-[11px] font-semibold text-white" data-testid="room-present">
               <Users aria-hidden="true" className="size-3" />
               <span className="tabular-nums">{copy.assistindo(presentNow)}</span>

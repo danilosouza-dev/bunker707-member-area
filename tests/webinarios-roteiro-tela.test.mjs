@@ -219,7 +219,7 @@ test("Roteiro de chat: as linhas com minuto, nome, papel, Solta em e situacao; o
   assert.match(semVideo, /0 entram sozinhas · 0 pelo botão · 0 sem minuto · 0 desligadas/);
 });
 
-test("Simulação: o aviso do CDC, uma linha por sessao gravada com o selo, quem decidiu e quando; a frase de hoje com o nome; so quem publica decide", () => {
+test("Simulação: o aviso do CDC, uma linha por sessao gravada com o selo, quem decidiu e quando (sem a frase na tela, D86); so quem publica decide", () => {
   const markup = html(createElement(SimulationCard, { canPublish: true, currentUserName: "Produtor de Teste", deciderNames: { "u-produtor": "Produtor de Teste" }, disabled: false, now: NOW, sessions: [session(), ended, session({ id: "cancelada", status: "cancelled" })] }));
   const text = textOf(markup);
 
@@ -229,7 +229,7 @@ test("Simulação: o aviso do CDC, uma linha por sessao gravada com o selo, quem
   assert.match(text, /Sessão de 06\/11\/2026 às 20:00/);
   assert.match(text, /Sem decisão registrada: o selo fica desligado\./);
   assert.match(text, /Decisão de Produtor de Teste em 03\/11\/2026 às 09:00\./);
-  assert.match(text, /Decisão do produtor em 03\/11\/2026: …/, "a frase gravada aparece");
+  assert.doesNotMatch(text, /Decisão do produtor em/, "a frase gravada nao aparece mais no card (decisao do produtor em 12/11/2026, docs/30 D86): fica quem decidiu e quando");
   assert.equal(count(markup, /role="switch"/g), 2);
   assert.match(markup, /aria-checked="true"/, "a sessao encerrada com o selo ligado");
   assert.doesNotMatch(text, /Confirmar decisão/, "a frase so aparece ao mexer na chave");

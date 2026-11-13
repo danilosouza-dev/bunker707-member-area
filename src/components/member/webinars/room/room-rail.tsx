@@ -40,11 +40,13 @@ export type RoomRailProps = {
   tab: RoomPanelTab;
   /** Os itens, pela mesma regra das abas (panelTabsFor). */
   tabs: readonly RoomPanelTab[];
+  /** As falas novas da equipe nas perguntas do aluno enquanto a aba Perguntas nao esta na tela (useRoomQuestionNews, D100). */
+  questionsNew?: number;
   /** As mensagens novas de outras pessoas enquanto o Chat nao esta na tela (useRoomPanelUnread). */
   unread: number;
 };
 
-export function RoomRail({ kind, onItem, panelShown, pollOpen, tab, tabs, unread }: RoomRailProps) {
+export function RoomRail({ kind, onItem, panelShown, pollOpen, questionsNew = 0, tab, tabs, unread }: RoomRailProps) {
   const copy = WEBINAR_COPY.salaV2;
 
   return (
@@ -53,12 +55,13 @@ export function RoomRail({ kind, onItem, panelShown, pollOpen, tab, tabs, unread
         const Icon = ICONS[item];
         const open = panelShown && tab === item;
         const label = item === "chat" ? WEBINAR_COPY.sala.abas.chat : tabLabel(item, kind);
-        const count = item === "chat" && !open ? Math.max(0, Math.floor(unread)) : 0;
+        const count = item === "chat" && !open ? Math.max(0, Math.floor(unread)) : item === "perguntas" && !open ? Math.max(0, Math.floor(questionsNew)) : 0;
+        const news = item === "perguntas" ? copy.perguntas.respostasNovas(count) : WEBINAR_COPY.sala.mensagensNovas(count);
         return (
           <button
             aria-controls={ROOM_PANEL_ID}
             aria-expanded={open}
-            aria-label={count > 0 ? copy.trilho.comNovas(label, WEBINAR_COPY.sala.mensagensNovas(count)) : undefined}
+            aria-label={count > 0 ? copy.trilho.comNovas(label, news) : undefined}
             className="group flex w-12 flex-col items-center outline-none"
             data-room-first-focus={item === "chat" ? "" : undefined}
             data-room-rail={item}
@@ -74,7 +77,7 @@ export function RoomRail({ kind, onItem, panelShown, pollOpen, tab, tabs, unread
               )}
             >
               <Icon aria-hidden="true" className="size-6" strokeWidth={1.75} />
-              {item === "chat" ? <RoomCountBadge count={count} ring="bg" /> : null}
+              {item === "chat" || item === "perguntas" ? <RoomCountBadge count={count} ring="bg" /> : null}
               {item === "enquetes" && pollOpen ? (
                 <span aria-hidden="true" className="absolute right-1.5 top-1.5 size-2 rounded-full bg-room-accent shadow-[0_0_0_2px_var(--room-bg)]" />
               ) : null}

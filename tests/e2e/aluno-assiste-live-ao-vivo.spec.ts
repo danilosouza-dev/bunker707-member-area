@@ -1794,3 +1794,108 @@ test("a Na tela por cima do iframe do motor: no palco largo o banner e o QR Code
     unwrap(await db.from("webinar_screen_displays").delete().eq("session_id", LIVE_AO_VIVO_DE_TESTE.sessaoId), "Tirando a Na tela da live de teste");
   }
 });
+
+test("as miniaturas (docs/30 D91 e D105): o menu so tem Lateral e Esconder, as duas valem na hora, por comando, e o video nunca recarrega; o Embaixo guardado de antes abre como Lateral", async ({ page }) => {
+  test.setTimeout(90_000);
+  const visao = WEBINAR_COPY.salaV2.visao;
+  const miniaturas = visao.miniaturas;
+  // A 1920 px com o painel aberto o iframe passa dos 1013 px: a coluna fica na tela pela largura.
+  await page.setViewportSize({ height: 1080, width: 1920 });
+  const { dialogo, montagem, sala } = await entrarNaSala(page);
+  expect(montagem.interfaceConfigOverwrite.VERTICAL_FILMSTRIP, "a coluna ao lado, o padrao").toBe(true);
+  const barra = dialogo.getByRole("group", { name: aoVivo.barra });
+  const palco = dialogo.locator("[data-lesson-player-stage]");
+  const botao = barra.getByRole("button", { exact: true, name: visao.atual(visao.palco) });
+  const menu = dialogo.getByRole("menu", { name: visao.rotulo });
+  const opcao = (nome: string) => menu.getByRole("menuitemradio", { exact: true, name: nome });
+  const margem = (nome: string) => palco.evaluate((elemento, variavel) => (elemento as HTMLElement).style.getPropertyValue(variavel).trim(), nome);
+  await expect.poll(() => margem("--room-video-right")).toBe("222px");
+
+  // O grupo Miniaturas no mesmo menu, com a Lateral marcada; a visao continua com o Palco marcado.
+  await botao.click();
+  await expect(menu.getByRole("group", { name: miniaturas.rotulo })).toBeVisible();
+  await expect(opcao(miniaturas.opcoes.side)).toHaveAttribute("aria-checked", "true");
+  await expect(opcao(visao.palco)).toHaveAttribute("aria-checked", "true");
+  await expect(menu.getByRole("note")).toHaveCount(0);
+
+  // Esconder: o comando vai na hora, sem remontar; com o motor confirmando, os selos vao ate a borda.
+  let antes = (await sala.comandos()).length;
+  await opcao(miniaturas.opcoes.hidden).click();
+  await expect(menu).toBeHidden();
+  await sala.esperarComando("toggleFilmStrip", { depoisDe: antes });
+  await sala.disparar("filmstripDisplayChanged", { visible: false });
+  await expect.poll(() => margem("--room-video-right")).toBe("0px");
+  expect(await sala.montagens(), "Esconder e por comando: o iframe e o mesmo").toBe(1);
+
+  // Lateral de volta: outro comando, e a coluna volta.
+  await botao.click();
+  await expect(opcao(miniaturas.opcoes.hidden)).toHaveAttribute("aria-checked", "true");
+  antes = (await sala.comandos()).length;
+  await opcao(miniaturas.opcoes.side).click();
+  await sala.esperarComando("toggleFilmStrip", { depoisDe: antes });
+  await sala.disparar("filmstripDisplayChanged", { visible: true });
+  await expect.poll(() => margem("--room-video-right")).toBe("222px");
+
+  // So duas opcoes (rodada v12, D105): o Embaixo saiu, porque pedia o video carregado de novo e tirava a aluna da sala
+  // de video por alguns segundos. Nenhuma frase de espera nem "Recarregar o vídeo agora".
+  await botao.click();
+  await expect(menu.getByRole("group", { name: miniaturas.rotulo }).getByRole("menuitemradio")).toHaveText([miniaturas.opcoes.side, miniaturas.opcoes.hidden]);
+  await expect(menu.getByRole("menuitemradio", { exact: true, name: "Embaixo" })).toHaveCount(0);
+  await expect(menu.getByRole("note")).toHaveCount(0);
+  await expect(menu.getByRole("menuitem")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  // Nenhuma troca das miniaturas tirou a aluna da sala de video: o mesmo iframe, sem pedido de saida.
+  expect((await sala.comandos()).some((item) => item.comando === "hangup"), "nenhum hangup").toBe(false);
+  expect(await sala.montagens(), "o video nunca recarregou").toBe(1);
+
+  // Quem tinha escolhido Embaixo antes da rodada v12 ainda tem "bottom" guardado no navegador: a sala abre na Lateral,
+  // com a coluna ao lado, e o menu marca a Lateral.
+  await page.evaluate(() => window.localStorage.setItem("bunker707:webinar-sala-miniaturas", "bottom"));
+  await page.reload();
+  await expect(dialogo).toHaveAttribute("data-room-kind", "live");
+  await dialogo.getByRole("button", { exact: true, name: aoVivo.entrarNaSala }).click();
+  expect((await sala.esperarMontada()).interfaceConfigOverwrite.VERTICAL_FILMSTRIP, "a coluna ao lado, mesmo com o Embaixo guardado").toBe(true);
+  await sala.disparar("videoConferenceJoined", { displayName: "Aluna T.", id: PARTICIPANTE, roomName });
+  await expect(dialogo.getByRole("button", { exact: true, name: aoVivo.levantarMao })).toBeEnabled();
+  await botao.click();
+  await expect(opcao(miniaturas.opcoes.side)).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
+  await expect.poll(() => margem("--room-video-bottom")).toBe("0px");
+  await page.evaluate(() => window.localStorage.removeItem("bunker707:webinar-sala-miniaturas"));
+});
+
+test("a live acaba com a aluna na sala (docs/30 D104): a janela da area avisa 'A live foi encerrada' com o OK em foco, sem o dialogo do motor; o OK fecha e a tela de encerrada fica", async ({ page }) => {
+  test.setTimeout(90_000);
+  const encerrada = WEBINAR_COPY.salaV2.encerrada;
+  const db = createLocalAdminClient();
+  const { dialogo, montagem, sala } = await entrarNaSala(page);
+  // O motor nao abre o dialogo dele quando a sala e encerrada: a pagina avisa.
+  expect(montagem.configOverwrite.notifyOnConferenceDestruction).toBe(false);
+  const janela = dialogo.locator("[data-room-ended-dialog]");
+  await expect(janela).toHaveCount(0);
+
+  try {
+    // Quem apresenta encerra a live: a sessao acaba no banco e o motor avisa que a sala fechou.
+    unwrap(await db.from("webinar_sessions").update({ ended_at: new Date().toISOString(), status: "ended" }).eq("id", LIVE_AO_VIVO_DE_TESTE.sessaoId), "Encerrando a live de teste");
+    await sala.disparar("readyToClose", {});
+
+    await expect(janela).toBeVisible({ timeout: 30_000 });
+    await expect(janela).toHaveAttribute("role", "alertdialog");
+    await expect(janela.getByRole("heading", { name: encerrada.titulo })).toBeVisible();
+    await expect(janela.getByText(encerrada.texto)).toBeVisible();
+    const ok = janela.getByRole("button", { exact: true, name: encerrada.ok });
+    await expect(ok).toBeFocused();
+    // Nenhuma tentativa de voltar para uma live que acabou.
+    await expect(dialogo.getByText(aoVivo.naoConseguimosVoltar)).toHaveCount(0);
+
+    // O OK so fecha a janela: a sala fica na tela de live encerrada.
+    await ok.click();
+    await expect(janela).toHaveCount(0);
+    await expect(dialogo.locator('[data-room-stage="ended"]')).toBeVisible();
+    await expect.poll(() => dialogo.evaluate((elemento) => elemento.contains(document.activeElement))).toBe(true);
+  } finally {
+    // Os testes seguintes do arquivo (a ordem pode mudar) encontram a live no ar de novo.
+    unwrap(await db.from("webinar_sessions").update({ ended_at: null, status: "live" }).eq("id", LIVE_AO_VIVO_DE_TESTE.sessaoId), "Voltando a live de teste para o ar");
+  }
+});

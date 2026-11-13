@@ -49,14 +49,18 @@ export type ConsoleSkeleton = {
 
 /**
  * As classes de cada parte do console. Com palco (a live): o palco 16:9 abaixo de lg e, a partir de lg, a altura que
- * sobra da coluna, nunca menos de 240 px; o painel no cartao do YouTube com a largura da sala (clamp de 320 a 514 px,
- * 27,5 % da janela), e fechado ele some (montado) e o palco toma a largura; o trilho de 48 px depois do painel, a 16 px
+ * sobra da coluna, nunca menos de 240 px; o painel no cartao do YouTube, de 320 a 514 px (27,5 % da janela: mais largo
+ * que o da sala do aluno, que para em 400 px; a rodada v9 tinha baixado o do console para 400 px tambem, e o produtor
+ * pediu de volta o espaco de antes no teste de 12/11/2026, docs/30 D92), e fechado ele some (montado) e o palco toma a largura; o trilho de 48 px depois do painel, a 16 px
  * da borda. Sem palco, o painel nunca fecha e fica no meio, com ate 720 px. A coluna do palco (so o palco e a barra; as
  * Configurações abrem por cima) rola por dentro numa janela baixa demais: o palco guarda o piso e a barra continua ao
  * alcance. A folga de 4 px (-m-1 com p-1) deixa o anel de foco dos botoes da borda inteiro dentro da rolagem. O painel
  * (console-panel.tsx) tem o cabecalho (ou a linha das abas) fixo e o corpo que rola. Os avisos (adminToast) abrem em
  * cima, no meio, logo abaixo do topo (a variavel --console-toast-top da raiz: o topo tem duas linhas abaixo de lg).
  */
+/** A largura do painel do console a partir de lg: de 320 a 514 px (a sala do aluno para em 400 px). */
+export const CONSOLE_PANEL_WIDTH = "lg:w-[clamp(320px,27.5vw,514px)]";
+
 export function consoleSkeleton(input: { hasStage: boolean; panelOpen: boolean }): ConsoleSkeleton {
   const card = "lg:rounded-[12px] lg:border lg:border-room-panel-border lg:bg-room-panel";
   const panelBase = `relative flex min-w-0 flex-col lg:min-h-0 ${card} [--surface-1:var(--room-panel)] [--surface-3:var(--room-panel)]`;
@@ -65,7 +69,7 @@ export function consoleSkeleton(input: { hasStage: boolean; panelOpen: boolean }
     bar: input.hasStage ? "min-w-0 shrink-0" : null,
     body: "flex min-w-0 flex-col gap-4 px-4 pb-4 pt-2 lg:min-h-0 lg:flex-1 lg:flex-row lg:pt-0",
     // Fechado, so `hidden` (sem o `flex`, que disputaria o display com ele).
-    panel: input.hasStage ? (input.panelOpen ? `${panelBase} lg:w-[clamp(320px,27.5vw,514px)] lg:flex-none` : "hidden") : `${panelBase} mx-auto w-full max-w-[720px]`,
+    panel: input.hasStage ? (input.panelOpen ? `${panelBase} ${CONSOLE_PANEL_WIDTH} lg:flex-none` : "hidden") : `${panelBase} mx-auto w-full max-w-[720px]`,
     rail: input.hasStage ? "hidden w-12 shrink-0 flex-col items-center gap-4 lg:ml-2 lg:flex" : null,
     root: "flex min-h-dvh flex-col bg-room-bg text-room-fg [--member-button-radius:9999px] [--member-cover-radius:12px] [&_[data-slot=button]]:rounded-full! [--console-toast-top:7.5rem] lg:h-dvh lg:overflow-hidden lg:[--console-toast-top:5rem]",
     stage: input.hasStage ? "relative aspect-video w-full min-w-0 overflow-hidden rounded-2xl bg-black lg:aspect-auto lg:min-h-60 lg:flex-1" : null,

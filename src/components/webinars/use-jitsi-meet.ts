@@ -137,6 +137,12 @@ export type UseJitsiMeet = {
   api: RefObject<JitsiMeetApi | null>;
   /** Manda um comando ao iframe; falso quando ainda nao ha sala montada. */
   executeCommand: (command: string, ...args: unknown[]) => boolean;
+  /**
+   * O interfaceConfigOverwrite com que o iframe de agora foi montado (nulo sem iframe). O motor le essas chaves so na
+   * montagem: a pagina compara com o que ela quer agora para saber o que so vale depois de recarregar (a fileira de
+   * miniaturas embaixo, VERTICAL_FILMSTRIP; rodada v9, docs/30 D91).
+   */
+  mountedInterfaceConfig: Readonly<Record<string, unknown>> | null;
   /** O id do proprio participante no Jitsi (do videoConferenceJoined), para filtrar mao levantada e papel. */
   participantId: string | null;
   /** Remonta a sala com o token mais novo ("Tentar de novo" ou depois de uma queda). */
@@ -151,6 +157,7 @@ export function useJitsiMeet<E extends string = JitsiListenedEvent>(input: UseJi
   const [mountKey, setMountKey] = useState(0);
   const [status, setStatus] = useState<JitsiStatus>("idle");
   const [participantId, setParticipantId] = useState<string | null>(null);
+  const [mountedInterfaceConfig, setMountedInterfaceConfig] = useState<Readonly<Record<string, unknown>> | null>(null);
 
   useEffect(() => {
     latest.current = input;
@@ -182,6 +189,7 @@ export function useJitsiMeet<E extends string = JitsiListenedEvent>(input: UseJi
           width: "100%"
         });
         api.current = instance;
+        setMountedInterfaceConfig(current.interfaceConfigOverwrite ?? {});
         // A nossa lista (com speaker-selection, para o alto-falante do painel Configurações) no lugar da do external_api.js.
         const iframe = instance.getIFrame?.();
         if (iframe) {
@@ -221,6 +229,7 @@ export function useJitsiMeet<E extends string = JitsiListenedEvent>(input: UseJi
     return () => {
       disposed = true;
       api.current = null;
+      setMountedInterfaceConfig(null);
       setParticipantId(null);
       setStatus("idle");
       try {
@@ -247,5 +256,5 @@ export function useJitsiMeet<E extends string = JitsiListenedEvent>(input: UseJi
   const retry = useCallback(() => setMountKey((key) => key + 1), []);
 
   // Montando (o script ainda carrega ou a sala acabou de ser pedida de novo): "loading".
-  return { api, executeCommand, participantId, retry, status: ready ? (status === "idle" ? "loading" : status) : "idle" };
+  return { api, executeCommand, mountedInterfaceConfig, participantId, retry, status: ready ? (status === "idle" ? "loading" : status) : "idle" };
 }

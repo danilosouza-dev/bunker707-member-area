@@ -5,11 +5,12 @@ import { actionStubs } from "./support/admin-action-stubs.mjs";
 import { ENDED_SESSION, LIVE_SESSION, MIN, REPLAY, SESSION, WEBINAR, bancoDaSimulacao, escolaDaSimulacao } from "./support/webinarios-v4-simulacao-banco.mjs";
 
 // Os participantes simulados mudados a qualquer momento, no servidor e sem banco (docs/30 D79 e D80; docs/18 §2.2):
-// saveSimulatedAudience no banco da Simulacao em memoria. Somar pede a caixa com a frase da mudanca (a de hoje, com o
-// numero e o nome de quem muda); com a live no ar, a mudanca vira uma linha de webinar_simulation_changes com o offset
+// saveSimulatedAudience no banco da Simulacao em memoria. Somar nao pede frase nem caixa desde 12/11/2026 (D86): o
+// servidor grava sozinho a frase da mudanca (a de hoje, com o numero e o nome de quem muda) no registro; com a live
+// no ar, a mudanca vira uma linha de webinar_simulation_changes com o offset
 // desde o Começar para todos, a decisao da sessao passa a ser a frase dela (o carimbo da sala muda) e a sessao sem
 // contador fica com "Real + 0"; a janela da Simulacao devolve o numero novo depois da rampa; antes do comeco a linha fica
-// sem offset e a regra da sessao muda; o Tirar grava a frase do +0 sem caixa; o mesmo numero, a encerrada, o Replay,
+// sem offset e a regra da sessao muda; o Tirar grava a frase do +0; o mesmo numero, a encerrada, o Replay,
 // quem nao publica e o banco sem a tabela recusam sem gravar; o teto de 200 mudancas; a leitura do card com a vista do
 // controle; o resumo do fim (o tick) que junta os trechos; e as mudancas lidas todas, em paginas, alem do teto de 1.000
 // linhas do PostgREST (a revisao v8, achado 8).
@@ -119,26 +120,19 @@ function semATabela(db) {
   return db;
 }
 
-test("a live no ar: +300 sem a caixa ou com a frase errada recusa; com a frase, a linha com o offset, a decisao da sessao (o carimbo) e a janela com o numero novo depois da rampa", async () => {
+test("a live no ar: +300 direto, sem frase nem caixa (D86); o servidor grava a frase da mudanca, a linha com o offset, a decisao da sessao (o carimbo) e a janela com o numero novo depois da rampa", async () => {
   const db = usar(bancoDaSimulacao({ tables: escolaAoVivo() }));
   const antes = linha(db, LIVE_SESSION).updated_at;
 
-  const semCaixa = await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION });
-  assert.equal(semCaixa.status, 400, "sem a frase confirmada, recusa");
-  const errada = await actions.saveSimulatedAudience({ ackText: frase(500), acknowledged: true, extra: 300, sessionId: LIVE_SESSION });
-  assert.deepEqual([errada.status, errada.fieldErrors?.acknowledged?.[0]], [400, SERVIDOR.plateiaFraseNaoBate], "a frase de outro numero nao serve");
-  const daGravada = await actions.saveSimulatedAudience({ ackText: frase(300, { live: false }), acknowledged: true, extra: 300, sessionId: LIVE_SESSION });
-  assert.equal(daGravada.status, 400, "a frase da gravada nao serve na live");
-  assert.equal(mudancas(db).length, 0, "nada gravado ate aqui");
-
   const texto = frase(300);
   assert.match(texto, /A partir de agora, os participantes simulados somam \+300 ao número de quem assiste\. Responsável: Produtora de Teste\.$/);
-  const salvo = ok(await actions.saveSimulatedAudience({ ackText: texto, acknowledged: true, extra: 300, sessionId: LIVE_SESSION }));
+  // O pedido leva so o numero, a sessao e a origem: a frase e a confirmacao da tela sairam (D86).
+  const salvo = ok(await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION }));
   const [mudanca] = mudancas(db);
   assert.equal(mudanca.session_id, LIVE_SESSION);
   assert.deepEqual(mudanca.count_rule, { base: 300, jitter: 0, mode: "fixed", peak: 300 });
   assert.ok(Math.abs(mudanca.at_offset_ms - 20 * MIN) < 5_000, `o offset desde o Começar para todos (${mudanca.at_offset_ms})`);
-  assert.deepEqual([mudanca.ack_text, mudanca.changed_by, mudanca.source], [texto, PRODUTORA, "console"]);
+  assert.deepEqual([mudanca.ack_text, mudanca.changed_by, mudanca.source], [texto, PRODUTORA, "console"], "a frase montada pelo servidor fica no registro (D80), sem a tela pedir");
   const sessao = linha(db, LIVE_SESSION);
   assert.deepEqual(sessao.simulated_count_rule, { base: 0, jitter: 0, mode: "fixed", peak: 0 }, "a sessao sem contador fica com Real + 0 (o mesmo numero ate a mudanca)");
   assert.deepEqual([sessao.simulation_ack_text, sessao.simulation_decided_by], [texto, PRODUTORA], "a decisao da sessao e a frase da mudanca");
@@ -161,10 +155,10 @@ test("a live no ar: +300 sem a caixa ou com a frase errada recusa; com a frase, 
   assert.equal(model.simulationCounterNow({ durationMs: 60 * MIN, endMs: Number.POSITIVE_INFINITY, kind: "live", offsetMs: mudanca.at_offset_ms - 1, simulation, status: "live" }), 0, "antes da mudanca, so o real");
 
   // O mesmo numero de novo nao muda nada.
-  const igual = await actions.saveSimulatedAudience({ ackText: texto, acknowledged: true, extra: 300, sessionId: LIVE_SESSION });
+  const igual = await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION });
   assert.deepEqual([igual.status, igual.fieldErrors?.extra?.[0]], [400, SERVIDOR.plateiaIgual]);
 
-  // O Tirar (+0) sem caixa grava a frase do +0.
+  // O Tirar (+0) grava a frase do +0.
   const tirado = ok(await actions.saveSimulatedAudience({ extra: 0, sessionId: LIVE_SESSION, source: "editor" }));
   const ultima = mudancas(db).at(-1);
   assert.equal(ultima.count_rule, null, "Só o real");
@@ -176,7 +170,7 @@ test("a live no ar: +300 sem a caixa ou com a frase errada recusa; com a frase, 
 
 test("antes do comeco: a linha sem offset e a regra da sessao passa a ser a nova (vale na hora); a gravada agendada tambem", async () => {
   const db = usar(bancoDaSimulacao({ tables: escolaAoVivo({ scheduled_at: new Date(Date.now() - 5 * MIN).toISOString(), started_at: null, status: "waiting" }) }));
-  ok(await actions.saveSimulatedAudience({ ackText: frase(200), acknowledged: true, extra: 200, sessionId: LIVE_SESSION }));
+  ok(await actions.saveSimulatedAudience({ extra: 200, sessionId: LIVE_SESSION }));
   assert.equal(mudancas(db)[0].at_offset_ms, null, "antes do comeco");
   assert.deepEqual(linha(db, LIVE_SESSION).simulated_count_rule, { base: 200, jitter: 0, mode: "fixed", peak: 200 });
   const simulation = await store.fetchSessionSimulation(db, LIVE_SESSION);
@@ -185,7 +179,7 @@ test("antes do comeco: a linha sem offset e a regra da sessao passa a ser a nova
 
   const gravada = usar(bancoDaSimulacao({ tables: escolaDaSimulacao({ minutosNoAr: -60, sessao: { status: "scheduled" } }) }));
   const textoGravada = model.simulationAudienceAckFor({ extra: 100, flags: SEM_NADA, nowMs: Date.now(), responsible: NOME });
-  ok(await actions.saveSimulatedAudience({ ackText: textoGravada, acknowledged: true, extra: 100, sessionId: SESSION }));
+  ok(await actions.saveSimulatedAudience({ extra: 100, sessionId: SESSION }));
   assert.deepEqual(linha(gravada, SESSION).simulated_count_rule, { base: 100, jitter: 0, mode: "fixed", peak: 100 });
   assert.equal(linha(gravada, SESSION).simulation_ack_text, textoGravada);
 });
@@ -193,7 +187,7 @@ test("antes do comeco: a linha sem offset e a regra da sessao passa a ser a nova
 test("recusas sem gravar: quem nao publica (403), a encerrada, o Replay, a sessao que nao existe, o banco sem a 202611140002 e o teto de mudancas", async () => {
   const db = usar(bancoDaSimulacao({ tables: escolaAoVivo() }));
   estado.semPublicar = true;
-  const negado = await actions.saveSimulatedAudience({ ackText: frase(300), acknowledged: true, extra: 300, sessionId: LIVE_SESSION });
+  const negado = await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION });
   assert.equal(negado.status, 403);
   estado.semPublicar = false;
 
@@ -201,7 +195,7 @@ test("recusas sem gravar: quem nao publica (403), a encerrada, o Replay, a sessa
   const comEncerrada = usar(bancoDaSimulacao({ tables: tabelas }));
   linha(comEncerrada, LIVE_SESSION).status = "ended";
   linha(comEncerrada, LIVE_SESSION).ended_at = new Date().toISOString();
-  const encerrada = await actions.saveSimulatedAudience({ ackText: frase(300), acknowledged: true, extra: 300, sessionId: LIVE_SESSION });
+  const encerrada = await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION });
   assert.deepEqual([encerrada.status, encerrada.error], [409, SERVIDOR.plateiaEncerrada], "depois do Encerrar, recusa");
   const replay = await actions.saveSimulatedAudience({ extra: 0, sessionId: REPLAY });
   assert.deepEqual([replay.status, replay.error], [409, SERVIDOR.semReplay]);
@@ -212,7 +206,7 @@ test("recusas sem gravar: quem nao publica (403), a encerrada, o Replay, a sessa
   assert.equal(mudancas(db).length + mudancas(comEncerrada).length, 0);
 
   const semTabela = usar(semATabela(bancoDaSimulacao({ tables: escolaAoVivo() })));
-  const pendente = await actions.saveSimulatedAudience({ ackText: frase(300), acknowledged: true, extra: 300, sessionId: LIVE_SESSION });
+  const pendente = await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION });
   assert.deepEqual([pendente.status, pendente.error], [409, SERVIDOR.precisaMigracaoPlateia("202611140002")]);
   assert.equal(linha(semTabela, LIVE_SESSION).simulation_ack_text, null, "nada muda na sessao");
   assert.equal(semTabela.calls.writes.length, 0, "nenhuma escrita");
@@ -231,7 +225,7 @@ test("recusas sem gravar: quem nao publica (403), a encerrada, o Replay, a sessa
     source: "console"
   }));
   usar(bancoDaSimulacao({ tables: cheia }));
-  const limite = await actions.saveSimulatedAudience({ ackText: frase(300), acknowledged: true, extra: 300, sessionId: LIVE_SESSION });
+  const limite = await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION });
   assert.deepEqual([limite.status, limite.error], [409, SERVIDOR.plateiaLimite(SIMULATION_LIMITS.countChangesMax)]);
 });
 
@@ -327,4 +321,94 @@ test("revisao v8, achado 8: as mudancas de varias sessoes passam das 1.000 linha
   const daUltima = store.withCountChanges({ sessionId: sessoes[5] }, todas).countChanges;
   assert.equal(daUltima.length, SIMULATION_LIMITS.countChangesMax);
   assert.deepEqual(daUltima.at(-1).rule, { base: 5199, jitter: 0, mode: "fixed", peak: 5199 }, "a mudanca que vale agora na ultima sessao");
+});
+
+/* "Variar sozinho" (rodada v9, pedido do produtor de 12/11/2026; docs/30 D90). */
+
+const VARIA = { direction: "both", everyMaxSeconds: 60, everyMinSeconds: 20, percent: 5 };
+const VARIA_NA_LINHA = { direction: "both", every_max_seconds: 60, every_min_seconds: 20, percent: 5 };
+
+test("Variar sozinho no ar: a mudanca grava a variacao na regra e na frase; o mesmo numero com a mesma variacao recusa; mudar ou desligar a variacao aplica; o +0 ignora", async () => {
+  const db = usar(bancoDaSimulacao({ tables: escolaAoVivo() }));
+  // Duas mudancas nunca caem no mesmo milissegundo de verdade (sao cliques de uma pessoa); aqui as chamadas sao
+  // seguidas, e duas linhas com a mesma hora ficariam na ordem do id sorteado (a leitura ordena por created_at e id).
+  const umInstante = () => new Promise((resolve) => setTimeout(resolve, 3));
+
+  const salvo = ok(await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION, vary: VARIA }));
+  const [mudanca] = mudancas(db);
+  assert.deepEqual(mudanca.count_rule, { base: 300, jitter: 0, mode: "fixed", peak: 300, vary: VARIA_NA_LINHA });
+  assert.equal(mudanca.ack_text, `${frase(300)} Varia sozinho até 5%, para mais e para menos, a cada 20 a 60 s.`, "a variacao entra no registro (D80)");
+  assert.deepEqual(salvo.audience.current, { base: 300, jitter: 0, mode: "fixed", peak: 300, vary: VARIA });
+  assert.deepEqual(salvo.audience.changes[0].vary, VARIA);
+  const auditoria = db.tables.admin_audit_log.find((row) => row.action === "webinar.simulation_audience_changed");
+  assert.deepEqual([auditoria.metadata.vary_percent, auditoria.metadata.vary_direction, auditoria.metadata.vary_every_min_seconds, auditoria.metadata.vary_every_max_seconds], [5, "both", 20, 60]);
+
+  // A janela da sala depois da rampa: o numero dentro da faixa do exemplo, mudando sozinho.
+  const simulation = await store.fetchSessionSimulation(db, LIVE_SESSION);
+  const depois = mudanca.at_offset_ms + SIMULATION_LIMITS.countRampSeconds * 1000 + 15_000;
+  const vistos = new Set();
+  for (let offset = depois; offset < depois + 20 * MIN; offset += 5_000) {
+    const numero = model.simulationCounterNow({ durationMs: 60 * MIN, endMs: Number.POSITIVE_INFINITY, kind: "live", offsetMs: offset, simulation, status: "live" });
+    assert.ok(numero >= 285 && numero <= 315, `${offset}: ${numero}`);
+    vistos.add(numero);
+  }
+  assert.ok(vistos.size >= 5, "o numero muda sozinho");
+
+  // O mesmo numero com a mesma variacao: nada mudaria.
+  const igual = await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION, vary: { ...VARIA } });
+  assert.deepEqual([igual.status, igual.fieldErrors?.extra?.[0]], [400, WEBINAR_COPY.simulacao.plateia.variar.igual]);
+  assert.equal(mudancas(db).length, 1);
+
+  // O mesmo numero com outra variacao aplica; sem a variacao (desligar) tambem.
+  await umInstante();
+  ok(await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION, vary: { ...VARIA, direction: "up", percent: 10 } }));
+  assert.deepEqual(mudancas(db).at(-1).count_rule.vary, { ...VARIA_NA_LINHA, direction: "up", percent: 10 });
+  await umInstante();
+  const desligada = ok(await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION }));
+  assert.deepEqual(mudancas(db).at(-1).count_rule, { base: 300, jitter: 0, mode: "fixed", peak: 300 }, "sem a chave, o numero parado");
+  assert.equal(desligada.audience.current.vary, undefined);
+  assert.equal(mudancas(db).at(-1).ack_text, frase(300));
+  await umInstante();
+  const parado = await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION, vary: null });
+  assert.deepEqual([parado.status, parado.fieldErrors?.extra?.[0]], [400, SERVIDOR.plateiaIgual]);
+
+  // Com o +0 (o Tirar) a variacao e ignorada.
+  await umInstante();
+  ok(await actions.saveSimulatedAudience({ extra: 0, sessionId: LIVE_SESSION, vary: VARIA }));
+  assert.equal(mudancas(db).at(-1).count_rule, null);
+
+  // Fora dos limites: 400 no campo, nada gravado.
+  const total = mudancas(db).length;
+  const invalida = await actions.saveSimulatedAudience({ extra: 300, sessionId: LIVE_SESSION, vary: { ...VARIA, percent: 80 } });
+  assert.equal(invalida.status, 400);
+  assert.equal(mudancas(db).length, total);
+});
+
+test("Variar sozinho antes do comeco: a regra da sessao leva a variacao e vale na hora; o resumo do fim (o tick) conta o pico da variacao", async () => {
+  const db = usar(bancoDaSimulacao({ tables: escolaAoVivo({ scheduled_at: new Date(Date.now() - 5 * MIN).toISOString(), started_at: null, status: "waiting" }) }));
+  ok(await actions.saveSimulatedAudience({ extra: 200, sessionId: LIVE_SESSION, source: "editor", vary: { ...VARIA, direction: "up", percent: 10 } }));
+  assert.deepEqual(linha(db, LIVE_SESSION).simulated_count_rule, { base: 200, jitter: 0, mode: "fixed", peak: 200, vary: { ...VARIA_NA_LINHA, direction: "up", percent: 10 } });
+  assert.equal(mudancas(db)[0].at_offset_ms, null);
+
+  // A sessao encerrada 30 min depois: o resumo e o maior numero que a turma viu, acima do fixo e dentro da faixa.
+  const startedAt = Date.now() - 50 * MIN;
+  const tabelas = escolaAoVivo({
+    ended_at: new Date(startedAt + 30 * MIN).toISOString(),
+    simulated_count_rule: { base: 200, jitter: 0, mode: "fixed", peak: 200, vary: { ...VARIA_NA_LINHA, direction: "up", percent: 10 } },
+    simulation_ack_text: "Decisão do produtor em 12/11/2026: …",
+    simulation_decided_at: new Date(startedAt).toISOString(),
+    simulation_decided_by: PRODUTORA,
+    started_at: new Date(startedAt).toISOString(),
+    status: "ended"
+  });
+  const encerrada = usar(bancoDaSimulacao({ tables: tabelas }));
+  const original = console.info;
+  console.info = () => undefined;
+  try {
+    await tick.runSimulationSummariesTick({ db: encerrada });
+  } finally {
+    console.info = original;
+  }
+  const resumo = linha(encerrada, LIVE_SESSION).simulation_summary;
+  assert.ok(resumo.counter_max > 200 && resumo.counter_max <= 220, `o pico da variacao entra no resumo honesto (${resumo.counter_max})`);
 });

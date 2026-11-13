@@ -83,7 +83,7 @@ test("consoleSkeleton (docs/31 V2-13 e §10): com palco, a coluna do palco com o
   // O painel e a referencia dos rotulos sr-only dele (o corpo de dentro rola, console-panel.tsx).
   assert.ok(has(live.panel, "relative"), "o painel com palco e a referencia dos rotulos dele");
   // O cartao do YouTube a partir de lg: o fundo do painel, o contorno de 1 px e o raio 12, com a largura da sala.
-  for (const classe of ["lg:rounded-[12px]", "lg:border", "lg:border-room-panel-border", "lg:bg-room-panel", "lg:w-[clamp(320px,27.5vw,514px)]", "lg:flex-none"]) {
+  for (const classe of ["lg:rounded-[12px]", "lg:border", "lg:border-room-panel-border", "lg:bg-room-panel", layout.CONSOLE_PANEL_WIDTH, "lg:flex-none"]) {
     assert.ok(has(live.panel, classe), `o painel com ${classe}`);
   }
   // Dentro do cartao, os cartoes do admin (SectionCard) ficam no fundo do proprio cartao: nunca um cartao escuro dentro dele.
@@ -369,12 +369,13 @@ test("liveConfigOverwrite no console: host e co-apresentador sem a barra do moto
     assert.equal(console.disableShortcuts, true, role);
     assert.deepEqual(console.participantMenuButtonsWithNotifyClick, [{ key: "ask-unmute", preventExecution: true }, { key: "kick", preventExecution: true }]);
     assert.deepEqual(embed.liveConfigOverwrite(role, settings, null, "console", "engine").toolbarButtons, ["desktop"], `${role}: o botao de tela do motor`);
-    // So a barra, os atalhos, o ⋮ e os avisos do motor mudam (no console eles continuam, V2-A59): o resto e o da sala
-    // (o envio do palco, o mudo, o menu da miniatura).
+    // So a barra, os atalhos, o ⋮ e os avisos do motor mudam (no console eles continuam, V2-A59, menos o da mao
+    // levantada, D95): o resto e o da sala (o envio do palco, o mudo, o menu da miniatura). O selo do motor no topo
+    // (conferenceInfo) sai nas duas, entao nao esta na lista.
     const diferentes = Object.keys({ ...sala, ...console }).filter((key) => JSON.stringify(sala[key]) !== JSON.stringify(console[key]));
     assert.deepEqual(
       diferentes.sort(),
-      ["bunkerTheme", "conferenceInfo", "disableShortcuts", "notifications", "participantMenuButtonsWithNotifyClick", "toolbarButtons", "toolbarConfig"],
+      ["bunkerTheme", "disableShortcuts", "disabledNotifications", "notifications", "participantMenuButtonsWithNotifyClick", "toolbarButtons", "toolbarConfig"],
       role
     );
     // A pagina da sala com o papel de quem apresenta continua com a barra do motor.
@@ -384,9 +385,10 @@ test("liveConfigOverwrite no console: host e co-apresentador sem a barra do moto
     assert.deepEqual(embed.liveConfigOverwrite(role, settings, null, "room"), sala, "room e o padrao");
   }
   for (const role of ["student", "team"]) {
-    // Igual a sala, menos o motor calado da sala (V2-20): no console ninguem ouve o notificationTriggered.
-    const semAvisos = Object.fromEntries(Object.entries(embed.liveConfigOverwrite(role, settings)).filter(([key]) => !["conferenceInfo", "disabledSounds", "notifications"].includes(key)));
-    assert.deepEqual(embed.liveConfigOverwrite(role, settings, null, "console", "engine"), semAvisos, `${role}: igual a sala, com os avisos do motor`);
+    // Igual a sala, menos o motor calado da sala (V2-20): no console ninguem ouve o notificationTriggered, e so o aviso
+    // da mao levantada sai (D95). O selo do motor no topo sai nas duas.
+    const semAvisos = Object.fromEntries(Object.entries(embed.liveConfigOverwrite(role, settings)).filter(([key]) => !["disabledSounds", "notifications"].includes(key)));
+    assert.deepEqual(embed.liveConfigOverwrite(role, settings, null, "console", "engine"), { ...semAvisos, disabledNotifications: ["notify.raisedHand"] }, `${role}: igual a sala, com os avisos do motor menos o da mao`);
   }
   // O interfaceConfig e o mesmo nas duas superficies (so o papel e o visual): o dialogo de fundo do motor, que o
   // Mais opções de fundo abre, continua so com os aparelhos.
@@ -446,12 +448,19 @@ test("consoleTabsFor: a live com Chat, Perguntas, Mãos e Pessoas; a gravada e o
   assert.deepEqual([...v2.CONSOLE_TABS], ["chat", "perguntas", "maos", "pessoas"]);
 });
 
-test("consoleMoreEntriesFor: as entradas do ⋯ na ordem do V2-15, pela sessao: Na tela primeiro na live e na gravada (nunca no Replay), Roteiro no webinario gravado e na sessao da live (R8, nunca no Replay da live), Oferta fora da live, Presença com a leitura dela, Gravação so na live", () => {
+test("consoleMoreEntriesFor: as entradas do ⋯ na ordem do V2-15, pela sessao: Na tela primeiro na live e na gravada (nunca no Replay), Roteiro no webinario gravado e na sessao da live (R8, nunca no Replay da live), Oferta fora da live, Presença sempre na live e na gravada (D107) e no Replay so com a leitura dela, Gravação so na live", () => {
   assert.deepEqual([...v2.CONSOLE_MORE_ENTRIES], ["tela", "enquetes", "roteiro", "oferta", "atendimento", "presenca", "gravacao"], "a Na tela e a primeira entrada");
   assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: true, kind: "live", webinarKind: "live" }), ["tela", "enquetes", "roteiro", "atendimento", "presenca", "gravacao"]);
-  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "live", webinarKind: "live" }), ["tela", "enquetes", "roteiro", "atendimento", "gravacao"], "antes de comecar, sem a Presença (a Na tela e o Roteiro ja valem na espera)");
+  // Desde a rodada v12 (docs/30 D107) a Presença existe tambem antes de comecar: la fica a chave do numero de pessoas.
+  assert.deepEqual(
+    v2.consoleMoreEntriesFor({ hasPresence: false, kind: "live", webinarKind: "live" }),
+    ["tela", "enquetes", "roteiro", "atendimento", "presenca", "gravacao"],
+    "antes de comecar, a Presença ja esta la (a chave do numero de pessoas)"
+  );
   assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: true, kind: "simulated", webinarKind: "simulated" }), ["tela", "enquetes", "roteiro", "oferta", "atendimento", "presenca"]);
-  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "live" }), ["enquetes", "oferta", "atendimento"], "no Replay nada aparece na frente da turma: sem a Na tela");
+  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "simulated", webinarKind: "simulated" }), ["tela", "enquetes", "roteiro", "oferta", "atendimento", "presenca"]);
+  assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "live" }), ["enquetes", "oferta", "atendimento"], "no Replay nada aparece na frente da turma: sem a Na tela nem a Presença");
+  assert.deepEqual(v2.consoleMoreEntriesFor({ audience: true, hasPresence: false, kind: "replay", webinarKind: "live" }), ["enquetes", "oferta", "atendimento"], "nem com participantes simulados");
   assert.deepEqual(v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "simulated" }), ["enquetes", "roteiro", "oferta", "atendimento"], "o Replay da gravada continua com o Roteiro, sem a Na tela");
   for (const entries of [v2.consoleMoreEntriesFor({ hasPresence: true, kind: "live", webinarKind: "live" }), v2.consoleMoreEntriesFor({ hasPresence: true, kind: "simulated", webinarKind: "simulated" })]) {
     assert.deepEqual(entries, v2.CONSOLE_MORE_ENTRIES.filter((entry) => entries.includes(entry)), "sempre na ordem do V2-15");
@@ -488,9 +497,12 @@ test("consolePanelViewOf: a aba ou a entrada escolhida vale enquanto existe nest
   const entries = v2.consoleMoreEntriesFor({ hasPresence: true, kind: "live", webinarKind: "live" });
   assert.deepEqual(v2.consolePanelViewOf({ entries, tabs, view: { tab: "maos" } }), { tab: "maos" });
   assert.deepEqual(v2.consolePanelViewOf({ entries, tabs, view: { more: "gravacao" } }), { more: "gravacao" });
-  // A Presença some sem a leitura dela; a gravada nao tem Mãos nem Gravação.
+  // A Presença fica tambem sem a leitura dela (a chave do numero de pessoas, docs/30 D107); a gravada nao tem Mãos nem Gravação.
   const semPresenca = v2.consoleMoreEntriesFor({ hasPresence: false, kind: "live", webinarKind: "live" });
-  assert.deepEqual(v2.consolePanelViewOf({ entries: semPresenca, tabs, view: { more: "presenca" } }), { tab: "chat" });
+  assert.deepEqual(v2.consolePanelViewOf({ entries: semPresenca, tabs, view: { more: "presenca" } }), { more: "presenca" });
+  // No Replay sem a leitura ela some, e a escolha volta ao Chat.
+  const replaySemPresenca = v2.consoleMoreEntriesFor({ hasPresence: false, kind: "replay", webinarKind: "live" });
+  assert.deepEqual(v2.consolePanelViewOf({ entries: replaySemPresenca, tabs: v2.consoleTabsFor({ kind: "replay" }), view: { more: "presenca" } }), { tab: "chat" });
   const gravada = { entries: v2.consoleMoreEntriesFor({ hasPresence: false, kind: "simulated", webinarKind: "simulated" }), tabs: v2.consoleTabsFor({ kind: "simulated" }) };
   assert.deepEqual(v2.consolePanelViewOf({ ...gravada, view: { tab: "maos" } }), { tab: "chat" });
   assert.deepEqual(v2.consolePanelViewOf({ ...gravada, view: { more: "gravacao" } }), { tab: "chat" });

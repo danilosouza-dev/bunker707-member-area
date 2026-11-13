@@ -78,10 +78,10 @@ export const loadAssistantEditor = fail; export const saveAssistant = fail; expo
   "@/server/webinars/translation-actions": `${fail}
 export const clearMessageTranslations = fail;`,
   "@/server/webinars/screen-actions": `${fail}
-export const saveScreenItem = fail; export const archiveScreenItem = fail; export const uploadScreenImage = fail; export const showScreenItem = fail; export const hideScreenItem = fail;`,
+export const saveScreenItem = fail; export const archiveScreenItem = fail; export const uploadScreenImage = fail; export const showScreenItem = fail; export const hideScreenItem = fail; export const showScreenComment = fail; export const hideScreenComment = fail;`,
   "@/server/webinars/room-actions": `${fail}
 export const openSessionNow = fail; export const endSessionNow = fail; export const sendTeamMessage = fail; export const moderateMessage = fail; export const setSessionChatMode = fail; export const savePolls = fail; export const launchPoll = fail; export const closePoll = fail; export const pinPoll = fail; export const unpinPoll = fail; export const answerQuestion = fail; export const replyToQuestion = fail; export const deleteQuestionReply = fail; export const setQuestionStatus = fail; export const saveSimulation = fail; export const createReplaySession = fail; export const cancelReplaySession = fail; export const removeStudentMessages = fail;
-export const createConsolePoll = fail;`
+export const createConsolePoll = fail; export const markQuestionSeen = fail; export const likeQuestionItem = fail; export const setShowPresentCount = fail;`
 };
 
 function withExtension(base) {
@@ -272,7 +272,8 @@ test("topo (docs/31 V2-13 e §10): a raiz com o tema escuro, a seta de voltar ao
   assert.match(h1, /\blg:text-xl\b/, "o titulo em 20/28 a partir de lg");
   const linhaDeBaixo = textOf(markup.slice(markup.indexOf(">", markup.indexOf("data-console-line")) + 1, markup.indexOf("</p>", markup.indexOf("data-console-line"))));
   assert.match(linhaDeBaixo, /^Console da sessão · No ar há \d+:\d\d · 7 presentes$/, `a linha de baixo: ${linhaDeBaixo}`);
-  assert.match(markup, /data-console-present="">7 presentes</, "os presentes na linha da gravada, sem o pico antes da leitura da presenca");
+  // Os presentes sao o botao que abre a Presença (a chave do numero de pessoas, rodada v12, docs/30 D107).
+  assert.match(markup, /<button aria-label="7 presentes\. Abrir a Presença"[^>]*data-console-present=""[^>]*>7 presentes</, "os presentes na linha da gravada, sem o pico antes da leitura da presenca");
   assert.doesNotMatch(markup.slice(markup.lastIndexOf("<span", markup.indexOf("data-console-present")), markup.indexOf("data-console-present")), /sm:hidden/, "fora da live (sem palco) os presentes ficam no topo em toda largura");
   assert.match(text, /Encerrar sessão/);
   assert.doesNotMatch(text, /Abrir sessão/, "a sessao no ar nao abre de novo");
@@ -494,9 +495,13 @@ test("chat (docs/31 V2-15 e §10): as acoes de cada mensagem (Fixar ou Desafixar
   assert.match(textOf(linha("m-sem-aceite")), /Sem consentimento do aluno/, "sem o aceite, o ⋯ diz por que");
   assert.doesNotMatch(textOf(linha("m-sem-aceite")), /Aprovar para as próximas turmas/);
   assert.deepEqual(nomes(linha("m-virou")), ["Fixar: Dani P.", "Apagar: Dani P.", "Mais ações da mensagem de Dani P."], "a que ja virou pergunta fica sem o botao");
-  // A equipe e o roteiro: sem Virar pergunta (a pergunta pede o aluno) e sem o ⋯ (nada para eles la).
-  assert.deepEqual(nomes(linha("m-equipe")), ["Desafixar: Produtor T.", "Apagar: Produtor T."]);
-  assert.deepEqual(nomes(linha("m-roteiro")), ["Fixar: Duda", "Apagar: Duda"]);
+  // A equipe e o roteiro: sem Virar pergunta (a pergunta pede o aluno); o ⋯ so com o "Mostrar na tela" (rodada v9,
+  // docs/30 D89: toda mensagem liberada pode ir para a tela).
+  assert.deepEqual(nomes(linha("m-equipe")), ["Desafixar: Produtor T.", "Apagar: Produtor T.", "Mais ações da mensagem de Produtor T."]);
+  assert.deepEqual(nomes(linha("m-roteiro")), ["Fixar: Duda", "Apagar: Duda", "Mais ações da mensagem de Duda"]);
+  assert.match(textOf(linha("m-roteiro")), /Mostrar na tela/);
+  assert.doesNotMatch(textOf(linha("m-roteiro")), /Aprovar para as próximas turmas|Sem consentimento/);
+  assert.match(textOf(linha("m-com-aceite")), /Mostrar na tela Aprovar para as próximas turmas/, "o Mostrar na tela e o primeiro do ⋯");
   // Cada botao da linha e do card e um ponto de volta do foco (a posicao entre os do item): o ⋯ e o ultimo.
   const marcados = (block) => Array.from(block.matchAll(/<button(?=[^>]*data-console-action="")[^>]*aria-label="([^"]+)"/g)).map((match) => match[1]);
   assert.deepEqual(marcados(linha("m-com-aceite")), nomes(linha("m-com-aceite")));
@@ -571,10 +576,11 @@ test("D82: ao lado de Escreva para a turma, a foto do Perfil de quem esta no con
 test("roteiro: a fila com o que entrou, Soltar agora so no que falta e no manual, a desligada sem botao, o resumo; enquetes e perguntas, cada um no painel dele (o Roteiro e as Enquetes no ⋯, as Perguntas na aba), montado e escondido", () => {
   const markup = render({ sessions, snapshot: snapshot(), webinar });
   const text = textOf(markup);
-  // A gravada (docs/31 V2-15): as abas Chat e Perguntas; o ⋯ com Enquetes, Roteiro, Oferta e Atendimento (sem a leitura
-  // da presenca, sem a Presença); tudo montado, so o Chat na tela, e sem o X (sem palco o painel nunca fecha).
+  // A gravada (docs/31 V2-15): as abas Chat e Perguntas; o ⋯ com Enquetes, Roteiro, Oferta, Atendimento e, desde a
+  // rodada v12 (docs/30 D107), a Presença tambem sem a leitura dela (a chave do numero de pessoas); tudo montado, so o
+  // Chat na tela, e sem o X (sem palco o painel nunca fecha).
   assert.deepEqual(Array.from(markup.matchAll(/role="tab"[^>]*>([^<]+)</g)).map((match) => match[1]), ["Chat", "Perguntas 2"]);
-  assert.deepEqual(Array.from(markup.matchAll(/data-console-more="([a-z]+)"/g)).map((match) => match[1]), ["tela", "enquetes", "roteiro", "oferta", "atendimento"]);
+  assert.deepEqual(Array.from(markup.matchAll(/data-console-more="([a-z]+)"/g)).map((match) => match[1]), ["tela", "enquetes", "roteiro", "oferta", "atendimento", "presenca"]);
   assert.ok(!hiddenPane(pane(markup, "tab", "chat")), "o Chat na tela");
   for (const [kind, name] of [["tab", "perguntas"], ["more", "enquetes"], ["more", "roteiro"], ["more", "oferta"], ["more", "atendimento"]]) {
     assert.ok(hiddenPane(pane(markup, kind, name)), `${name} escondido`);
@@ -612,7 +618,10 @@ test("roteiro: a fila com o que entrou, Soltar agora so no que falta e no manual
   assert.deepEqual(order, ["q-top", "q-1", "q-respondida", "q-dispensada"], "abertas por voto, depois respondidas, dispensadas no fim");
   // Legado: a pergunta gravada como anonima antes de 10/11/2026 continua "Anônima" no console.
   assert.match(textOf(questions), /Anônima/);
-  assert.match(textOf(questions), /5 votos/);
+  // Os votos da pergunta agora sao o polegar com o numero, que a equipe tambem curte (rodada v11, docs/30 D101); a
+  // total vai no nome do botao.
+  assert.match(questions, /<button aria-label="Curtir, 5 curtidas" aria-pressed="false"[^>]*data-console-like="question"[^>]*>/);
+  assert.doesNotMatch(textOf(questions), /5 votos/);
   assert.match(textOf(questions), /Sim, 7 dias\./);
   assert.equal(count(questions, />Responder por escrito</g), 2);
   assert.equal(count(questions, />Respondida ao vivo</g), 2);
@@ -739,7 +748,7 @@ test("paginas e rota: a pagina do console com as guardas e a migracao pendente; 
   assert.doesNotMatch(`${room}${script}`, /full_name|email:/, "nada de nome ou e-mail na auditoria");
 });
 
-test("o painel Presenca (§2.4): presentes agora, pico, mensagens no ultimo minuto com a media e a curva dos ultimos 30 minutos; sem o painel, nada", async () => {
+test("o painel Presenca (§2.4): presentes agora, pico, mensagens no ultimo minuto com a media e a curva dos ultimos 30 minutos; sem a leitura, a entrada fica so com a chave do numero de pessoas (D107)", async () => {
   const { consolePresenceOf } = await import("../src/server/webinars/console-presence-model.ts");
   const view = {
     chat: { hot: [], perMinute: [{ minute: 3, students: 2, total: 4 }, { minute: 4, students: 1, total: 2 }], students: 3, top: [], total: 6 },
@@ -747,12 +756,12 @@ test("o painel Presenca (§2.4): presentes agora, pico, mensagens no ultimo minu
   };
   const presence = consolePresenceOf(view, 4 * MIN + 30_000);
   const markup = render({ sessions, snapshot: snapshot({ presence }), webinar });
-  // A Presença no ⋯ (docs/31 V2-15), so com a leitura da presenca, montada e escondida.
+  // A Presença no ⋯ (docs/31 V2-15), montada e escondida.
   assert.deepEqual(Array.from(markup.matchAll(/data-console-more="([a-z]+)"/g)).map((match) => match[1]), ["tela", "enquetes", "roteiro", "oferta", "atendimento", "presenca"]);
   assert.ok(hiddenPane(pane(markup, "more", "presenca")));
   assert.match(pane(markup, "more", "presenca"), /id="console-presence-title"/);
   // O selo do topo da gravada (V2-13): os presentes do retrato de 5 s e o pico da presenca.
-  assert.match(markup, /data-console-present="">7 presentes · pico 9</);
+  assert.match(markup, /data-console-present=""[^>]*>7 presentes · pico 9</);
   const painel = markup.slice(markup.indexOf('id="console-presence-title"'));
   const text = textOf(painel);
   assert.match(text, />Presença Atualiza a cada minuto\. Só alunos; o roteiro e o Assistente não entram\. Presentes agora 7 Pico 9 em 03:00 Mensagens no último minuto 4 média de 1,2 por minuto nos últimos 30 min Últimos 30 minutos/);
@@ -762,14 +771,19 @@ test("o painel Presenca (§2.4): presentes agora, pico, mensagens no ultimo minu
 
   const semPresenca = render({ sessions, snapshot: snapshot({ presence: null }), webinar });
   assert.doesNotMatch(textOf(semPresenca), /Mensagens no último minuto/);
-  assert.doesNotMatch(semPresenca, /data-console-more="presenca"/, "sem a leitura, sem a entrada Presença");
+  // Sem a leitura, a entrada continua (rodada v12, docs/30 D107): so a chave "Mostrar quantas pessoas estão na sala".
+  const soChave = pane(semPresenca, "more", "presenca");
+  assert.match(soChave, /id="console-present-count-title"/);
+  assert.match(soChave, /<button[^>]*aria-checked="true"[^>]*id="console-present-count"[^>]*role="switch"|<button[^>]*id="console-present-count"[^>]*role="switch"/);
+  assert.doesNotMatch(soChave, /id="console-presence-title"/, "sem o painel da leitura");
 });
 
 test("Refazer tradução: cada mensagem do chat ganha o item no ⋯ so com a traducao ligada no ambiente", () => {
   const desligada = render({ sessions, snapshot: snapshot(), webinar });
   assert.doesNotMatch(desligada, /Refazer tradução/);
-  // Sem a traducao, a equipe e o roteiro nao tem nada no ⋯; com ela, toda mensagem liberada ganha o ⋯ com o item.
-  assert.doesNotMatch(chatItem(desligada, "m-roteiro"), /Mais ações da mensagem/);
+  // Sem a traducao, o ⋯ da equipe e do roteiro so tem o "Mostrar na tela" (rodada v9); com ela, toda mensagem liberada
+  // ganha tambem o item.
+  assert.doesNotMatch(textOf(chatItem(desligada, "m-roteiro")), /Refazer tradução/);
   const ligada = html(createElement(SessionConsole, { currentUserId: "u-host", data: { sessions, snapshot: snapshot(), webinar }, permissions: both, serverNow: NOW, translationEnabled: true }));
   for (const [id, name] of [["m-sem-aceite", "Aluno 231"], ["m-equipe", "Produtor T."], ["m-roteiro", "Duda"]]) {
     const item = chatItem(ligada, id);

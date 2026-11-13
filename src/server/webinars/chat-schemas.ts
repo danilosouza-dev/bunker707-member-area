@@ -22,10 +22,13 @@ import {
 } from "./model";
 import { NA_TELA_COPY } from "../../lib/webinar-copy-v4/na-tela";
 import { PESSOAS_COPY as PESSOAS } from "../../lib/webinar-copy-v4/pessoas";
+import { ANSWER_AUTHOR_LIMITS, ANSWER_AUTHOR_MODES, answerAuthorCustomName } from "./answer-author-model";
 import { PERSONA_AVATAR_LIMITS, PERSONA_AVATAR_PATH_PATTERN, personaCleanName, personaNameFits } from "./persona-model";
 
 export const CHAT_MESSAGES = {
   answer: "A resposta pode ter até 1.000 caracteres.",
+  /** Rodada v9 (docs/30 D88): o nome de "Responder como › Outro nome". */
+  authorName: `Escreva o nome que aparece na resposta (de ${ANSWER_AUTHOR_LIMITS.nameMin} a ${ANSWER_AUTHOR_LIMITS.nameMax} caracteres).`,
   body: "Escreva a mensagem.",
   bodyTooLong: "A mensagem pode ter até 1.000 caracteres.",
   consent: "Para participar do chat, aceite as regras uma vez.",
@@ -151,6 +154,20 @@ export const questionBodySchema = z.object({
 export type QuestionPostInput = z.infer<typeof questionBodySchema>;
 
 export const questionVoteBodySchema = z.object({ sessionId: sessionIdSchema });
+
+/**
+ * POST /questions/[qid]/like (docs/30 D101): curtir ou tirar a curtida da resposta escrita da pergunta (`replyId` nulo
+ * ou ausente) ou de uma resposta do fio.
+ */
+export const questionLikeBodySchema = z.object({ replyId: uuidSchema.nullable().optional(), sessionId: sessionIdSchema });
+
+/**
+ * A curtida da equipe no console (docs/30 D101): a propria pergunta, a resposta escrita ou uma resposta do fio (so
+ * esta leva o `replyId`).
+ */
+export const likeQuestionItemSchema = z
+  .object({ questionId: uuidSchema, replyId: uuidSchema.nullable().optional(), target: z.enum(["answer", "question", "reply"]) })
+  .refine((value) => (value.target === "reply") === Boolean(value.replyId), { message: "Resposta inválida.", path: ["replyId"] });
 
 /** POST /questions/[qid]/replies: a resposta do aluno no fio da propria pergunta (com o aceite, se ele mudou de versao). */
 export const questionReplyBodySchema = z.object({
@@ -321,6 +338,12 @@ export const moderateMessageSchema = z.object({
   reason: z.string().trim().max(200).optional()
 });
 
+/**
+ * Mostrar ou esconder dos alunos quantas pessoas estao na sala, pelo console (rodada v12, docs/30 D107): a chave
+ * `showPresentCount` do room_settings do webinario, pela sessao que o console tem aberta.
+ */
+export const showPresentCountSchema = z.object({ sessionId: sessionIdSchema, shown: z.boolean() });
+
 export const sessionChatModeSchema = z.object({
   chatMode: z.enum(CHAT_MODES, { error: CHAT_MESSAGES.invalid }),
   sessionId: sessionIdSchema,
@@ -368,16 +391,37 @@ export const createConsolePollSchema = z.object({ ...pollDraftFields, launch: z.
 export const launchPollSchema = z.object({ pin: z.boolean().default(false), pollId: uuidSchema, sessionId: sessionIdSchema });
 export const closePollSchema = z.object({ pollId: uuidSchema, sessionId: sessionIdSchema, shareResults: z.boolean().default(false) });
 
+/**
+ * "Responder como" (rodada v9, docs/30 D88): o modo e, em "Outro nome", o nome. Ausente (a pagina de antes): quem chama
+ * usa o padrao de sempre (a primeira resposta como "Equipe"; a do fio com o nome de quem escreve).
+ */
+const answerAuthorChoiceSchema = z
+  .object({
+    as: z.enum(ANSWER_AUTHOR_MODES, { error: CHAT_MESSAGES.invalid }),
+    name: z.string().trim().max(ANSWER_AUTHOR_LIMITS.nameMax, CHAT_MESSAGES.authorName).nullish()
+  })
+  .superRefine((value, context) => {
+    if (value.as === "custom" && !answerAuthorCustomName(value.name)) {
+      context.addIssue({ code: "custom", message: CHAT_MESSAGES.authorName, path: ["name"] });
+    }
+  })
+  .optional();
+
 export const answerQuestionSchema = z.object({
   answerText: z.string().trim().max(CHAT_LIMITS.answer, CHAT_MESSAGES.answer).optional(),
   answeredLive: z.boolean().default(false),
+  author: answerAuthorChoiceSchema,
   questionId: uuidSchema
 });
 
 export const questionStatusSchema = z.object({ questionId: uuidSchema, status: z.enum(QUESTION_STATUSES, { error: CHAT_MESSAGES.invalid }) });
 
+/** Marcar o fio de uma pergunta como visto pela equipe (console; rodada v10, docs/30 D94). */
+export const markQuestionSeenSchema = z.object({ questionId: uuidSchema });
+
 /** A resposta da equipe no fio de uma pergunta ja respondida (console). */
 export const replyQuestionSchema = z.object({
+  author: answerAuthorChoiceSchema,
   body: z.string().trim().min(1, CHAT_MESSAGES.reply).max(QUESTION_REPLY_LIMITS.teamBody, CHAT_MESSAGES.answer),
   questionId: uuidSchema
 });

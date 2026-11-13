@@ -21,6 +21,7 @@ import { WebinarError, assertNoDbError, isMissingWebinarSchema, type WebinarsDb 
 import type { SessionSimulation, SimulatedCountRule, SimulatedJoins, SimulatedSaleNotices, SimulationChangeRecord, SimulationChangeSource, SimulationTotals } from "./model";
 import {
   SESSION_SIMULATION_COLUMNS,
+  simulatedCountRuleToRow,
   SESSION_SIMULATION_FEED_COLUMNS,
   sessionSimulationFeedStateFromRow,
   sessionSimulationFromRow,
@@ -184,7 +185,7 @@ export async function recordSimulationDecision(
   input: { ackText: string; countRule?: SimulatedCountRule; decidedAt: string; decidedBy: string; sessionId: string }
 ): Promise<void> {
   const count = input.countRule;
-  const rule = count ? { simulated_count_rule: count.mode === "off" ? null : { base: count.base, jitter: count.jitter, mode: count.mode, peak: count.peak } } : {};
+  const rule = count ? { simulated_count_rule: simulatedCountRuleToRow(count) } : {};
   const { data, error } = await db
     .from("webinar_sessions")
     .update({ ...rule, simulation_ack_text: input.ackText, simulation_decided_at: input.decidedAt, simulation_decided_by: input.decidedBy })

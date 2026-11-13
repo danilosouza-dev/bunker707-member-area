@@ -266,9 +266,9 @@ test("banco sem a migracao dos webinarios: 503 com a migracao; erro comum do ban
   actionStubs.db = scriptedDb(() => ({ data: null, error: { code: "42703", message: "column webinar_sessions.jit does not exist" } }));
   const sem = await pedirSessao(`?sessao=${SESSAO_ID}&relatorio=qa`);
   assert.equal(sem.status, 503);
-  // WEBINARS_MIGRATION aponta a mais nova dos webinarios (desde 11/11/2026 a 202611140002, que inclui a 202610300005 do jit pela ordem
+  // WEBINARS_MIGRATION aponta a mais nova dos webinarios (desde 12/11/2026 a 202611170001 da rodada v11, que inclui a 202610300005 do jit pela ordem
   // dos arquivos).
-  assert.deepEqual(await sem.json(), { error: "Esta parte precisa da atualização do banco (migração 202611140002)." });
+  assert.deepEqual(await sem.json(), { error: "Esta parte precisa da atualização do banco (migração 202611170001)." });
   const semPainel = await pedirPainel("?tipo=gravadas&inicio=2026-11-01T03:00:00.000Z&fim=2026-12-01T03:00:00.000Z");
   assert.equal(semPainel.status, 503);
 

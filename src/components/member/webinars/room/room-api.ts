@@ -9,7 +9,7 @@
 // banner e do QR Code (POST .../screen-events; o "viu" pelo fetch keepalive, o clique e o fechar pelo sendBeacon).
 
 import type { RoomEventItem } from "@/lib/jitsi-room-config";
-import { roomApiPath, questionReplyPath, questionVotePath, type ChatCursor } from "@/lib/webinar-room-client";
+import { roomApiPath, questionLikePath, questionReplyPath, questionVotePath, type ChatCursor } from "@/lib/webinar-room-client";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { JoinTokenReply } from "@/server/webinars/live-model";
 import type { ChatMode, Reaction, StudentChatMessage } from "@/server/webinars/model";
@@ -72,7 +72,12 @@ export function getSession(webinarId: string, sessionId: string, signal?: AbortS
   return getJson<StudentSessionPayload>(roomApiPath(webinarId, "session", { sessao: sessionId }), WEBINAR_COPY.aluno.erroCarregar, signal);
 }
 
-export type HeartbeatAnswer = { ended: boolean; offsetMs: number | null; presentNow: number; serverTime: string };
+/**
+ * A resposta do sinal de 15 s. `presentHidden` (rodada v12, docs/30 D107): a equipe escondeu dos alunos quantas pessoas
+ * estao na sala; vem a cada sinal, para a sala acompanhar a chave do console sem esperar a releitura da sessao. Ausente
+ * na resposta do servidor de antes: vale o que a sessao disse.
+ */
+export type HeartbeatAnswer = { ended: boolean; offsetMs: number | null; presentHidden?: boolean; presentNow: number; serverTime: string };
 
 export function postHeartbeat(webinarId: string, body: { leave?: boolean; offsetSeconds: number; sessionId: string; state: string; visible: boolean }) {
   return sendJson<HeartbeatAnswer>(roomApiPath(webinarId, "heartbeat"), "POST", body, GENERIC);
@@ -158,6 +163,11 @@ export function postQuestion(webinarId: string, body: QuestionPostBody) {
 
 export function postQuestionVote(webinarId: string, questionId: string, sessionId: string) {
   return sendJson<{ upvotes: number; voted: boolean }>(questionVotePath(webinarId, questionId), "POST", { sessionId }, GENERIC);
+}
+
+/** Curtir / Tirar a curtida da resposta escrita da pergunta (`replyId` nulo) ou de uma resposta do fio (docs/30 D101). */
+export function postQuestionLike(webinarId: string, questionId: string, body: { replyId: string | null; sessionId: string }) {
+  return sendJson<{ liked: boolean; likes: number }>(questionLikePath(webinarId, questionId), "POST", body, GENERIC);
 }
 
 export type QuestionReplyBody = Pick<ChatPostBody, "consent" | "consentVersion"> & { body: string; sessionId: string };

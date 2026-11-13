@@ -52,6 +52,8 @@ import { RoomPollsTab } from "./room-polls";
 import { RoomQuestionsOrderButton, RoomQuestionsTab } from "./room-questions";
 import type { QuestionsFilter, QuestionsOrder } from "./room-questions-model";
 import { RoomRail } from "./room-rail";
+import { QUESTION_NEWS_SNACK_ACTION } from "./room-question-news-model";
+import { useRoomQuestionNews } from "./use-room-question-news";
 import { RoomReactionBubbles } from "./room-reactions";
 import { RoomSimulationJoins, RoomSimulationSales } from "./room-simulation";
 import { RoomSnackbarHost, RoomSnackbarProvider, useRoomSnackbarController } from "./room-snackbar";
@@ -63,6 +65,7 @@ import { useRoomPlayer } from "./use-room-player";
 import { useRoomPolls } from "./use-room-polls";
 import { RoomPinnedArea, RoomPinnedPills, usePinnedFocus, type PinnedFocusTarget } from "./screen/room-pinned";
 import type { ScreenItemHandlers } from "./screen/room-screen-card";
+import { RoomScreenCommentAnnouncer, RoomScreenCommentLayer } from "./screen/room-screen-comment";
 import { RoomScreenAnnouncer, RoomScreenLayer } from "./screen/room-screen-layer";
 import { screenFocusKey, screenPlacement, screenStripForcedRecorded } from "./screen/room-screen-model";
 import { RoomScreenDock, RoomScreenStrip } from "./screen/room-screen-strip";
@@ -75,6 +78,8 @@ import { RoomDock } from "./vertical/room-dock";
 import { VerticalChat } from "./vertical/vertical-chat";
 import { VerticalComposer } from "./vertical/vertical-composer";
 import { VerticalDrawer, type VerticalDrawerTab } from "./vertical/vertical-drawer";
+import { usePanelMotion } from "./use-panel-motion";
+import { screenCommentPlace } from "@/server/webinars/screen-comment-model";
 import { drawerTabFor, roomSkeleton, themeForDesign, verticalBadge, type RoomDesign } from "./vertical/vertical-model";
 import { VerticalTopBar } from "./vertical/vertical-top-bar";
 
@@ -437,6 +442,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const [offerShown, setOfferShown] = useState(false);
   /** O contador do ultimo sinal de presenca; antes dele, o da leitura da sessao. */
   const [heartbeatPresent, setHeartbeatPresent] = useState<number | null>(null);
+  /** O ultimo sinal de 15 s disse que a equipe escondeu o numero de pessoas (nulo antes dele): vale sobre a sessao. */
+  const [heartbeatHidden, setHeartbeatHidden] = useState<boolean | null>(null);
   /** O sinal de presenca respondeu 404 (fora do acesso agora). */
   const [heartbeatLost, setHeartbeatLost] = useState(false);
   const reducedMotion = useRoomReducedMotion();
@@ -545,6 +552,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
     onAccessLost: () => setHeartbeatLost(true),
     onAnswer: (answer) => {
       setHeartbeatPresent(answer.presentNow);
+      setHeartbeatHidden(typeof answer.presentHidden === "boolean" ? answer.presentHidden : null);
       if (answer.ended) {
         setPlayerEnded(true);
       }
@@ -607,6 +615,16 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   // O contador do balao e do Chat do trilho: as mensagens novas desde que o Chat saiu da tela (os ids e o offset do
   // video da sessao, cujo zero nao muda: a hora marcada na gravada, o player no Replay).
   const unread = useRoomPanelUnread({ chatLoaded: chat.loaded, kind, messages: translation.messages, offsetMs: currentOffsetMs, chatShown });
+  // As respostas novas nas perguntas do aluno (docs/30 D100): contam com a aba Perguntas fora da tela (no vertical, a
+  // gaveta fechada ou noutra aba).
+  const questionsTabMounted = (vertical ? drawerTab : tab) === "perguntas";
+  const questionNews = useRoomQuestionNews({
+    enabled: !readOnly && !unavailable && phase !== "ended" && tabs.includes("perguntas"),
+    sessionId,
+    shown: questionsTabMounted && (vertical ? drawerVisible : panelShown),
+    tabMounted: questionsTabMounted,
+    webinarId
+  });
   const firstFocus = firstFocusTarget({ panelShown });
   // A enquete no meio do palco so no desenho normal com a sala de pe (como a barra); o card do chat, a deixada para
   // depois.
@@ -617,6 +635,20 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const pinnedShortcuts = pinnedPillsShown({ blocked: unavailable, design, panelShown, settingsTakeover: false });
   const focusPinned = usePinnedFocus(rootRef);
   const snackbarApi = snackbar.api;
+
+  // A equipe falou numa pergunta do aluno com a aba Perguntas fora da tela (docs/30 D100): o numero no item Perguntas
+  // (o trilho) ou o ponto na aba, e o aviso da sala com Ver, que abre a aba. So quando o numero sobe.
+  const questionNewsCount = questionNews.count;
+  const questionNewsShownRef = useRef(0);
+  useEffect(() => {
+    const before = questionNewsShownRef.current;
+    questionNewsShownRef.current = questionNewsCount;
+    if (questionNewsCount > before) {
+      snackbarApi.show({ action: { key: QUESTION_NEWS_SNACK_ACTION, label: WEBINAR_COPY.salaV2.perguntas.verResposta }, key: "question_news", text: WEBINAR_COPY.salaV2.perguntas.respostaNova });
+    } else if (questionNewsCount === 0 && before > 0) {
+      snackbarApi.clear("question_news");
+    }
+  }, [questionNewsCount, snackbarApi]);
   // A Na tela, o banner e o QR Code: as mesmas regras das fixadas (§3.6); qualquer capa no palco manda tudo para a faixa.
   const screenItems = pinnedOn ? naTela.items : [];
   const soundCover = soundCoverShown({ barShown, kind, muted, soundTouched });
@@ -624,6 +656,10 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const screenForced = screenStripForcedRecorded({ hasVideo: session.video !== null, soundCover, stageState });
   const pinnedPillsOn = pinnedShortcuts && (pinnedMessage !== null || pinnedPoll !== null);
   const placement = screenPlacement({ items: screenForced || vertical ? [] : screenItems, offerShown, pinnedPills: !screenForced && pinnedPillsOn });
+  // O comentario ou a pergunta que a equipe trouxe para a tela (rodada v9, docs/30 D89): pelas mesmas regras da Na tela;
+  // a Oferta no palco ocupa o canto de baixo a direita.
+  const screenComment = pinnedOn && !unavailable ? naTela.comment : null;
+  const screenCommentAt = screenCommentPlace(placement.cells.map((cell) => cell.place), offerShown);
   const screenEvents = useRoomScreenEvents({ enabled: !readOnly && pinnedOn, pollOver: stagePoll !== null, sessionId, webinarId });
   const sendScreenEvent = screenEvents.sendEvent;
   const closeScreenItem = naTela.closeItem;
@@ -857,6 +893,12 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   function onSnackAction(key: string) {
     if (key === PINNED_SNACK_ACTION) {
       showPinned("message");
+      return;
+    }
+    if (key === QUESTION_NEWS_SNACK_ACTION) {
+      // Ver: a aba Perguntas abre.
+      setTab("perguntas");
+      setPanelOpen(true);
     }
   }
 
@@ -913,7 +955,9 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const composerNotice = readOnly ? null : mutedPhrase(ban, nowMs);
   const headerPhase = phase === "replay" ? "live" : phase;
   // Com o painel fechado o palco cresce para ocupar a coluna (abaixo de lg; no computador ele ja ocupa).
-  const skeleton = roomSkeleton(design, { cinema: false, panelShown, stageGrows: !panelShown });
+  // Fechando, o painel continua no lugar ate a saida terminar (rodada v9, P12): o palco muda de tamanho uma vez so.
+  const panelMotion = usePanelMotion(panelShown);
+  const skeleton = roomSkeleton(design, { cinema: false, panelShown: panelMotion.laid, stageGrows: !panelMotion.laid });
   // O selo do momento no palco (V2-4), pela mesma regra do topo do vertical (D10).
   const momentBadge = verticalBadge({ kind, phase: headerPhase, showLiveBadge: session.session.showLiveBadge });
   const topLeft: RoomStageTopLeft =
@@ -925,7 +969,12 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const metaLine = roomDateLine({ durationMinutes: session.webinar.durationMinutes, kind, presenterName, scheduledAt: session.session.scheduledAt }).join(" · ");
   const mobileLine = roomMobileLine(presenterName);
   // O selo de quem assiste agora (o real, ou o somado da Simulacao), no palco ao lado do selo do momento (docs/31 §11.5).
-  const presentBadge = roomPresentBadge(momentBadge.showCount ? shownCount : null);
+  // A equipe pode esconder dos alunos quantas pessoas estao na sala (docs/30 D102).
+  // A chave muda tambem pelo console com a sessao no ar (D107): o ultimo sinal de 15 s vale sobre a sessao.
+  const presentHidden = heartbeatHidden ?? session.presentHidden === true;
+  // O numero que a sala mostra (o selo do palco, a aba Participantes e o titulo dela): nulo quando nao ha o que mostrar.
+  const presentShown = momentBadge.showCount && !presentHidden ? shownCount : null;
+  const presentBadge = roomPresentBadge(presentShown);
   // A gravada nao tem a coluna de miniaturas do iframe: os selos de baixo vao ate a borda do video.
   // Com o aviso no palco, as pilulas do chat sobem a altura dele (room-chat-pills.tsx).
   const stageVars = {
@@ -1012,6 +1061,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         getOffsetMs={getOffsetMs}
         notice={composerNotice}
         onConsented={() => void clock.refresh()}
+        onQuestions={questionNews.ingest}
         onRefused={onWriteRefused}
         readOnly={readOnly || phase === "ended"}
         sessionId={sessionId}
@@ -1035,7 +1085,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
     ) : shownTab === "participantes" ? (
       // A gravada: quem apresenta e o mesmo numero do cabecalho (o real mais a parte simulada; encerrada, nenhum, como
       // no cabecalho); nunca a lista de alunos.
-      <LiveParticipantsTab note={readOnly && kind === "simulated" ? WEBINAR_COPY.simulacao.plateia.previa : null} presenterKnown={presenterName !== null} stage={panelStageNames(presenterName)} students={momentBadge.showCount ? shownCount : null} />
+      <LiveParticipantsTab note={readOnly && kind === "simulated" ? WEBINAR_COPY.simulacao.plateia.previa : null} presenterKnown={presenterName !== null} stage={panelStageNames(presenterName)} students={presentShown} />
     ) : pinnedPoll && pollsTab.length === 0 ? null : (
       // A enquete fixada fica na area das fixadas, acima: aqui so as outras (e nada, quando ela e a unica).
       <RoomPollsTab onAnswer={roomPolls.answer} polls={pollsTab} readOnly={readOnly || phase === "ended"} />
@@ -1073,7 +1123,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
           kind={kind}
           onLeave={askToLeave}
           phase={headerPhase}
-          presentNow={shownCount}
+          presentNow={presentHidden ? null : shownCount}
           showLiveBadge={session.session.showLiveBadge}
           timeLabel={timeLabel}
           title={session.webinar.title}
@@ -1118,9 +1168,12 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
                 topLeftExtra={<RoomSimulationSales layout="cell" offsetMs={currentOffsetMs} reducedMotion={reducedMotion} state={simulation} />}
               />
             )}
-            {/* Com o painel fechado, as 2 ultimas mensagens em pilulas sobre o palco (V2-8); com um item embaixo, so no palco estreito. */}
+            {/* O comentario ou a pergunta na tela (docs/30 D89): o cartao no palco de 640 px ou mais; no estreito, na faixa. */}
+            {vertical ? null : <RoomScreenCommentLayer comment={screenComment} forced={screenForced} place={screenCommentAt} />}
+            {/* Com o painel fechado, as 2 ultimas mensagens em pilulas sobre o palco (V2-8); com um item embaixo ou o
+                comentario na tela, so no palco estreito. */}
             {chatPillsShown({ blocked: unavailable, design, offerShown, panelShown, settingsTakeover: false }) ? (
-              <RoomWideHidden hidden={!placement.chatPills}>
+              <RoomWideHidden hidden={!placement.chatPills || screenComment !== null}>
                 <RoomChatPills kind={kind} messages={overlayMessages(translation.messages)} />
               </RoomWideHidden>
             ) : null}
@@ -1171,7 +1224,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
               }
               design={design}
               hidden={drawerVisible}
-              screen={vertical && pinnedOn ? <RoomScreenDock handlers={screenHandlers} items={screenItems} /> : null}
+              screen={vertical && pinnedOn ? <RoomScreenDock comment={screenComment} handlers={screenHandlers} items={screenItems} /> : null}
               offer={
                 <RoomOffer
                   enabled={writable}
@@ -1205,6 +1258,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
           {/* O palco mais estreito (ou com uma capa): as fixadas, o banner e o QR Code em linhas logo abaixo dele, acima da barra. */}
           {pinnedOn && !vertical ? (
             <RoomScreenStrip
+              comment={screenComment}
               forced={screenForced}
               handlers={screenHandlers}
               items={screenItems}
@@ -1212,6 +1266,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
             />
           ) : null}
           {pinnedOn ? <RoomScreenAnnouncer items={screenItems} /> : null}
+          {pinnedOn ? <RoomScreenCommentAnnouncer comment={screenComment} /> : null}
           {barShown ? (
             <RecordedControls
               fullscreenEnabled={fullscreenEnabled}
@@ -1243,6 +1298,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
               firstFocus={firstFocus === "tab"}
               id={ROOM_PANEL_ID}
               kind={kind}
+              motion={panelMotion}
               onClose={() => setPanelOpen(false)}
               onTab={setTab}
               open={panelShown}
@@ -1258,13 +1314,13 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
                 ) : undefined
               }
               titleCount={
-                tab === "participantes" ? (momentBadge.showCount ? shownCount : null) : tab === "enquetes" ? openPolls.length : tab === "perguntas" ? questionsCount : null
+                tab === "participantes" ? presentShown : tab === "enquetes" ? openPolls.length : tab === "perguntas" ? questionsCount : null
               }
             >
               {tabContent}
             </RoomPanel>
             {/* O trilho a direita, a partir de lg (nunca no vertical): abre e fecha o painel em cada aba. */}
-            <RoomRail kind={kind} onItem={onRail} panelShown={panelShown} pollOpen={openPolls.length > 0} tab={tab} tabs={tabs} unread={unread} />
+            <RoomRail kind={kind} onItem={onRail} panelShown={panelShown} pollOpen={openPolls.length > 0} questionsNew={questionNews.count} tab={tab} tabs={tabs} unread={unread} />
           </>
         )}
       </div>

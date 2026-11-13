@@ -187,8 +187,12 @@ test.describe("produtor", () => {
     // O console continua com os avisos do motor (ninguem la ouve o notificationTriggered, V2-A59) e quem apresenta
     // continua ouvindo a mao.
     expect(montagem.configOverwrite).not.toHaveProperty("notifications");
-    expect(montagem.configOverwrite).not.toHaveProperty("conferenceInfo");
     expect(montagem.configOverwrite).not.toHaveProperty("disabledSounds");
+    // So o aviso da mao levantada e o selo do motor no topo saem (docs/30 D95): o console ja mostra as maos na aba e
+    // na barra. E a live encerrada nao abre o dialogo do motor (D97).
+    expect(montagem.configOverwrite.disabledNotifications).toEqual(["notify.raisedHand"]);
+    expect(montagem.configOverwrite.conferenceInfo).toEqual({ alwaysVisible: [], autoHide: [] });
+    expect(montagem.configOverwrite.notifyOnConferenceDestruction).toBe(false);
     expect(montagem.configOverwrite.participantMenuButtonsWithNotifyClick).toEqual([
       { key: "ask-unmute", preventExecution: true },
       { key: "kick", preventExecution: true }
@@ -733,7 +737,7 @@ test.describe("produtor", () => {
     expect((await sessaoAoVivoNoBanco()).status).toBe("live");
   });
 
-  test("a coluna de miniaturas do Apresentador fica com o motor (docs/31 V2-A5): a 1280 px, com o iframe abaixo de 1013 px, o console do host nunca manda toggleFilmStrip, e os presentes em cima a direita descontam a coluna", async ({ page }) => {
+  test("a coluna de miniaturas do Apresentador fica com o motor (docs/31 V2-A5): a 1280 px, com o iframe abaixo de 1013 px, o console do host nunca manda toggleFilmStrip, e os presentes em cima a direita descontam a coluna; as miniaturas so tem Lateral e Esconder, por comando, sem recarregar o video (docs/30 D105)", async ({ page }) => {
     // A 1280 px o painel tem 360 px: o iframe fica com cerca de 872 px, abaixo dos 1013 px que a coluna pede.
     await page.setViewportSize({ height: 720, width: 1280 });
     const sala = await abrirConsole(page);
@@ -756,6 +760,29 @@ test.describe("produtor", () => {
     await expect.poll(margemDosSelos).toBe("222px");
     expect((await sala.comandos()).filter((item) => item.comando === "toggleFilmStrip")).toEqual([]);
     expect(await sala.montagens(), "o mesmo iframe").toBe(1);
+
+    // As miniaturas do console (rodada v12, docs/30 D105): so Lateral e Esconder. O Embaixo saiu, e com ele a recarga do
+    // video: nenhuma escolha tira quem apresenta da sala de video.
+    const miniaturas = WEBINAR_COPY.salaV2.visao.miniaturas;
+    await barraDe(page).getByRole("button", { exact: true, name: WEBINAR_COPY.consoleV2.visao.palcoParaTodos }).click();
+    const grupo = page.getByRole("group", { name: miniaturas.rotulo });
+    await expect(grupo.getByRole("menuitemradio")).toHaveText([miniaturas.opcoes.side, miniaturas.opcoes.hidden]);
+    await expect(page.getByRole("menuitemradio", { exact: true, name: "Embaixo" })).toHaveCount(0);
+    // Esconder e Lateral de volta: por comando, no mesmo iframe.
+    let antes = (await sala.comandos()).length;
+    await grupo.getByRole("menuitemradio", { exact: true, name: miniaturas.opcoes.hidden }).click();
+    await sala.esperarComando("toggleFilmStrip", { depoisDe: antes });
+    await sala.disparar("filmstripDisplayChanged", { visible: false });
+    await barraDe(page).getByRole("button", { exact: true, name: WEBINAR_COPY.consoleV2.visao.palcoParaTodos }).click();
+    antes = (await sala.comandos()).length;
+    await page.getByRole("menuitemradio", { exact: true, name: miniaturas.opcoes.side }).click();
+    await sala.esperarComando("toggleFilmStrip", { depoisDe: antes });
+    await sala.disparar("filmstripDisplayChanged", { visible: true });
+    expect((await sala.comandos()).some((item) => item.comando === "hangup"), "nenhum hangup").toBe(false);
+    expect(await sala.montagens(), "o video nunca recarregou").toBe(1);
+    await expect(palco.locator("[data-live-stage-left]")).toHaveCount(0);
+    // A escolha e de quem esta no console: volta ao padrao, para os testes seguintes.
+    await page.evaluate(() => window.localStorage.removeItem("bunker707:webinar-console-miniaturas"));
   });
 
   test("o painel com abas (docs/31 V2-15): Mãos com o numero na barra abre a aba Mãos, Abaixar todas as mãos manda um sinal so, para todos; o microfone da linha pelo participantMuted; Lançar enquete abre o ⋯ › Enquetes; o Gravar por preparar abre o ⋯ › Gravação", async ({ page }) => {
@@ -784,6 +811,12 @@ test.describe("produtor", () => {
     const maos = barra.getByRole("button", { exact: true, name: consoleV2.barra.maos(1) });
     await expect(maos).toBeVisible();
     await expect(maos.locator("[data-console-hands-count]")).toHaveText("1");
+    // A mao levantada no palco, com o desenho da area (docs/30 D99): o selo com quantas maos e o aviso com Ver fila.
+    const seloDasMaos = page.locator('[data-console-hands-open="stage"]');
+    await expect(seloDasMaos).toHaveText("1");
+    await expect(seloDasMaos).toHaveAccessibleName(consoleV2.filaDeMaos.selo(1));
+    await expect(page.getByText(/levantou a mão\.$/)).toBeVisible();
+    await expect(page.getByRole("button", { exact: true, name: consoleV2.filaDeMaos.verFila })).toBeVisible();
     await maos.click();
     // No computador as abas sao o trilho (docs/31 §10): o item Mãos aberto, com o numero no nome, e o foco nele.
     const abaMaos = page.locator('[data-console-rail="maos"]');

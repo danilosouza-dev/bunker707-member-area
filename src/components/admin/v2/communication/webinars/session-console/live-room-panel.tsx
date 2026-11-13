@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type Dispatch, type RefObject } from "react";
 import { useJitsiDevices, type UseJitsiDevices } from "@/components/webinars/use-jitsi-devices";
-import { onStageParticipantOf } from "@/components/member/webinars/room/live-room-model";
+import { mountedThumbsRow, onStageParticipantOf } from "@/components/member/webinars/room/live-room-model";
 import { useJitsiMeet, type JitsiMeetApi, type JitsiStatus } from "@/components/webinars/use-jitsi-meet";
 import { deviceEnvironmentOf, deviceSectionReady, deviceSettingsFor, type DeviceKind, type DeviceOption, type DeviceSettings } from "@/lib/jitsi-device-settings";
 import {
@@ -212,6 +212,11 @@ export type LiveRoomHandle = {
    * o comando inverte a coluna, dois seguidos a deixariam como estava).
    */
   syncFilmstrip: (input: { visible: boolean; wanted: boolean }) => void;
+  /**
+   * O iframe de agora foi montado com a fileira de miniaturas embaixo (o layout `stage_bottom` do motor): verdadeiro,
+   * falso (a coluna) ou nulo sem iframe. Desde a rodada v12 (docs/30 D105) o console nunca pede esse layout.
+   */
+  thumbsRow: boolean | null;
   /** Liga ou desliga a sala de espera agora (so manda quando muda). */
   syncLobby: (value: boolean) => void;
   testing: boolean;
@@ -849,6 +854,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
     sharing: joined && sharing,
     startTesting: () => setTesting(true),
     syncFilmstrip,
+    thumbsRow: mountedThumbsRow(meet.mountedInterfaceConfig),
     syncLobby,
     testing,
     videoOn: joined && videoOn,

@@ -4,7 +4,7 @@ import { Clapperboard, Hand, Maximize2, Mic, MicOff, Minimize2, Settings2, Smile
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
-import type { RoomView } from "@/lib/webinar-room-prefs";
+import type { RoomThumbs, RoomView } from "@/lib/webinar-room-prefs";
 import type { Reaction } from "@/server/webinars/model";
 import { LIVE_ROOM_COPY, liveBarItems } from "./live-room-model";
 import { ROOM_REACTIONS_POPOVER, ROOM_SETTINGS_POPOVER, RoomBar, RoomBarButton, RoomLeaveButton, RoomPanelToggle } from "./room-bar";
@@ -71,6 +71,8 @@ export type LiveControlsProps = {
   onToggleReactions: () => void;
   onToggleSettings: () => void;
   /** Palco ou Grade (a Visão do vídeo): sem ele, a barra fica sem o botao. */
+  /** Escolher onde as miniaturas ficam (rodada v9, docs/30 D91); sem ele, o menu fica so com Palco e Grade. */
+  onThumbs?: (thumbs: RoomThumbs) => void;
   onView?: (view: RoomView) => void;
   /** Abrir ou fechar o menu da Visão do vídeo (a sala fecha Reagir e Configurações quando ele abre). */
   onViewMenu?: (open: boolean) => void;
@@ -93,6 +95,8 @@ export type LiveControlsProps = {
   soundOn: boolean;
   videoOn: boolean;
   /** O menu da Visão do vídeo aberto (pela sala: nunca junto com Reagir ou Configurações). */
+  /** A escolha guardada das miniaturas. */
+  thumbs?: RoomThumbs;
   viewMenuOpen?: boolean;
   /** O que o video mostra agora (o ultimo tileViewChanged do motor): o nome do botao da Visão do vídeo. */
   viewShown?: RoomView;
@@ -196,7 +200,16 @@ export function LiveControls(props: LiveControlsProps) {
         );
       case "view":
         return props.onView && props.onViewMenu ? (
-          <RoomViewMenu disabled={!props.joined} key={item} onChoose={props.onView} onOpenChange={props.onViewMenu} open={props.viewMenuOpen ?? false} shown={props.viewShown ?? "stage"} />
+          <RoomViewMenu
+            disabled={!props.joined}
+            key={item}
+            onChoose={props.onView}
+            onOpenChange={props.onViewMenu}
+            onThumbs={props.onThumbs}
+            open={props.viewMenuOpen ?? false}
+            shown={props.viewShown ?? "stage"}
+            thumbs={props.thumbs}
+          />
         ) : null;
       case "settings":
         return <RoomBarButton controls={LIVE_SETTINGS_ID} expanded={props.settingsOpen} icon={Settings2} item={item} key={item} label={LIVE_ROOM_COPY.configuracoes} onClick={props.onToggleSettings} />;

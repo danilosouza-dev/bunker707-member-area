@@ -1,15 +1,16 @@
 "use client";
 
-import { DoorOpen, LogIn, PictureInPicture2, RefreshCw, Users } from "lucide-react";
+import { DoorOpen, Hand, LogIn, PictureInPicture2, RefreshCw, Users } from "lucide-react";
 import { useEffect, useState, type CSSProperties, type RefObject } from "react";
-import { columnWanted, stageColumnShown } from "@/components/member/webinars/room/live-room-model";
-import { stageVideoRightPx } from "@/components/member/webinars/room/room-layout-model";
+import { columnWanted, stageColumnShown, stageRowShown } from "@/components/member/webinars/room/live-room-model";
+import { stageVideoBottomPx, stageVideoRightPx } from "@/components/member/webinars/room/room-layout-model";
 import { RoomStageBadges, RoomStagePill } from "@/components/member/webinars/room/room-stage-badges";
 import { ROOM_FOCUS, RoomButton } from "@/components/member/webinars/room/room-ui";
 import { useStageGeometry } from "@/components/member/webinars/room/use-stage-geometry";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
-import { consoleColumnPolicy, consoleStageBadgeFor, type ConsoleStageTopLeft } from "@/server/webinars/console-v2-model";
+import type { RoomThumbs } from "@/lib/webinar-room-prefs";
+import { consoleStageBadgeFor, consoleThumbsWanted, type ConsoleStageTopLeft } from "@/server/webinars/console-v2-model";
 import type { LiveConsoleSnapshot } from "@/server/webinars/live-console-model";
 import type { WebinarSession } from "@/server/webinars/model";
 import type { LiveRoomHandle } from "./live-room-panel";
@@ -29,6 +30,11 @@ import type { LiveRoomHandle } from "./live-room-panel";
 // coluna quando ela esta na tela (--room-video-right, stageColumnShown). Pela regra do papel (consoleColumnPolicy), o
 // Apresentador nunca manda toggleFilmStrip pela propria largura (o seguir a visao levaria a escolha a todos e ao
 // gravador) e o co-apresentador e a Equipe tiram ou poem a coluna pela largura, como o aluno (columnWanted).
+// As miniaturas onde a pessoa escolheu (rodada v9, docs/30 D91; `thumbs`, guardado no navegador do console; so Lateral
+// ou Esconder desde a rodada v12, D105): o co-apresentador e a Equipe somam a escolha a conta da largura (Esconder tira
+// com qualquer largura), e o Apresentador so manda o comando pela escolha dele, no Palco (consoleThumbsWanted). As duas
+// valem por comando: o console nunca recarrega o video por causa das miniaturas. Com o iframe montado com a fileira
+// embaixo (o layout do motor, que o console nao pede mais), os selos de baixo sobem (--room-video-bottom).
 // Nenhum texto cita o motor da sala. A Na tela (docs/30 §2.4; especificacao de 10/11/2026, §6.1): os cartoes do banner
 // e do QR Code nao sao desenhados neste palco (o menu das miniaturas do motor precisa continuar livre); com algum deles
 // na tela, a pilula neutra "Na tela: Banner · QR Code" em cima a direita, depois dos presentes. Os presentes ("12
@@ -48,10 +54,19 @@ type ConsoleStageProps = {
   className: string;
   handle: LiveRoomHandle;
   live: LiveConsoleSnapshot;
-  /** O toque nos presentes (docs/30 D79): abre os participantes simulados. Sem ele, a pilula fica so como texto. */
+  /** Quantas maos estao levantadas (a fila da aba Mãos); com `onHands`, o selo do palco (docs/30 D99). */
+  handsCount?: number;
+  /** O toque no selo das maos: abre a aba Mãos. */
+  onHands?: () => void;
+  /**
+   * O toque nos presentes: abre a Presença, nos participantes simulados (docs/30 D79) ou, sem eles, na chave do numero
+   * de pessoas (D107). Sem ele, a pilula fica so como texto.
+   */
   onPresent?: () => void;
   /** "12 presentes · pico 14" (consolePresenceBadge); nulo, o canto de cima a direita fica vazio. */
   presentLabel: string | null;
+  /** O nome do botao dos presentes (o que ele abre); sem ele, o dos participantes simulados. */
+  presentOpenLabel?: string;
   /** O nome do apresentador da pagina (o selo de outro moderador no video grande, V2-A25); nulo, esse selo nao aparece. */
   presenterName: string | null;
   /** "Na tela: Banner · QR Code" (a Na tela, com o banner ou o QR Code na frente da turma); nulo, a pilula nao aparece. */
@@ -59,6 +74,8 @@ type ConsoleStageProps = {
   session: WebinarSession;
   /** O mesmo ref passado ao useLiveRoom: o iframe entra aqui. */
   stageRef: RefObject<HTMLDivElement | null>;
+  /** Onde quem esta no console quer as miniaturas (Lateral por padrao). */
+  thumbs?: RoomThumbs;
   /** O selo do momento (consoleStageTopLeft). */
   topLeft: ConsoleStageTopLeft | null;
 };
@@ -94,22 +111,23 @@ function frameMessage(handle: LiveRoomHandle, status: WebinarSession["status"], 
   }
 }
 
-export function ConsoleStage({ busy, className, handle, live, onPresent, presentLabel, presenterName, screenLabel = null, session, stageRef, topLeft }: ConsoleStageProps) {
+export function ConsoleStage({ busy, className, handle, handsCount = 0, live, onHands, onPresent, presentLabel, presentOpenLabel, presenterName, screenLabel = null, session, stageRef, thumbs = "side", topLeft }: ConsoleStageProps) {
   const geometry = useStageGeometry(stageRef);
   const { joined, room } = handle;
   const frameWidth = geometry.frameWidth;
-  const byWidth = consoleColumnPolicy(handle.role) === "width";
-  const wantColumn = columnWanted({ frameWidth, view: room.viewShown });
+  const row = handle.thumbsRow === true;
+  // O que o console quer das miniaturas agora (nulo: nao mexe): a largura e a escolha no co-apresentador e na Equipe;
+  // so a escolha, e so no Palco, no Apresentador.
+  const wantColumn = consoleThumbsWanted({ byWidth: columnWanted({ frameWidth, row, thumbs, view: room.viewShown }), role: handle.role, thumbs, view: room.viewShown });
   const filmstripVisible = room.filmstripVisible;
   const syncFilmstrip = handle.syncFilmstrip;
 
-  // A coluna de miniaturas pela largura do iframe, so no co-apresentador e na Equipe: na entrada e a cada largura nova
-  // (o painel que abre ou fecha, a janela). O Apresentador deixa a coluna com o motor.
+  // As miniaturas do iframe, na entrada, a cada largura nova (o painel que abre ou fecha, a janela) e a cada escolha.
   useEffect(() => {
-    if (byWidth && joined && frameWidth > 0) {
+    if (wantColumn !== null && joined && frameWidth > 0) {
       syncFilmstrip({ visible: filmstripVisible, wanted: wantColumn });
     }
-  }, [byWidth, filmstripVisible, frameWidth, joined, syncFilmstrip, wantColumn]);
+  }, [filmstripVisible, frameWidth, joined, syncFilmstrip, wantColumn]);
 
   // O console ja entrou na sala nesta pagina (a falha depois disso e uma queda; antes, a sala que nao abriu).
   const [everJoined, setEverJoined] = useState(joined);
@@ -121,10 +139,12 @@ export function ConsoleStage({ busy, className, handle, live, onPresent, present
   const canTest = handle.meetConfigured && session.status === "scheduled" && !handle.testing;
   const showRetry = handle.frameStatus === "failed" || (handle.tokenError === "failed" && handle.frameStatus === "idle");
   const badge = consoleStageBadgeFor({ joined, presenterName, role: handle.role, room });
-  const videoRightPx = stageVideoRightPx({ columnShown: stageColumnShown(room, joined), touch: geometry.touch });
+  const videoRightPx = stageVideoRightPx({ columnShown: stageColumnShown(room, joined, row), touch: geometry.touch });
+  const videoBottomPx = stageVideoBottomPx({ rowShown: stageRowShown(room, joined, row) });
+  const handsShown = joined && handsCount > 0 && Boolean(onHands);
 
   return (
-    <div className={className} data-console-slot="stage" data-live-frame-status={handle.frameStatus} style={{ "--room-video-right": `${videoRightPx}px` } as CSSProperties}>
+    <div className={className} data-console-slot="stage" data-live-frame-status={handle.frameStatus} style={{ "--room-video-bottom": `${videoBottomPx}px`, "--room-video-right": `${videoRightPx}px` } as CSSProperties}>
       <div aria-label={WEBINAR_COPY.aoVivo.palco} className="absolute inset-0 [&_iframe]:size-full [&_iframe]:border-0" data-live-stage="" ref={stageRef} role="region" />
       <RoomStageBadges
         assistantOn={false}
@@ -133,12 +153,28 @@ export function ConsoleStage({ busy, className, handle, live, onPresent, present
         recording={recording}
         topLeft={topLeft}
         topRight={
-          presentLabel || screenLabel ? (
+          presentLabel || screenLabel || handsShown ? (
             <>
+              {handsShown ? (
+                // A mao levantada no palco, com o desenho da area (docs/30 D99): quantas maos, e o toque abre a fila.
+                <button
+                  aria-label={WEBINAR_COPY.consoleV2.filaDeMaos.selo(handsCount)}
+                  className={cn("pointer-events-auto rounded-full", ROOM_FOCUS)}
+                  data-console-hands-open="stage"
+                  onClick={onHands}
+                  title={WEBINAR_COPY.consoleV2.filaDeMaos.selo(handsCount)}
+                  type="button"
+                >
+                  <RoomStagePill className="tabular-nums" data-room-badge="hands">
+                    <Hand aria-hidden="true" />
+                    {handsCount}
+                  </RoomStagePill>
+                </button>
+              ) : null}
               {presentLabel && onPresent ? (
                 // A pilula e o botao dos participantes simulados (D79): a camada dos selos nao recebe o toque, o botao sim.
                 <button
-                  aria-label={WEBINAR_COPY.simulacao.plateia.abrirControle(presentLabel)}
+                  aria-label={presentOpenLabel ?? WEBINAR_COPY.simulacao.plateia.abrirControle(presentLabel)}
                   className={cn("pointer-events-auto rounded-full", ROOM_FOCUS)}
                   data-console-audience-open="stage"
                   onClick={onPresent}

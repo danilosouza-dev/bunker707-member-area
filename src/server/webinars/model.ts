@@ -9,6 +9,7 @@
 import { saoPauloDayKey } from "../../lib/webinar-time";
 import { slugifyTitle } from "../catalog/model";
 import type { AudienceDefinition } from "../communications/audience-model";
+import type { AnswerAuthor, AnswerAuthorMode } from "./answer-author-model";
 import type { RecorderStatus } from "./recorder-model";
 
 export const WEBINAR_KINDS = ["live", "simulated"] as const;
@@ -148,6 +149,12 @@ export type RoomSettings = {
    * teto de 4 do V2-A60 saiu): ligado, todo aluno pode falar, e a equipe silencia uma pessoa ou todos.
    */
   selfUnmute: boolean;
+  /**
+   * Mostrar aos alunos quantas pessoas estao na sala (rodada v11, docs/30 D102; pedido do produtor de 12/11/2026).
+   * Ligado por padrao, tambem no webinario de antes (a chave ausente). Desligado, a sala do aluno nao mostra o numero
+   * em lugar nenhum e o servidor nem o manda; a equipe continua vendo no console.
+   */
+  showPresentCount: boolean;
   slowModeSeconds: SlowModeSeconds | null;
   waitingRoom: boolean;
 };
@@ -316,6 +323,7 @@ export function defaultRoomSettings(): RoomSettings {
     questions: true,
     reactions: true,
     selfUnmute: false,
+    showPresentCount: true,
     slowModeSeconds: null,
     waitingRoom: false
   };
@@ -825,10 +833,19 @@ export type QuestionReply = {
   anonymous: boolean;
   /** A foto do perfil de quem escreveu, so nas leituras do console (author-photos.ts); nunca na Anonima. */
   avatarUrl?: string | null;
+  /**
+   * Como a resposta da equipe aparece (rodada v9, docs/30 D88; webinar_question_replies.author_as): "self" (o nome e a
+   * foto de quem escreveu), "team" (so "Equipe") ou "custom" (o nome personalizado, em `displayName`). Nula na resposta
+   * de antes e na do aluno: vale o nome gravado.
+   */
+  authorAs?: AnswerAuthorMode | null;
   body: string;
   createdAt: string;
   displayName: string;
   id: string;
+  /** As curtidas desta resposta e se quem le curtiu (so nas leituras do console, docs/30 D101). */
+  liked?: boolean;
+  likes?: number;
   questionId: string;
   role: QuestionReplyRole;
   sessionId: string;
@@ -842,6 +859,13 @@ export type WebinarQuestion = {
   avatarUrl?: string | null;
   /** O fio da pergunta (as respostas depois da primeira), em ordem; so nas leituras do console. */
   replies?: QuestionReply[];
+  /**
+   * Quem assina a resposta escrita (rodada v9, docs/30 D88; webinar_questions.answer_author). Nula na resposta de antes,
+   * na do Assistente e no banco sem a 202611150001: a sala mostra "Equipe".
+   */
+  answerAuthor?: AnswerAuthor | null;
+  /** A foto de quem assinou com "Meu nome", so nas leituras do console e da sala (a da equipe aparece sempre, D62). */
+  answerAuthorAvatarUrl?: string | null;
   answerText: string | null;
   answeredAt: string | null;
   answeredBy: string | null;
@@ -860,6 +884,18 @@ export type WebinarQuestion = {
    */
   simulated: boolean;
   status: QuestionStatus;
+  /**
+   * Quando a equipe marcou o fio como visto (rodada v10, docs/30 D94): o aviso "Nova resposta do aluno" sai ate o
+   * aluno escrever de novo. So o console le; nunca vai para o aluno. Ausente ou nulo: nunca marcado.
+   */
+  threadSeenAt?: string | null;
+  /**
+   * So nas leituras do console (docs/30 D101): as curtidas da resposta escrita e se quem esta no console curtiu
+   * (`answerLikes`, `answerLiked`), e se ele curtiu a propria pergunta (`voted`; o total e `upvotes`).
+   */
+  answerLiked?: boolean;
+  answerLikes?: number;
+  voted?: boolean;
   upvotes: number;
   /** Quem perguntou; nulo so na pergunta simulada. */
   userId: string | null;
@@ -1175,8 +1211,22 @@ export type StudentOfferView = {
 export const SIMULATED_COUNT_MODES = ["off", "fixed", "curve"] as const;
 export type SimulatedCountMode = (typeof SIMULATED_COUNT_MODES)[number];
 
-/** Contador de plateia (`simulated_count_rule`): real / real + base / real + de base a peak com jitter. */
-export type SimulatedCountRule = { base: number; jitter: number; mode: SimulatedCountMode; peak: number };
+/** Para onde o numero fixo varia sozinho (rodada v9, docs/30 D90): para mais e para menos, so para mais ou so para menos. */
+export const SIMULATED_COUNT_VARY_DIRECTIONS = ["both", "up", "down"] as const;
+export type SimulatedCountVaryDirection = (typeof SIMULATED_COUNT_VARY_DIRECTIONS)[number];
+
+/**
+ * "Variar sozinho" (rodada v9, pedido do produtor de 12/11/2026; docs/30 D90): o numero fixo sobe e desce ate
+ * `percent` % dele, para o lado de `direction`, com uma mudanca a cada `everyMinSeconds` a `everyMaxSeconds` segundos.
+ * O numero e a hora de cada mudanca saem da semente da sessao (simulation-model.ts), iguais para todos os alunos.
+ */
+export type SimulatedCountVary = { direction: SimulatedCountVaryDirection; everyMaxSeconds: number; everyMinSeconds: number; percent: number };
+
+/**
+ * Contador de plateia (`simulated_count_rule`): real / real + base / real + de base a peak com jitter. `vary` so vale
+ * no "Real + número fixo" (ausente ou nulo: o numero parado, como sempre).
+ */
+export type SimulatedCountRule = { base: number; jitter: number; mode: SimulatedCountMode; peak: number; vary?: SimulatedCountVary | null };
 
 /** Entradas e saidas (`simulated_joins`): "Ana M. entrou" a cada `everySeconds`, ate `max`, so nomes genericos. */
 export type SimulatedJoins = { enabled: boolean; everySeconds: number; max: number; names: "generic" };
@@ -1248,8 +1298,52 @@ export const SIMULATION_LIMITS = {
   /** Os participantes simulados mudados no ar (D79): sobem ou descem em linha reta em 90 s, nunca de uma vez. */
   countRampSeconds: 90,
   /** No maximo 200 mudancas por sessao (a conta de cada ponto percorre as mudancas). */
-  countChangesMax: 200
+  countChangesMax: 200,
+  /** "Variar sozinho" (D90): de 1 a 50 % do numero fixo. */
+  varyPercentMin: 1,
+  varyPercentMax: 50,
+  /** "Variar sozinho": uma mudanca a cada 5 s no minimo (a sala redesenha o numero a cada segundo) e 10 min no maximo. */
+  varyEverySecondsMin: 5,
+  varyEverySecondsMax: 600
 } as const;
+
+/** O "Variar sozinho" que o controle propoe ao ligar: ate 5 %, para mais e para menos, a cada 20 a 60 s. */
+export function defaultSimulatedCountVary(): SimulatedCountVary {
+  return { direction: "both", everyMaxSeconds: 60, everyMinSeconds: 20, percent: 5 };
+}
+
+/**
+ * O "Variar sozinho" de uma regra, so quando vale: no numero fixo maior que zero, com os numeros dentro dos limites.
+ * Qualquer outra coisa, nulo (o numero parado).
+ */
+export function simulatedCountVaryOf(rule: Pick<SimulatedCountRule, "base" | "mode" | "vary">): SimulatedCountVary | null {
+  const vary = rule.vary;
+  if (rule.mode !== "fixed" || !(rule.base > 0) || !vary) {
+    return null;
+  }
+  const { direction, everyMaxSeconds, everyMinSeconds, percent } = vary;
+  const whole = [everyMaxSeconds, everyMinSeconds, percent].every((value) => Number.isInteger(value));
+  if (
+    !whole ||
+    !SIMULATED_COUNT_VARY_DIRECTIONS.includes(direction) ||
+    percent < SIMULATION_LIMITS.varyPercentMin ||
+    percent > SIMULATION_LIMITS.varyPercentMax ||
+    everyMinSeconds < SIMULATION_LIMITS.varyEverySecondsMin ||
+    everyMaxSeconds > SIMULATION_LIMITS.varyEverySecondsMax ||
+    everyMaxSeconds < everyMinSeconds
+  ) {
+    return null;
+  }
+  return { direction, everyMaxSeconds, everyMinSeconds, percent };
+}
+
+/** As duas variacoes sao a mesma (as duas ausentes, ou os mesmos quatro numeros). */
+export function sameSimulatedCountVary(a: SimulatedCountVary | null | undefined, b: SimulatedCountVary | null | undefined): boolean {
+  if (!a || !b) {
+    return !a && !b;
+  }
+  return a.direction === b.direction && a.everyMaxSeconds === b.everyMaxSeconds && a.everyMinSeconds === b.everyMinSeconds && a.percent === b.percent;
+}
 
 export function defaultSimulatedCountRule(): SimulatedCountRule {
   return { base: 0, jitter: 0, mode: "off", peak: 0 };

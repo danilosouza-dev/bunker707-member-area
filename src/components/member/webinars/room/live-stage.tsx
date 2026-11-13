@@ -49,6 +49,11 @@ export type LiveStageProps = {
    * --room-video-right: os selos de baixo e as pilulas do chat param antes dela (room-layout-model.ts).
    */
   videoRightPx?: number;
+  /**
+   * Quanto a fileira de miniaturas ocupa na base do video (px; rodada v9, docs/30 D91), na variavel
+   * --room-video-bottom: os selos de baixo, as pilulas, o aviso da sala e os cartoes da Na tela sobem esse valor.
+   */
+  videoBottomPx?: number;
 };
 
 function Cover({ children, coverUrl, tone = "default" }: { children?: ReactNode; coverUrl: string | null; tone?: "default" | "dim" }) {
@@ -72,7 +77,7 @@ export function liveStageState(screen: LiveScreen, entry: LiveEntry): string {
 }
 
 export function LiveStage(props: LiveStageProps) {
-  const { children, className, countdownLabel, coverUrl, entry, frameRef, lobby = false, onEnter, onRetry, readOnly, replayHref, screen, sessionId, stageRef, title, videoRightPx = 0 } = props;
+  const { children, className, countdownLabel, coverUrl, entry, frameRef, lobby = false, onEnter, onRetry, readOnly, replayHref, screen, sessionId, stageRef, title, videoBottomPx = 0, videoRightPx = 0 } = props;
   const copy = WEBINAR_COPY.aoVivo;
   const phrase = liveScreenPhrase(screen, { hasReplay: replayHref !== null });
   const open = screen === "open";
@@ -90,7 +95,7 @@ export function LiveStage(props: LiveStageProps) {
       data-room-stage={liveStageState(screen, entry)}
       ref={stageRef}
       role="region"
-      style={{ "--room-video-right": `${videoRightPx}px` } as CSSProperties}
+      style={{ "--room-video-bottom": `${videoBottomPx}px`, "--room-video-right": `${videoRightPx}px` } as CSSProperties}
     >
       {/* O iframe da sala entra aqui (nunca troca de lugar: abrir o painel ou girar so mudam classes). */}
       <div className="absolute inset-0 [&_iframe]:size-full [&_iframe]:border-0" data-live-frame ref={frameRef} />
