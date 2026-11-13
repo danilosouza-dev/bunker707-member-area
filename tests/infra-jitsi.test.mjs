@@ -159,7 +159,7 @@ test("compose do Jitsi: web, prosody, jicofo e jvb na tag stable fixada, saude e
   const prosody = services.get("prosody");
   assert.match(prosody, /JWT_APP_SECRET: "\$\{JWT_APP_SECRET\}"/);
   assert.match(prosody, /JWT_ALLOW_EMPTY: "0"/);
-  assert.match(prosody, /XMPP_MUC_MODULES: "\$\{XMPP_MUC_MODULES:-token_affiliation,bunker_room_guard,bunker_presence_guard,bunker_ghost_guard\}"/, "o modulo que barra quem foi removido ou banido, o que deixa so a foto do token (D115) e o que tira a entrada antiga de quem volta (D119)");
+  assert.match(prosody, /XMPP_MUC_MODULES: "\$\{XMPP_MUC_MODULES:-token_affiliation,bunker_room_guard,bunker_presence_guard,bunker_ghost_guard\}"/, "o modulo que barra quem foi removido ou banido, o que deixa so a foto do token (D115) e o que tira a entrada antiga de quem volta (D122)");
   assert.match(prosody, /ROOM_GUARD_URL: "\$\{ROOM_GUARD_URL:-\}"/);
   assert.match(prosody, /- \.\/prosody\/plugins:\/prosody-plugins-custom:ro/, "a copia versionada do token_affiliation entra no caminho dos plugins");
   assert.match(prosody, /\/usr\/local\/bin\/healthcheck\.sh/);
@@ -309,7 +309,7 @@ test("custom-config.js e custom-interface_config.js, avaliados como o navegador 
   assert.match(toolbarCheck(generated), /FALHA config\.js barra padrao com 'desktop'/, "a barra do host no config.js servido falha");
   // Os dois arquivos so atribuem: nada de fetch, script ou acesso a window. As unicas excecoes sao os dois carregadores
   // nossos, cada um entre as suas marcas (uma vez so): o do CSS (docs/31 §3), que so le o hash e cria um <link> para um
-  // caminho desta origem, e o dos participantes simulados (docs/30 D117), que so le o hash e cria a tag de script para
+  // caminho desta origem, e o dos participantes simulados (docs/30 D120), que so le o hash e cria a tag de script para
   // um caminho desta origem.
   assert.equal(customConfig.split("bunker707:css-loader:inicio").length, 2, "uma marca de inicio so: nada se esconde num segundo bloco");
   const loader = /\/\/ bunker707:css-loader:inicio\n([\s\S]*?)\/\/ bunker707:css-loader:fim\n/.exec(customConfig);
@@ -477,7 +477,7 @@ test("mod_bunker_presence_guard (D115): toda presenca que chega de uma sessao pe
   assert.doesNotMatch(run.stdout, /FALHOU/);
 });
 
-test("mod_bunker_ghost_guard (D119): quem volta a sala tira so a propria entrada antiga, a da conexao que caiu; duas abas vivas ficam, a entrada de outra pessoa fica, e um erro nunca desfaz a entrada", () => {
+test("mod_bunker_ghost_guard (D122): quem volta a sala tira so a propria entrada antiga, a da conexao que caiu; duas abas vivas ficam, a entrada de outra pessoa fica, e um erro nunca desfaz a entrada", () => {
   const pluginPath = join(jitsiDir, "prosody", "plugins", "mod_bunker_ghost_guard.lua");
   const plugin = read(pluginPath);
   assert.match(plugin, /module:hook\("muc-occupant-joined", function\(event\)[\s\S]*?end, -\d+\);/, "depois da entrada (prioridade negativa): quem volta ja esta na sala");
@@ -500,7 +500,7 @@ test("mod_bunker_ghost_guard (D119): quem volta a sala tira so a propria entrada
   assert.doesNotMatch(run.stdout, /FALHOU/);
 });
 
-test("deploy-meet poe o bunker_presence_guard e o bunker_ghost_guard na lista do Prosody de um servidor que ja existia, sem tirar os outros modulos (D115, D119)", () => {
+test("deploy-meet poe o bunker_presence_guard e o bunker_ghost_guard na lista do Prosody de um servidor que ja existia, sem tirar os outros modulos (D115, D122)", () => {
   const start = deploySource.indexOf("    muc_modules=$(get_env");
   const end = deploySource.indexOf("    fi\n", start) + "    fi\n".length;
   assert.ok(start > 0 && end > start, "o passo esta no ramo do meet");
@@ -1101,7 +1101,7 @@ test("o carregador do CSS: so com config.bunkerTheme no hash cria o <link> (v = 
   assert.equal(config.channelLastN, 9);
 });
 
-// Os participantes simulados desenhados pelo motor (docs/30 D117): o carregador do arquivo no custom-config.js, avaliado
+// Os participantes simulados desenhados pelo motor (docs/30 D120): o carregador do arquivo no custom-config.js, avaliado
 // como o navegador faria. So liga o arquivo no iframe do nosso app (a chave do tema no hash) e no gravador
 // (config.iAmRecorder=true, que o Jibri manda); uma sala aberta pelo endereco nao carrega nada. O que o arquivo faz
 // tem teste de comportamento em tests/infra-jitsi-plateia.test.mjs; a montagem e o smoke, a guarda ao lado.

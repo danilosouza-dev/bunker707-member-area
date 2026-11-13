@@ -113,7 +113,7 @@ elif [ "$role" = "meet" ]; then
     # O JVB esta atras do NAT do Docker: anuncia o IPv4 publico do servidor.
     set_env "$target" "$envf" JVB_ADVERTISE_IPS "$ip"
     # A foto do Perfil na miniatura (docs/30 D115) pede o bunker_presence_guard no Prosody, e a miniatura que nao se
-    # repete quando alguem volta a sala (D119), o bunker_ghost_guard. O .env de um servidor que ja existia nao e gerado
+    # repete quando alguem volta a sala (D122), o bunker_ghost_guard. O .env de um servidor que ja existia nao e gerado
     # de novo: os modulos que faltam entram no fim da lista (o resto fica como esta), e o compose recria o prosody,
     # porque o ambiente dele mudou.
     muc_modules=$(get_env "$target" "$envf" XMPP_MUC_MODULES)

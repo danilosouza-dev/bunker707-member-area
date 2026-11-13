@@ -25,7 +25,7 @@ insecure=(); [ -n "$local_certs" ] && insecure=(-k)
 # A folha do iframe (docs/31 §3): o ?v= do carregador e o comeco do sha256 dela; a servida tem de ser a do commit.
 css_file="$(dirname -- "$0")/../web/bunker707.css"
 css_sha=$(sha256sum "$css_file" | cut -c1-64); css_v=${css_sha:0:8}
-# Os participantes simulados desenhados pelo motor (docs/30 D117): o mesmo ?v= pelo sha256, no arquivo de /libs.
+# Os participantes simulados desenhados pelo motor (docs/30 D120): o mesmo ?v= pelo sha256, no arquivo de /libs.
 plateia_file="$(dirname -- "$0")/../web/bunker707-plateia.js"
 plateia_sha=$(sha256sum "$plateia_file" | cut -c1-64); plateia_v=${plateia_sha:0:8}
 

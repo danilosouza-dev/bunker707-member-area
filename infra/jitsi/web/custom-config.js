@@ -85,7 +85,7 @@ config.localRecording = { disable: false };
 })();
 // bunker707:css-loader:fim
 
-// Bunker707: os participantes simulados desenhados pelo proprio motor (docs/30 D117). Como o carregador do CSS acima,
+// Bunker707: os participantes simulados desenhados pelo proprio motor (docs/30 D120). Como o carregador do CSS acima,
 // este roda como script da pagina, antes do app: so liga /libs/bunker707-plateia.js, servido por este mesmo nginx
 // (montado em docker-compose.yml), e so em dois casos: o iframe do nosso app (a chave config.bunkerTheme no hash) e o
 // gravador (config.iAmRecorder=true no hash, que o Jibri manda). Uma sala aberta pelo endereco nao carrega nada. O
@@ -104,7 +104,7 @@ config.localRecording = { disable: false };
         if (!ours && !recorder) { return; }
         var script = document.createElement('script');
         // O v e o comeco do sha256 do arquivo (a guarda da infra confere e diz o valor novo), como no CSS.
-        script.src = '/libs/bunker707-plateia.js?v=b852b9d6';
+        script.src = '/libs/bunker707-plateia.js?v=a332a0ce';
         script.async = true;
         (document.head || document.documentElement).appendChild(script);
     } catch (e) {

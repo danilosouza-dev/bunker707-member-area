@@ -147,7 +147,7 @@ export type UseJitsiMeet = {
   participantId: string | null;
   /**
    * Manda uma mensagem a pagina do iframe (window.postMessage, so para a origem do nosso motor); falso sem iframe
-   * montado. So os participantes simulados usam (docs/30 D117): a lista vai ao arquivo da instancia, que a desenha.
+   * montado. So os participantes simulados usam (docs/30 D120): a lista vai ao arquivo da instancia, que a desenha.
    */
   postToFrame: (message: unknown) => boolean;
   /** Remonta a sala com o token mais novo ("Tentar de novo" ou depois de uma queda). */
@@ -206,7 +206,7 @@ export function useJitsiMeet<E extends string = JitsiListenedEvent>(input: UseJi
         for (const name of events) {
           const signal: string = name;
           instance.addListener(signal, (payload) => {
-            // O motor avisa a entrada e a saida de um participante simulado (docs/30 D117) como as de uma pessoa: o
+            // O motor avisa a entrada e a saida de um participante simulado (docs/30 D120) como as de uma pessoa: o
             // sinal para aqui, antes de qualquer conta da pagina (quem esta na sala, os papeis, o que vai ao servidor).
             if (disposed || aboutSimulatedParticipant(payload)) {
               return;

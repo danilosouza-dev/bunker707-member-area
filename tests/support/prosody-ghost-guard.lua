@@ -1,4 +1,4 @@
--- O mod_bunker_ghost_guard.lua rodando de verdade (docs/30 D119), com uma sala, sessoes e presencas de mentira: o modulo
+-- O mod_bunker_ghost_guard.lua rodando de verdade (docs/30 D122), com uma sala, sessoes e presencas de mentira: o modulo
 -- so usa module:hook, module:log, module:require "util", prosody.full_sessions, room:each_occupant e room:set_role, e
 -- nada do Prosody precisa estar instalado. Quem chama: tests/infra-jitsi.test.mjs, so quando ha lua5.4 na maquina.
 -- Uso: lua5.4 tests/support/prosody-ghost-guard.lua <plugin>

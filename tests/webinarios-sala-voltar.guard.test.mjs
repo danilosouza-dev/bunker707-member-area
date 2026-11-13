@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-// Guarda de texto (docs/18 §2.2) de quem sai e volta a Live ao vivo (docs/30 D118 e D119): onde a sala pede o
+// Guarda de texto (docs/18 §2.2) de quem sai e volta a Live ao vivo (docs/30 D121 e D122): onde a sala pede o
 // historico do chat, e que so a live pede. O comportamento do pedido esta em tests/webinarios-sala-rotas.test.mjs
 // (a rota), o do Sair em tests/webinarios-sala-sair.test.mjs e o do modulo do Prosody em tests/infra-jitsi.test.mjs.
 

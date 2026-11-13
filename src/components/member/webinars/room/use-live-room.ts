@@ -304,11 +304,11 @@ export type LiveRoomController = {
   /** Sair: o iframe sai (hangup) e o que sobrou da fila vai pelo sendBeacon. */
   /**
    * Sai da sala. O iframe so sai da pagina depois que o motor de video avisa a saida (ou no prazo de
-   * ROOM_LEAVE_WAIT_MS); `onGone` roda nessa hora (o Sair troca de pagina ali). Docs/30 D119.
+   * ROOM_LEAVE_WAIT_MS); `onGone` roda nessa hora (o Sair troca de pagina ali). Docs/30 D122.
    */
   hangUp: (onGone?: () => void) => void;
   jitsiStatus: JitsiStatus;
-  /** Uma mensagem para a pagina do iframe (o postToFrame do useJitsiMeet): a lista dos participantes simulados (D117). */
+  /** Uma mensagem para a pagina do iframe (o postToFrame do useJitsiMeet): a lista dos participantes simulados (D120). */
   postToFrame: (message: unknown) => boolean;
   reply: JoinTokenReply | null;
   retryNow: () => void;
@@ -602,7 +602,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
   const onEvent = useCallback(
     (name: JitsiListenedEvent, payload: unknown) => {
       if (leavingRef.current) {
-        // Saindo pelo Sair: o aviso de saida do motor solta o iframe (docs/30 D119); nenhum outro sinal vale mais.
+        // Saindo pelo Sair: o aviso de saida do motor solta o iframe (docs/30 D122); nenhum outro sinal vale mais.
         if (name === "videoConferenceLeft" || name === "readyToClose") {
           leaveWaitRef.current?.gone();
         }
@@ -944,7 +944,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
       pushEvent(toRoomEvent("videoConferenceLeft", {}, { nowIso: new Date().toISOString(), ownId: ownIdRef.current }));
     }
     // Este iframe esta dentro da sala de video: ele fica na pagina ate o motor avisar a saida ao servidor da sala (ou
-    // ate o prazo). Tirado antes, o servidor guardava a conexao por 1 min e a miniatura ficava para todos (D119).
+    // ate o prazo). Tirado antes, o servidor guardava a conexao por 1 min e a miniatura ficava para todos (D122).
     const frame = meetApiRef.current?.current ?? null;
     const inConference = frame !== null && joinedApiRef.current === frame;
     const asked = commandRef.current("hangup");

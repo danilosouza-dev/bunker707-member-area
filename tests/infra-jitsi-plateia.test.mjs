@@ -5,7 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
-// Os participantes simulados desenhados pelo proprio motor de video (docs/30 D117 e §6.9): o arquivo
+// Os participantes simulados desenhados pelo proprio motor de video (docs/30 D120 e §6.9): o arquivo
 // infra/jitsi/web/bunker707-plateia.js, avaliado como o navegador faria, contra um motor de mentira com o mesmo
 // formato do estado e das acoes que ele usa na tag fixada (base/participants, filmstrip, base/conference e
 // base/config). O que o motor de verdade desenha com isso so o ensaio local prova (docs/30 §6.9); aqui se prova o que

@@ -422,7 +422,7 @@ export const LOWER_HAND_SIGNAL = "bunker707:lower-hand";
 export const RECORDING_SIGNAL = "bunker707:recording";
 
 /**
- * Os participantes simulados desenhados pelo proprio motor (docs/30 D117): o tipo da mensagem que a pagina manda ao
+ * Os participantes simulados desenhados pelo proprio motor (docs/30 D120): o tipo da mensagem que a pagina manda ao
  * iframe (window.postMessage, aceita pelo infra/jitsi/web/bunker707-plateia.js so de quem montou o iframe), o teto de
  * miniaturas e o formato do id de cada simulado. Os tres sao os mesmos do arquivo da instancia (a guarda confere).
  */

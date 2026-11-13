@@ -307,7 +307,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     [sessionId]
   );
 
-  // Os participantes simulados nas miniaturas dos alunos (docs/30 D117): o console le a mesma lista da sala e, pelo
+  // Os participantes simulados nas miniaturas dos alunos (docs/30 D120): o console le a mesma lista da sala e, pelo
   // numero de simulados do retrato de 5 s, sabe quem aparece agora. Ele nao desenha ninguem no proprio video: a lista
   // so segue para o gravador, para a gravacao mostrar o que a turma ve.
   const simulatedNow = snapshot?.simulatedNow ?? 0;

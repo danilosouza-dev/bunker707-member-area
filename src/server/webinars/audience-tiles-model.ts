@@ -1,4 +1,4 @@
-// Os participantes simulados nas miniaturas da live, a parte pura (docs/30 D117; pedido do produtor de 13/11/2026):
+// Os participantes simulados nas miniaturas da live, a parte pura (docs/30 D120; pedido do produtor de 13/11/2026):
 // a lista ordenada de quem aparece (as pessoas que comentam, do card Roteiro, com a foto; depois as sem foto; depois
 // nomes genericos ate o teto), quantas aparecem em cada instante (o numero de participantes simulados daquele
 // segundo, que a sala ja calcula para o selo dos presentes) e a mensagem que a pagina manda ao iframe. Quem desenha e
@@ -56,13 +56,17 @@ function personaTileId(personaId: string, taken: ReadonlySet<string>): string | 
 
 /**
  * A lista ordenada dos simulados de uma sessao: as pessoas que comentam com foto (por nome), as sem foto (por nome) e
- * os nomes genericos, ate `max`. A mesma entrada da sempre a mesma lista.
+ * os nomes genericos, ate `max`. A lista de pessoas e a da escola (docs/30 D117): em cada grupo, as que comentam no
+ * roteiro deste webinario (`scriptPersonaIds`) vem antes das outras, para a miniatura acompanhar quem a turma ve
+ * comentar quando ha mais pessoas na lista do que participantes simulados. A mesma entrada da sempre a mesma lista.
  */
 export function audienceTilesRoster(input: {
   max?: number;
   /** A origem conferida do nosso Supabase (a foto so sai do nosso bucket); nula, todo mundo com as iniciais. */
   origin: string | null;
   personas: readonly Pick<WebinarPersona, "avatarPath" | "id" | "name">[];
+  /** As pessoas ligadas a algum item do roteiro deste webinario; sem ele, a lista inteira so por nome. */
+  scriptPersonaIds?: ReadonlySet<string>;
   seed: number;
 }): AudienceTilePerson[] {
   const max = Math.max(0, Math.min(AUDIENCE_TILES_MAX, Math.trunc(input.max ?? AUDIENCE_TILES_MAX)));
@@ -71,7 +75,10 @@ export function audienceTilesRoster(input: {
   const names = new Set<string>();
 
   const created = sortPersonas(input.personas).map((persona) => ({ persona, photoUrl: personaAvatarUrl(persona.avatarPath, input.origin) }));
-  for (const group of [created.filter((item) => item.photoUrl), created.filter((item) => !item.photoUrl)]) {
+  const inScript = (item: (typeof created)[number]) => input.scriptPersonaIds?.has(item.persona.id) === true;
+  const withPhoto = created.filter((item) => item.photoUrl);
+  const plain = created.filter((item) => !item.photoUrl);
+  for (const group of [withPhoto.filter(inScript), withPhoto.filter((item) => !inScript(item)), plain.filter(inScript), plain.filter((item) => !inScript(item))]) {
     for (const { persona, photoUrl } of group) {
       const name = persona.name.replace(/\s+/g, " ").trim();
       const key = personaNameKey(name);

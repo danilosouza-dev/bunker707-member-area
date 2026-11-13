@@ -6,7 +6,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 // Guarda de arquitetura (docs/18 §1.2: conferencia de texto so vale como guarda, em arquivo .guard): o arquivo dos
-// participantes simulados da instancia do motor (docs/30 D117), o que o monta e serve e o ?v= do carregador. O que ele
+// participantes simulados da instancia do motor (docs/30 D120), o que o monta e serve e o ?v= do carregador. O que ele
 // pede ao motor tem teste de comportamento em tests/infra-jitsi-plateia.test.mjs; o carregador, em
 // tests/infra-jitsi.test.mjs; o que o motor desenha com isso, so o ensaio local prova (docs/30 §6.9).
 const here = dirname(fileURLToPath(import.meta.url));

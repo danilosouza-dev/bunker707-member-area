@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 // Guarda de arquitetura (docs/18 §1.2: conferencia de texto so vale como guarda, em arquivo .guard) dos participantes
-// simulados nas miniaturas (docs/30 D117): onde a pagina descarta os sinais de um simulado, quem manda a lista ao
+// simulados nas miniaturas (docs/30 D120): onde a pagina descarta os sinais de um simulado, quem manda a lista ao
 // iframe e quem so repassa. O comportamento de cada parte tem teste: a lista e a mensagem em
 // webinarios-miniaturas-simuladas.test.mjs, a rota em webinarios-miniaturas-simuladas-rotas.test.mjs e o arquivo da
 // instancia em infra-jitsi-plateia.test.mjs.

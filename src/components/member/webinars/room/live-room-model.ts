@@ -339,7 +339,7 @@ export function dropKind(input: { everJoined: boolean; leaving: boolean }): "dro
 }
 
 /* ------------------------------------------------------------------------------------------------
- * A saida da sala pelo Sair (docs/30 D119)
+ * A saida da sala pelo Sair (docs/30 D122)
  * ---------------------------------------------------------------------------------------------- */
 
 /**

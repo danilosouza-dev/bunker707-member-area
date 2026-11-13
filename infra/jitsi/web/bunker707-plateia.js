@@ -1,5 +1,5 @@
 /*
- * Bunker707: os participantes simulados desenhados pelo proprio motor de video (docs/30 D117; docs/31 §18).
+ * Bunker707: os participantes simulados desenhados pelo proprio motor de video (docs/30 D120; docs/31 §19).
  *
  * O custom-config.js desta instancia so carrega este arquivo no iframe do nosso app (a chave config.bunkerTheme no
  * hash) e no gravador (config.iAmRecorder=true no hash). Sem isso (uma sala aberta pelo endereco), ele nem entra.

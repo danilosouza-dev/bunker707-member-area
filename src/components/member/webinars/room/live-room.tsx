@@ -690,7 +690,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const getSimulationOffsetMs = () => simulationClockMs({ kind: "live", scheduledAt, startedAt }, Date.now() + (skewRef.current ?? 0));
   const simulation = useRoomSimulation({ enabled: !readOnly && !blocked && phase !== "ended", getOffsetMs: getSimulationOffsetMs, sessionId, simulationKey: naTela.simulationKey, webinarId });
   const simulationOffsetMs = simulationClockMs({ kind: "live", scheduledAt, startedAt }, nowMs + skewMs);
-  // Os participantes simulados nas miniaturas (docs/30 D117): a lista ordenada vem do servidor; aparecem os primeiros,
+  // Os participantes simulados nas miniaturas (docs/30 D120): a lista ordenada vem do servidor; aparecem os primeiros,
   // pelo numero de simulados deste segundo (o mesmo que soma no selo dos presentes), e quem desenha e o proprio motor.
   // So com a Simulacao ligada na sessao (a live sem ela nao pede nada) e a partir de 1024 px: abaixo disso a sala nao
   // mostra miniaturas nem a Grade, e a lista so faria o celular baixar fotos que ninguem ve.
@@ -757,7 +757,7 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     setTheme(theme === "light" ? "dark" : "light");
   }
 
-  /** Sai da sala e so entao troca de pagina: o motor de video avisa a saida antes de o iframe sumir (docs/30 D119). */
+  /** Sai da sala e so entao troca de pagina: o motor de video avisa a saida antes de o iframe sumir (docs/30 D122). */
   function leave() {
     room.hangUp(() => router.push(webinarHref));
   }

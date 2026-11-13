@@ -230,7 +230,7 @@ export type LiveRoomHandle = {
 
 type UseLiveRoomInput = {
   /**
-   * Os participantes simulados que aparecem agora nas miniaturas dos alunos (docs/30 D117). O console nao desenha
+   * Os participantes simulados que aparecem agora nas miniaturas dos alunos (docs/30 D120). O console nao desenha
    * ninguem: o arquivo da instancia so repassa a lista ao gravador, para a gravacao sair como a sala do aluno.
    */
   audience?: readonly AudienceTilePerson[];

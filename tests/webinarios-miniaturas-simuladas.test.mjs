@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import "./support/transpile-tsx.mjs";
 
-// Os participantes simulados nas miniaturas da live, a parte pura (docs/30 D117; docs/18 §2.1; pedido do produtor de
+// Os participantes simulados nas miniaturas da live, a parte pura (docs/30 D120; docs/18 §2.1; pedido do produtor de
 // 13/11/2026): a lista ordenada (as pessoas que comentam com foto, as sem foto e os nomes genericos ate o teto), sempre
 // a mesma para a mesma entrada; quantas aparecem em cada instante; a mensagem que a pagina manda ao iframe; e os sinais
 // do iframe sobre um simulado, que a pagina descarta. O que o arquivo da instancia faz com a mensagem esta em
@@ -35,6 +35,25 @@ test("a ordem da lista: quem comenta com foto, quem comenta sem foto e so depois
   assert.ok(roster.slice(4).every((person) => person.id.startsWith("simg") && person.photoUrl === null), "os genericos nunca tem foto");
   assert.ok(roster.every((person) => frame.isSimulatedParticipantId(person.id)), "todo id no formato que o arquivo da instancia aceita");
   assert.equal(new Set(roster.map((person) => person.id)).size, roster.length, "sem id repetido");
+});
+
+test("a lista de pessoas e a da escola: em cada grupo, quem comenta no roteiro deste webinario vem antes das outras pessoas", () => {
+  // A Zélia (sem foto) e o Marcos (com foto) comentam neste roteiro; a ana (com foto) e a Bia (sem foto), em outros.
+  const scriptPersonaIds = new Set([PERSONAS[0].id, PERSONAS[1].id]);
+  const roster = tiles.audienceTilesRoster({ origin: ORIGIN, personas: PERSONAS, scriptPersonaIds, seed: 7 });
+  assert.deepEqual(
+    roster.slice(0, 4).map((person) => person.name),
+    ["Marcos Lima", "ana m.", "Zélia Prado", "Bia Costa"],
+    "com foto antes de sem foto (a regra do produtor); dentro de cada grupo, quem comenta aqui na frente"
+  );
+  assert.ok(roster.slice(4).every((person) => person.id.startsWith("simg")), "os genericos so depois de todas as pessoas da escola");
+  // Com menos participantes simulados do que pessoas na lista, sobram os do roteiro e as fotos.
+  assert.deepEqual(tiles.audienceTilesRoster({ max: 2, origin: ORIGIN, personas: PERSONAS, scriptPersonaIds, seed: 7 }).map((person) => person.name), ["Marcos Lima", "ana m."]);
+  // Um id que nao esta na lista (a pessoa removida, o item de outro roteiro) nao muda nada; sem o conjunto, so por nome.
+  const semRoteiro = tiles.audienceTilesRoster({ origin: ORIGIN, personas: PERSONAS, seed: 7 });
+  assert.deepEqual(tiles.audienceTilesRoster({ origin: ORIGIN, personas: PERSONAS, scriptPersonaIds: new Set(["nao-existe"]), seed: 7 }), semRoteiro);
+  assert.deepEqual(tiles.audienceTilesRoster({ origin: ORIGIN, personas: PERSONAS, scriptPersonaIds: new Set(), seed: 7 }), semRoteiro);
+  assert.deepEqual(new Set(roster.map((person) => person.id)), new Set(semRoteiro.map((person) => person.id)), "as mesmas pessoas, so a ordem muda");
 });
 
 test("os nomes genericos: primeiro nome + inicial, sem repetir, sem o nome de quem comenta, e os das entradas do chat na frente", () => {

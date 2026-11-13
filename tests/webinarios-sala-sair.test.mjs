@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import "./support/resolve-extensionless-ts.mjs";
 
-// O Sair da sala do aluno (docs/30 D119; docs/18 §2.2). A pagina tirava o iframe do motor de video no mesmo passo em
+// O Sair da sala do aluno (docs/30 D122; docs/18 §2.2). A pagina tirava o iframe do motor de video no mesmo passo em
 // que pedia a saida: quando o motor nao chegava a avisar o servidor da sala, a conexao ficava guardada por 1 min, a
 // miniatura de quem saiu continuava na tela de todos e, voltando nesse meio tempo, a pessoa aparecia duas vezes (teste
 // do produtor de 13/11/2026). Agora a pagina espera o aviso de saida do motor (ou o prazo) antes de tirar o iframe e

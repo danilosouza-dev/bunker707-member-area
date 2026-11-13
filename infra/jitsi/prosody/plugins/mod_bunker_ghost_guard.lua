@@ -1,4 +1,4 @@
--- Bunker707: quem volta a sala tira a propria entrada antiga (docs/30 D119). Modulo nosso (nao vem do Jitsi), carregado
+-- Bunker707: quem volta a sala tira a propria entrada antiga (docs/30 D122). Modulo nosso (nao vem do Jitsi), carregado
 -- no MUC por XMPP_MUC_MODULES=token_affiliation,bunker_room_guard,bunker_presence_guard,bunker_ghost_guard.
 --
 -- Por que: quando o navegador de alguem fecha a conexao sem se despedir (a aba fechada, a pagina recarregada, a queda

@@ -1,6 +1,6 @@
 "use client";
 
-// Os participantes simulados nas miniaturas da Live ao vivo (docs/30 D117; pedido do produtor de 13/11/2026), o lado da
+// Os participantes simulados nas miniaturas da Live ao vivo (docs/30 D120; pedido do produtor de 13/11/2026), o lado da
 // sala. Duas partes:
 //
 // - useRoomAudience: a lista ordenada de quem pode aparecer (GET /api/webinars/[id]/audience, calculada no servidor: as

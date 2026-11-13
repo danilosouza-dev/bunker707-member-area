@@ -759,9 +759,9 @@ aberta no topo do card).
   compacta (uma linha por item, com rolagem até metade da tela) e não mudou.
 - **Por que não uma janela**: o **Remover** abre uma confirmação, que ficaria uma janela dentro de outra, e o console em
   tela cheia precisaria levar as duas para o portal dele. A lista que abre ali mesmo resolve o espaço sem isso.
-## 18. Os participantes simulados nas miniaturas (13/11/2026, `docs/30` D117)
+## 19. Os participantes simulados nas miniaturas (13/11/2026, `docs/30` D120)
 
-O produtor pediu que as pessoas simuladas apareçam na lista de miniaturas da Live ao vivo, "para parecer uma live real". As decisões e o que roda por dentro estão no `docs/30` (D117 e §6.9); aqui fica o desenho.
+O produtor pediu que as pessoas simuladas apareçam na lista de miniaturas da Live ao vivo, "para parecer uma live real". As decisões e o que roda por dentro estão no `docs/30` (D120 e §6.9); aqui fica o desenho.
 
 - **Quem desenha**: o próprio motor. Cada simulado é uma miniatura igual à de quem está com a câmera desligada: a foto (a da pessoa que comenta, do card Roteiro) ou as iniciais coloridas do motor, o nome embaixo e o microfone riscado. Nada de novo na folha `bunker707.css`: os cantos, o fundo e o contorno são os mesmos das outras miniaturas.
 - **A ordem**, de cima para baixo na coluna e da esquerda para a direita na Grade: a miniatura do próprio aluno, quem modera (com a tela compartilhada dele, quando há), os alunos de verdade, os simulados com foto, os simulados sem foto.

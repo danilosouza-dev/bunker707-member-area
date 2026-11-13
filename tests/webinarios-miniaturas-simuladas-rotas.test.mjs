@@ -4,7 +4,7 @@ import test from "node:test";
 import { actionStubs } from "./support/admin-action-stubs.mjs";
 import { CONTADOR, DECISAO, LIVE_SESSION, MIN, OTHER_SESSION, REPLAY, SESSION, WEBINAR, bancoDaSimulacao, escolaDaSimulacao, iso, semAsColunasDaSimulacao } from "./support/webinarios-v4-simulacao-banco.mjs";
 
-// A rota das miniaturas simuladas da Live ao vivo (docs/30 D117; docs/18 §2.2), sem banco: o banco da Simulacao em
+// A rota das miniaturas simuladas da Live ao vivo (docs/30 D120; docs/18 §2.2), sem banco: o banco da Simulacao em
 // memoria e a sessao do aluno pelo teste. GET .../audience?sessao=: 401 sem sessao, 400 sem id ou sem ?sessao=, 404
 // para a sessao de outro webinario; a live com participantes simulados e a decisao registrada devolve a lista
 // ordenada (quem comenta com foto, quem comenta sem foto, os nomes genericos), igual para todos, sem a semente nem as
@@ -63,6 +63,14 @@ const PESSOAS = [
   pessoa("22222222-aaaa-4bbb-8ccc-000000000002", "Marcos Lima", FOTO),
   pessoa("99999999-aaaa-4bbb-8ccc-000000000009", "De Outro Webinario", FOTO, "ffffffff-0000-4000-8000-00000000ffff")
 ];
+// O roteiro deste webinario: a Zélia e o Marcos comentam aqui; a pessoa criada em outro webinario, nao (a lista de
+// pessoas e uma so da escola, docs/30 D117).
+const ROTEIRO = [
+  { id: "aaaaaaaa-1111-4aaa-8aaa-000000000001", persona_avatar_path: null, persona_id: PESSOAS[0].id, webinar_id: WEBINAR },
+  { id: "aaaaaaaa-1111-4aaa-8aaa-000000000002", persona_avatar_path: FOTO, persona_id: PESSOAS[1].id, webinar_id: WEBINAR },
+  { id: "aaaaaaaa-1111-4aaa-8aaa-000000000003", persona_avatar_path: null, persona_id: null, webinar_id: WEBINAR },
+  { id: "aaaaaaaa-1111-4aaa-8aaa-000000000004", persona_avatar_path: FOTO, persona_id: PESSOAS[2].id, webinar_id: "ffffffff-0000-4000-8000-00000000ffff" }
+];
 const NO_AR = { ended_at: null, recording_anchor_at: null, scheduled_at: iso(Date.now() - 20 * MIN), started_at: iso(Date.now() - 12 * MIN), status: "live" };
 const regras = { ...DECISAO, simulated_count_rule: CONTADOR };
 
@@ -76,11 +84,12 @@ function novoAluno() {
 }
 
 /** A escola com o webinario ao vivo, a sessao da live com `live` por cima e as pessoas que comentam. */
-function montar(live = {}, { pessoas = PESSOAS, semColunas = false } = {}) {
+function montar(live = {}, { pessoas = PESSOAS, roteiro = ROTEIRO, semColunas = false } = {}) {
   const tables = escolaDaSimulacao({ webinar: { kind: "live" } });
   if (pessoas) {
     tables.webinar_personas = pessoas.map((row) => ({ ...row }));
   }
+  tables.webinar_chat_script_items = roteiro.map((row) => ({ ...row }));
   const db = semColunas ? semAsColunasDaSimulacao({ tables }) : bancoDaSimulacao({ tables });
   Object.assign(db.tables.webinar_sessions.find((item) => item.id === LIVE_SESSION), NO_AR, live);
   actionStubs.db = db;
@@ -110,7 +119,7 @@ test("guardas: 401 sem sessao, 400 sem id ou sem ?sessao=, 404 para a sessao de 
   assert.equal(outra.headers.get("cache-control"), "private, no-store, max-age=0");
 });
 
-test("a live com participantes simulados e a decisao: a lista ordenada, igual ao modelo e para todos, so com as pessoas deste webinario; nunca a semente nem as regras", async () => {
+test("a live com participantes simulados e a decisao: a lista ordenada, igual ao modelo e para todos, com as pessoas da escola e quem comenta neste roteiro na frente; nunca a semente nem as regras", async () => {
   const { db } = montar(regras);
   const primeira = await ler();
   assert.equal(primeira.status, 200);
@@ -118,15 +127,17 @@ test("a live com participantes simulados e a decisao: a lista ordenada, igual ao
   const feed = primeira.body.data;
   assert.equal(feed.enabled, true);
   assert.equal(feed.people.length, 300);
-  assert.deepEqual(feed.people.slice(0, 2), [
+  // Com foto: quem comenta neste roteiro, depois a outra pessoa da escola; sem foto: quem comenta neste roteiro.
+  assert.deepEqual(feed.people.slice(0, 3), [
     { id: "simp22222222aaaa4bbb", name: "Marcos Lima", photoUrl: `${ORIGIN}/storage/v1/object/public/content-assets/${FOTO}` },
+    { id: "simp99999999aaaa4bbb", name: "De Outro Webinario", photoUrl: `${ORIGIN}/storage/v1/object/public/content-assets/${FOTO}` },
     { id: "simp11111111aaaa4bbb", name: "Zélia Prado", photoUrl: null }
   ]);
-  assert.ok(feed.people.slice(2).every((person) => person.id.startsWith("simg") && person.photoUrl === null));
-  assert.equal(feed.people.some((person) => person.name === "De Outro Webinario"), false);
+  assert.ok(feed.people.slice(3).every((person) => person.id.startsWith("simg") && person.photoUrl === null));
   const seed = db.tables.webinar_sessions.find((item) => item.id === LIVE_SESSION).simulation_seed;
-  const personas = PESSOAS.filter((row) => row.webinar_id === WEBINAR).map((row) => ({ avatarPath: row.avatar_path, id: row.id, name: row.name }));
-  assert.deepEqual(feed.people, tiles.audienceTilesRoster({ origin: ORIGIN, personas, seed }));
+  const personas = PESSOAS.map((row) => ({ avatarPath: row.avatar_path, id: row.id, name: row.name }));
+  const scriptPersonaIds = new Set([PESSOAS[0].id, PESSOAS[1].id]);
+  assert.deepEqual(feed.people, tiles.audienceTilesRoster({ origin: ORIGIN, personas, scriptPersonaIds, seed }), "o roteiro de outro webinario nao poe ninguem na frente");
   assert.deepEqual(Object.keys(primeira.body.data).sort(), ["enabled", "people"]);
   assert.deepEqual([...new Set(feed.people.flatMap((person) => Object.keys(person)))].sort(), ["id", "name", "photoUrl"], "nem a semente nem as regras");
 
@@ -193,6 +204,10 @@ test("a lista de cada sessao fica 30 s na memoria do processo: a turma que entra
   assert.equal(segunda, primeira, "a mesma resposta, sem ler o banco");
   if (depois !== null) assert.equal(leituras(), depois);
   const terceira = await loadAudienceTiles(db, { session, webinarId: WEBINAR }, now + AUDIENCE_TILES_CACHE_MS + 1);
-  assert.deepEqual(terceira.people.slice(0, 3).map((person) => person.name), ["Alba Nova", "Marcos Lima", "Zélia Prado"], "passado o prazo, a pessoa nova com foto entra na frente");
+  assert.deepEqual(
+    terceira.people.slice(0, 4).map((person) => person.name),
+    ["Marcos Lima", "Alba Nova", "De Outro Webinario", "Zélia Prado"],
+    "passado o prazo, a pessoa nova com foto entra entre as com foto, depois de quem comenta neste roteiro"
+  );
   assert.deepEqual(await loadAudienceTiles(db, { session: { id: SESSION, kind: "simulated" }, webinarId: WEBINAR }, now), DESLIGADO, "a sessao gravada nem le o banco");
 });

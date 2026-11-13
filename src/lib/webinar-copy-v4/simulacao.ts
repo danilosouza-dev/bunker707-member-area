@@ -195,7 +195,7 @@ export const SIMULACAO_COPY = {
     "Vinícius Q."
   ],
   /**
-   * Os nomes das miniaturas dos participantes simulados que a equipe nao criou (docs/30 D117): cada primeiro nome com
+   * Os nomes das miniaturas dos participantes simulados que a equipe nao criou (docs/30 D120): cada primeiro nome com
    * cada inicial, no formato de todo aluno na sala (o primeiro nome e a inicial do sobrenome, D64). Os 20 primeiros
    * nomes e as iniciais cobrem os `nomesGenericos` das entradas: quem "entrou" no chat tem miniatura. Nunca nomes de
    * alunos reais.
