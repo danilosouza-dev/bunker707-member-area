@@ -35,8 +35,9 @@ import { WEBINAR_LIMITS, toTime, webinarHasStudentData, webinarSituation, webina
 import { copyOfferToWebinar } from "./offer-store";
 import { copyPersonasToWebinar } from "./persona-store";
 import { queueWebinarCancelledNotices, queueWebinarRescheduledNotices } from "./notify";
+import { assertReplayTargetAllowed } from "./replay-lesson-access";
 import { baseRecordingOf, draftSessionsOf } from "./queries";
-import { accessModeOfRow, sessionFromRow, webinarFromRow, webinarRowPatch, type PresenterRow, type RecordingRow, type SessionRow, type WebinarRow } from "./rows";
+import { accessModeOfRow, replayLessonTargetOfRow, sessionFromRow, webinarFromRow, webinarRowPatch, type PresenterRow, type RecordingRow, type SessionRow, type WebinarRow } from "./rows";
 import {
   WEBINAR_MESSAGES,
   cancelWebinarSchema,
@@ -82,6 +83,7 @@ const HAS_STUDENT_DATA = "Este webinário tem dados de alunos (vagas, presença,
 const ONLY_FINISHED_ARCHIVES = "Só um webinário encerrado ou cancelado é arquivado.";
 const JIT_BLOCKS_ARCHIVE = "Este webinário ainda atende pelo Começa quando você entra. Desligue no card Sessões e espere a sessão em andamento acabar para arquivar.";
 const NOT_ARCHIVED_MESSAGE = "Esse webinário não está arquivado.";
+
 const KIND_LOCKED_MESSAGE = "O tipo não muda depois de publicar.";
 const SESSION_MISSING_MESSAGE = "Essa sessão não existe mais.";
 const SESSION_NOT_SCHEDULED_MESSAGE = "Só uma sessão que ainda não começou muda de hora.";
@@ -341,13 +343,14 @@ async function copyPart<T>(label: string, run: () => Promise<T>, empty: T): Prom
  * vaga (queueWebinarRescheduledNotices).
  */
 export async function saveWebinarDraft(input: SaveWebinarInput): Promise<ActionResult<SavedWebinar>> {
-  return runWebinarAction("messaging.write", "conteudo", saveWebinarSchema, input, async ({ input: data, user }) => {
+  return runWebinarAction("messaging.write", "conteudo", saveWebinarSchema, input, async ({ access, input: data, user }) => {
     const db = webinarsDb();
     const now = new Date();
     const draft = data.draft;
     const patch = webinarRowPatch(draft);
 
     if (!data.id) {
+      await assertReplayTargetAllowed(access, draft.replayLessonTarget, null);
       const created = await insertWithFreeSlug(db, { ...patch, created_by: user.id, status: "draft" }, draft.title);
       await replacePresenterRows(db, created.id, presenterRowsOf(draft));
       let sessions: SessionsSync = { created: 0, kept: 0, lateJoinUpdated: 0, removed: 0 };
@@ -380,6 +383,7 @@ export async function saveWebinarDraft(input: SaveWebinarInput): Promise<ActionR
     }
 
     assertSameVersion(current, data.expectedUpdatedAt);
+    await assertReplayTargetAllowed(access, draft.replayLessonTarget, replayLessonTargetOfRow(current.replay_lesson_target));
 
     const published = current.status === "published";
 
@@ -774,6 +778,7 @@ export async function unarchiveWebinar(input: { expectedUpdatedAt?: string; id: 
     return { id: saved.id, situation: webinarSituation(webinarFromRow(saved), sessions, now.getTime()), updatedAt: saved.updated_at };
   });
 }
+
 
 /* ------------------------------------------------------------------------------------------------
  * Sessao e capa

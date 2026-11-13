@@ -21,7 +21,7 @@ import type { Job, JobContext } from "./registry";
 export const WEBINAR_RECORDINGS_JOB_NAME = "webinar-recordings";
 
 function worked(result: WebinarRecordingsResult) {
-  return result.prepared + result.ready + result.failed + result.replays + result.released + result.alerted + result.purged > 0;
+  return result.prepared + result.ready + result.failed + result.replays + result.released + result.alerted + result.purged + result.keptAsLesson > 0;
 }
 
 /** Contagens do tick em job_runs.metadata (so numeros). */
@@ -30,6 +30,7 @@ async function recordJobMetrics(ctx: JobContext, result: WebinarRecordingsResult
     alerted: result.alerted,
     failed: result.failed,
     job_ms: jobMs,
+    kept_as_lesson: result.keptAsLesson,
     prepared: result.prepared,
     purged: result.purged,
     ready: result.ready,
