@@ -624,6 +624,15 @@ pela Cloudflare). O IP do C fica visivel; a protecao e o firewall da Hetzner, o 
   `main`, com `SEM_LIVE_2H=sim`, e com o C restaurado do snapshot antes (`restaurar` com `PAPEIS=meet`, §4A.7).
   Conferir depois: numa sala de teste com duas contas, a miniatura de quem tem foto no Perfil mostra a foto; no C,
   `exec-meet` com `docker compose logs prosody | grep -i presence_guard` nao mostra erro ao carregar.
+- **A miniatura que nao se repete quando alguem volta a sala (13/11/2026, `docs/30` D119)**: o Prosody carrega tambem
+  o nosso `bunker_ghost_guard` (`infra/jitsi/prosody/plugins/mod_bunker_ghost_guard.lua`). Quando a conexao de alguem
+  cai sem o motor se despedir, o Prosody guarda a sessao por 60 s (`mod_smacks`) e a pessoa continua na sala; o modulo
+  tira essa entrada antiga na hora em que a mesma conta do token entra de novo (so a entrada com todas as conexoes
+  caidas; duas abas abertas da mesma conta continuam). O `deploy-meet` acrescenta o modulo ao `XMPP_MUC_MODULES` do
+  `.env` do C quando falta, como o `bunker_presence_guard`, e o compose recria o prosody: da `main`, com
+  `SEM_LIVE_2H=sim` e o ok do produtor. Conferir depois: o roteiro 14 do `docs/30` §10.3; no C, `exec-meet` com
+  `docker compose logs prosody | grep -i "ghost_guard\|entrada antiga"` mostra uma linha "entrada antiga da mesma
+  conta saiu" a cada volta e nenhum erro ao carregar.
 - **O Jicofo sem dar papel a ninguem (13/11/2026, `docs/30` D116)**: o servico `jicofo` do compose leva
   `JICOFO_ENABLE_AUTH=0` (o padrao do compose ja e 0, entao vale no C sem mexer no `.env`). Com a autenticacao do
   Jicofo ligada, todo token valido virava dono da sala, o do aluno tambem. Vale como qualquer `deploy-meet`: da
@@ -638,7 +647,7 @@ pela Cloudflare). O IP do C fica visivel; a protecao e o firewall da Hetzner, o 
   e o `smoke.sh` confere o arquivo servido pelo sha256 e o `?v=` no `config.js`. Conferir depois, numa sala de teste
   com duas contas e participantes simulados ligados: a lista de miniaturas do aluno na ordem do `docs/30` §10.3 (item
   13), o console sem simulado nenhum no video e, com a gravacao ligada, as miniaturas simuladas no video gravado.
-- O `.env` do C leva `XMPP_MUC_MODULES=token_affiliation,bunker_room_guard,bunker_presence_guard` e `ROOM_GUARD_URL=<origem da area de
+- O `.env` do C leva `XMPP_MUC_MODULES=token_affiliation,bunker_room_guard,bunker_presence_guard,bunker_ghost_guard` e `ROOM_GUARD_URL=<origem da area de
   membros>/api/webhooks/room-guard` (o `generate-secrets.sh` deriva os dois; num `.env` gerado antes de 29/10/2026,
   acrescentar as duas linhas a mao antes do proximo `deploy-meet`): o Prosody busca ali, a cada 5 s, quem a equipe
   removeu ou baniu e recusa a entrada dessas contas mesmo com o token antigo (`docs/30` §8.1). A busca e assinada com
@@ -749,6 +758,7 @@ equipe tecnica). Se o monitor acusar queda com live marcada nas proximas 24 h, o
 | O servidor C sumiu | painel da Hetzner; o plano B "Live gravada do dia" (§8B.7) e o aviso pelo sino; reprovisionar com `provision-meet` + `deploy-meet` + `secrets-meet` (o DNS e refeito pelo `cf_apply_dns`) |
 | A miniatura mostra as iniciais de quem tem foto no Perfil | o `custom-config.js` servido (`https://meet.<dominio>/config.js`) termina com `config.disableThirdPartyRequests = false`; `XMPP_MUC_MODULES` com `bunker_presence_guard` no `.env` do C e `docker compose logs prosody` sem erro do modulo; a foto e a enviada pelo Perfil (a do Google vira iniciais, `docs/30` D115); o motor le a foto so na entrada |
 | As miniaturas dos participantes simulados nao aparecem para o aluno | o numero de simulados esta acima de zero no selo dos presentes? `https://meet.<dominio>/config.js` termina com o carregador `bunker707:plateia-loader` e `https://meet.<dominio>/libs/bunker707-plateia.js` responde 200 (o `smoke.sh` confere os dois)? o iframe e o do nosso app (a chave do tema no hash)? `GET /api/webinars/<id>/audience?sessao=<id>` responde `enabled: true` (sem a decisao registrada ou com a live encerrada, `false`)? no celular a sala nao mostra miniaturas (`docs/30` D117) |
+| A miniatura de quem saiu e voltou aparece duas vezes (some sozinha em ate 1 min) | `XMPP_MUC_MODULES` do `.env` do C tem `bunker_ghost_guard`? (`deploy-meet` da `main` acrescenta); `exec-meet` com `docker compose logs prosody \| grep -i ghost_guard`: erro ao carregar = o arquivo `mod_bunker_ghost_guard.lua` nao chegou a `infra/jitsi/prosody/plugins`; sem a linha "entrada antiga da mesma conta saiu" na volta = a conexao antiga ainda nao tinha caido para o servidor (a rede cortada sem aviso: sai sozinha no prazo) ou sao duas abas abertas da mesma conta (`docs/30` A56) |
 | Aluno removido ou banido volta para a sala | `XMPP_MUC_MODULES` com `bunker_room_guard` e `ROOM_GUARD_URL` no `.env` do C; `exec-meet` com `docker compose logs prosody` ("lista de barrados indisponivel" = o app nao respondeu: conferir `JWT_APP_SECRET` = `WEBINAR_JWT_SECRET` e o `ROOM_GUARD_URL`); o token vence em 15 min de qualquer jeito |
 | O segredo do token vazou | trocar `JWT_APP_SECRET` (C, `secrets-meet`) e `WEBINAR_JWT_SECRET` (app, `secrets-membros`) juntos, fora de live (derruba quem esta na sala) |
 

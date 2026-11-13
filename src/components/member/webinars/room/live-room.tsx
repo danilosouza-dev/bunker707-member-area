@@ -599,6 +599,8 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   // consulta de 5 s do chat (com o carimbo).
   const naTela = useRoomScreen({ sessionId, sessionPinned: session.pinned, sessionScreen: session.screen });
   const chat = useRoomChat({
+    // Quem entra ou volta na live recebe tambem as ultimas mensagens da sessao, nao so os 5 min da primeira janela.
+    backlog: true,
     enabled: !readOnly && !blocked,
     getPlayerOffsetMs: getOffsetMs,
     getScreenStamp: naTela.getStamp,
@@ -755,9 +757,9 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
     setTheme(theme === "light" ? "dark" : "light");
   }
 
+  /** Sai da sala e so entao troca de pagina: o motor de video avisa a saida antes de o iframe sumir (docs/30 D119). */
   function leave() {
-    room.hangUp();
-    router.push(webinarHref);
+    room.hangUp(() => router.push(webinarHref));
   }
 
   // A confirmacao de Sair: o foco entra no Voltar dela e volta para quem a abriu.

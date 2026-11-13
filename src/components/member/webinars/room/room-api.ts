@@ -109,6 +109,13 @@ export function getChatWindow(webinarId: string, sessionId: string, window: Chat
   return getJson<ChatWindowAnswer>(roomApiPath(webinarId, "chat", { from: window.fromMs, sessao: sessionId, to: window.toMs }), WEBINAR_COPY.sala.erroCarregarChat, signal);
 }
 
+export type ChatBacklogAnswer = { messages: StudentChatMessage[]; mode: "backlog"; serverTime: string };
+
+/** O historico de quem entra na Live ao vivo: as ultimas mensagens da sessao antes de `beforeMs` (docs/30 §5.1). */
+export function getChatBacklog(webinarId: string, sessionId: string, beforeMs: number, signal?: AbortSignal) {
+  return getJson<ChatBacklogAnswer>(roomApiPath(webinarId, "chat", { before: beforeMs, sessao: sessionId }), WEBINAR_COPY.sala.erroCarregarChat, signal);
+}
+
 /** As mensagens novas depois do cursor (a consulta de 5 s); com `screenStamp`, o carimbo da Na tela que a sala tem (`tela`). */
 export function getRecentChat(webinarId: string, sessionId: string, cursor: ChatCursor, screenStamp?: string | null, signal?: AbortSignal) {
   return getJson<ChatRecentAnswer>(

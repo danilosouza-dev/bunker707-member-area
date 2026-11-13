@@ -136,8 +136,9 @@ services:
   # Sinalizacao (XMPP). Quem entra: so com JWT do nosso app (AUTH_TYPE=jwt, ENABLE_GUESTS=0); o host vira
   # moderador pelo token (XMPP_MUC_MODULES=token_affiliation, a copia versionada em prosody/plugins), quem a equipe
   # removeu ou baniu nao volta com o token antigo (bunker_room_guard, nosso, tambem em prosody/plugins) e a presenca de
-  # cada um leva so a foto do token, sem video compartilhado (bunker_presence_guard, nosso, docs/30 D115). A porta
-  # 5222 sai do servidor so para o Jibri da vez (firewall da Hetzner); o navegador fala por websocket pelo web.
+  # cada um leva so a foto do token, sem video compartilhado (bunker_presence_guard, nosso, docs/30 D115), e quem volta
+  # a sala tira a propria entrada antiga, a da conexao que caiu sem se despedir (bunker_ghost_guard, nosso, D119). A
+  # porta 5222 sai do servidor so para o Jibri da vez (firewall da Hetzner); o navegador fala por websocket pelo web.
   prosody:
     container_name: bunker707-meet-prosody
     image: ${JITSI_IMAGE_REPO:-ghcr.io/jitsi}/prosody:${JITSI_IMAGE_VERSION}
@@ -165,7 +166,7 @@ services:
       JWT_ACCEPTED_ISSUERS: "${JWT_ACCEPTED_ISSUERS:-bunker707}"
       JWT_ACCEPTED_AUDIENCES: "${JWT_ACCEPTED_AUDIENCES:-bunker707}"
       JWT_ALLOW_EMPTY: "0"
-      XMPP_MUC_MODULES: "${XMPP_MUC_MODULES:-token_affiliation,bunker_room_guard,bunker_presence_guard}"
+      XMPP_MUC_MODULES: "${XMPP_MUC_MODULES:-token_affiliation,bunker_room_guard,bunker_presence_guard,bunker_ghost_guard}"
       # A lista de removidos e banidos que o mod_bunker_room_guard busca no app (docs/30 §8.1); vazio, so o token curto.
       ROOM_GUARD_URL: "${ROOM_GUARD_URL:-}"
       ENABLE_LOBBY: "${ENABLE_LOBBY:-1}"

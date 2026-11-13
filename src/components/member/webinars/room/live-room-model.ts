@@ -339,6 +339,74 @@ export function dropKind(input: { everJoined: boolean; leaving: boolean }): "dro
 }
 
 /* ------------------------------------------------------------------------------------------------
+ * A saida da sala pelo Sair (docs/30 D119)
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * Quanto a sala espera o motor de video se despedir (o videoConferenceLeft) antes de tirar o iframe de todo jeito. O
+ * mesmo prazo do console (CONSOLE_LEAVE_WAIT_MS). Na pratica o aviso chega em decimos de segundo.
+ */
+export const ROOM_LEAVE_WAIT_MS = 1_500;
+
+export type RoomLeave = {
+  /** Uma entrada nova na sala: a saida que estava esperando nao fecha mais nada. */
+  cancel: () => void;
+  /** O motor avisou a saida (videoConferenceLeft ou readyToClose): o que estava esperando roda agora. */
+  gone: () => void;
+  /** Ha uma saida esperando o aviso do motor. */
+  pending: () => boolean;
+  /**
+   * Comeca a saida. `finish` roda uma vez so: na hora quando nao ha o que esperar (`wait` falso: o iframe nao estava
+   * na sala, ou nao aceitou o pedido de sair), senao no aviso do motor ou no prazo, o que vier primeiro. Um segundo
+   * pedido com uma saida esperando nao comeca outra: o `finish` dele entra no lugar do de antes.
+   */
+  start: (input: { finish: () => void; wait: boolean }) => void;
+};
+
+/**
+ * A espera da despedida do motor de video. Sem ela, o Sair tirava o iframe da pagina antes de o motor avisar a saida
+ * ao servidor da sala, que guardava a conexao por 1 min: a miniatura de quem saiu ficava na tela de todos, e quem
+ * voltava nesse meio tempo aparecia duas vezes (teste do produtor de 13/11/2026). O relogio e injetado (o hook passa
+ * o `later` dele, que morre com a pagina; os testes, um relogio falso).
+ */
+export function createRoomLeave(later: (callback: () => void, ms: number) => void, waitMs: number = ROOM_LEAVE_WAIT_MS): RoomLeave {
+  let waiting: { finish: () => void } | null = null;
+  const settle = (mine: { finish: () => void }) => {
+    if (waiting !== mine) {
+      return;
+    }
+    waiting = null;
+    mine.finish();
+  };
+  return {
+    cancel() {
+      waiting = null;
+    },
+    gone() {
+      if (waiting) {
+        settle(waiting);
+      }
+    },
+    pending() {
+      return waiting !== null;
+    },
+    start(input) {
+      if (waiting) {
+        waiting.finish = input.finish;
+        return;
+      }
+      if (!input.wait) {
+        input.finish();
+        return;
+      }
+      const mine = { finish: input.finish };
+      waiting = mine;
+      later(() => settle(mine), waitMs);
+    }
+  };
+}
+
+/* ------------------------------------------------------------------------------------------------
  * A fila dos sinais do iframe (POST .../room-events)
  * ---------------------------------------------------------------------------------------------- */
 
