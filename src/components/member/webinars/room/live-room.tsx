@@ -10,6 +10,7 @@ import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { roomMediaLessonId } from "@/lib/webinar-room-client";
 import { formatCountdown } from "@/lib/webinar-time";
 import type { LiveRoomInfo } from "@/server/webinars/live-model";
+import { audienceTilesNow } from "@/server/webinars/audience-tiles-model";
 import { simulationClockMs } from "@/server/webinars/simulation-model";
 import { roomHref, type StudentRoomPayload } from "@/server/webinars/student-model";
 import { RoomTranslationBar } from "../translation/room-translation-bar";
@@ -108,6 +109,7 @@ import { screenFocusKey, screenPlacement, screenStripForcedLive } from "./screen
 import { RoomScreenStrip } from "./screen/room-screen-strip";
 import { RoomWideHidden } from "./screen/room-wide-hidden";
 import { useRoomScreen, useRoomScreenEvents } from "./screen/use-room-screen";
+import { useAudienceTiles, useRoomAudience } from "./use-room-audience";
 import { useRoomSimulation } from "./use-room-simulation";
 import { useDeferredPolls, useRoomHydrated, useRoomPanelOpen, useRoomTheme, useRoomThumbs } from "./use-room-prefs";
 import { usePanelMotion } from "./use-panel-motion";
@@ -686,6 +688,12 @@ export function LiveWebinarRoom({ coverUrl, nonce, payload, presenterName, readO
   const getSimulationOffsetMs = () => simulationClockMs({ kind: "live", scheduledAt, startedAt }, Date.now() + (skewRef.current ?? 0));
   const simulation = useRoomSimulation({ enabled: !readOnly && !blocked && phase !== "ended", getOffsetMs: getSimulationOffsetMs, sessionId, simulationKey: naTela.simulationKey, webinarId });
   const simulationOffsetMs = simulationClockMs({ kind: "live", scheduledAt, startedAt }, nowMs + skewMs);
+  // Os participantes simulados nas miniaturas (docs/30 D117): a lista ordenada vem do servidor; aparecem os primeiros,
+  // pelo numero de simulados deste segundo (o mesmo que soma no selo dos presentes), e quem desenha e o proprio motor.
+  const audienceRoster = useRoomAudience({ enabled: !readOnly && !blocked && phase !== "ended", sessionId, simulationKey: naTela.simulationKey, webinarId });
+  const simulatedNow = simulation.displayCount(0, simulationOffsetMs);
+  const audienceNow = audienceTilesNow(audienceRoster, simulatedNow);
+  useAudienceTiles({ joined: room.jitsiStatus === "joined", people: audienceNow, post: room.postToFrame });
   // O numero de quem assiste some com a live encerrada; no palco ele e o selo ao lado do selo do momento (docs/31 §11.5).
   // Com a Simulacao (R7), o real mais a parte simulada daquele instante, como na gravada (o selo e a aba Participantes).
   // A equipe pode esconder dos alunos quantas pessoas estao na sala (docs/30 D102): sem numero no palco, no titulo e na aba.

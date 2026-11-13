@@ -632,6 +632,12 @@ pela Cloudflare). O IP do C fica visivel; a protecao e o firewall da Hetzner, o 
   `ok jicofo sem dar papel (JICOFO_ENABLE_AUTH=0)`; numa sala de teste com duas contas, o **Liberar** e o
   **Silenciar** do microfone, o **Fechar cameras** e a mao levantada funcionam, e a miniatura do aluno nao leva o
   icone de moderador.
+- **Os participantes simulados nas miniaturas (13/11/2026, `docs/30` D117 e §6.9)**: o `web` do C serve tambem
+  `/libs/bunker707-plateia.js` (montado pelo compose, somente leitura), e o `custom-config.js` o liga so no iframe do
+  nosso app e no gravador. Vale como qualquer `deploy-meet`: da `main`, com `SEM_LIVE_2H=sim`; o deploy recria o `web`
+  e o `smoke.sh` confere o arquivo servido pelo sha256 e o `?v=` no `config.js`. Conferir depois, numa sala de teste
+  com duas contas e participantes simulados ligados: a lista de miniaturas do aluno na ordem do `docs/30` §10.3 (item
+  13), o console sem simulado nenhum no video e, com a gravacao ligada, as miniaturas simuladas no video gravado.
 - O `.env` do C leva `XMPP_MUC_MODULES=token_affiliation,bunker_room_guard,bunker_presence_guard` e `ROOM_GUARD_URL=<origem da area de
   membros>/api/webhooks/room-guard` (o `generate-secrets.sh` deriva os dois; num `.env` gerado antes de 29/10/2026,
   acrescentar as duas linhas a mao antes do proximo `deploy-meet`): o Prosody busca ali, a cada 5 s, quem a equipe
@@ -742,6 +748,7 @@ equipe tecnica). Se o monitor acusar queda com live marcada nas proximas 24 h, o
 | Certificado do `meet` invalido | `docker compose logs caddy` no C; o registro DNS so DNS (sem proxy); porta 80 aberta; `docker compose restart caddy` |
 | O servidor C sumiu | painel da Hetzner; o plano B "Live gravada do dia" (§8B.7) e o aviso pelo sino; reprovisionar com `provision-meet` + `deploy-meet` + `secrets-meet` (o DNS e refeito pelo `cf_apply_dns`) |
 | A miniatura mostra as iniciais de quem tem foto no Perfil | o `custom-config.js` servido (`https://meet.<dominio>/config.js`) termina com `config.disableThirdPartyRequests = false`; `XMPP_MUC_MODULES` com `bunker_presence_guard` no `.env` do C e `docker compose logs prosody` sem erro do modulo; a foto e a enviada pelo Perfil (a do Google vira iniciais, `docs/30` D115); o motor le a foto so na entrada |
+| As miniaturas dos participantes simulados nao aparecem para o aluno | o numero de simulados esta acima de zero no selo dos presentes? `https://meet.<dominio>/config.js` termina com o carregador `bunker707:plateia-loader` e `https://meet.<dominio>/libs/bunker707-plateia.js` responde 200 (o `smoke.sh` confere os dois)? o iframe e o do nosso app (a chave do tema no hash)? `GET /api/webinars/<id>/audience?sessao=<id>` responde `enabled: true` (sem a decisao registrada ou com a live encerrada, `false`)? no celular a sala nao mostra miniaturas (`docs/30` D117) |
 | Aluno removido ou banido volta para a sala | `XMPP_MUC_MODULES` com `bunker_room_guard` e `ROOM_GUARD_URL` no `.env` do C; `exec-meet` com `docker compose logs prosody` ("lista de barrados indisponivel" = o app nao respondeu: conferir `JWT_APP_SECRET` = `WEBINAR_JWT_SECRET` e o `ROOM_GUARD_URL`); o token vence em 15 min de qualquer jeito |
 | O segredo do token vazou | trocar `JWT_APP_SECRET` (C, `secrets-meet`) e `WEBINAR_JWT_SECRET` (app, `secrets-membros`) juntos, fora de live (derruba quem esta na sala) |
 

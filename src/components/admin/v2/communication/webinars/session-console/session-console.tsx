@@ -92,6 +92,8 @@ import type { PersonaDraft, WebinarPersona } from "@/server/webinars/persona-mod
 import { fireScriptItem, saveScriptComment, sendScriptedComment, uploadPersonaPhoto } from "@/server/webinars/script-actions";
 import { saveSimulatedAudience } from "@/server/webinars/simulation-actions";
 import { simulationClockMs, simulationSessionStarted } from "@/server/webinars/simulation-model";
+import { audienceTilesNow } from "@/server/webinars/audience-tiles-model";
+import { useRoomAudience } from "@/components/member/webinars/room/use-room-audience";
 import { SimulationAudienceControl } from "../simulation/simulation-audience-control";
 import { EmptyState } from "../../../empty-state";
 import { ErrorBanner } from "../../../error-banner";
@@ -305,7 +307,20 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     [sessionId]
   );
 
+  // Os participantes simulados nas miniaturas dos alunos (docs/30 D117): o console le a mesma lista da sala e, pelo
+  // numero de simulados do retrato de 5 s, sabe quem aparece agora. Ele nao desenha ninguem no proprio video: a lista
+  // so segue para o gravador, para a gravacao mostrar o que a turma ve.
+  const simulatedNow = snapshot?.simulatedNow ?? 0;
+  const audienceRoster = useRoomAudience({
+    enabled: live !== null && sessionId !== null && session?.status !== "ended",
+    sessionId: sessionId ?? "",
+    simulationKey: simulatedNow > 0 ? "com" : "sem",
+    webinarId: webinar.id
+  });
+  const audienceNow = useMemo(() => audienceTilesNow(audienceRoster, simulatedNow), [audienceRoster, simulatedNow]);
+
   const room = useLiveRoom({
+    audience: audienceNow,
     canPublish: permissions.canPublish,
     container: stageRef,
     currentUserId,

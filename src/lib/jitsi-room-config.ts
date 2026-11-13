@@ -421,6 +421,41 @@ export const LOWER_HAND_SIGNAL = "bunker707:lower-hand";
  */
 export const RECORDING_SIGNAL = "bunker707:recording";
 
+/**
+ * Os participantes simulados desenhados pelo proprio motor (docs/30 D117): o tipo da mensagem que a pagina manda ao
+ * iframe (window.postMessage, aceita pelo infra/jitsi/web/bunker707-plateia.js so de quem montou o iframe), o teto de
+ * miniaturas e o formato do id de cada simulado. Os tres sao os mesmos do arquivo da instancia (a guarda confere).
+ */
+export const AUDIENCE_FRAME_MESSAGE = "bunker707:plateia";
+export const AUDIENCE_TILES_MAX = 300;
+const SIMULATED_PARTICIPANT_ID = /^sim[pg][0-9a-z]{1,16}$/;
+
+/** O id e de um participante simulado (nunca de uma pessoa na sala: os ids do motor sao 8 caracteres de 0-9a-f). */
+export function isSimulatedParticipantId(value: unknown): value is string {
+  return typeof value === "string" && SIMULATED_PARTICIPANT_ID.test(value);
+}
+
+/**
+ * O sinal do iframe fala de um participante simulado (o `id` do payload): a pagina o descarta antes de qualquer conta.
+ * O motor avisa a entrada e a saida de cada simulado como avisa as de uma pessoa, e nada na pagina (a lista de quem
+ * esta na sala, os papeis, a mao, o que vai ao servidor) pode contar um deles.
+ */
+export function aboutSimulatedParticipant(payload: unknown): boolean {
+  return Boolean(payload) && typeof payload === "object" && isSimulatedParticipantId((payload as Record<string, unknown>).id);
+}
+
+/** Uma pessoa simulada como a pagina a conhece: o id no nosso formato, o nome e a foto (so do nosso bucket) ou nula. */
+export type AudienceTilePerson = { id: string; name: string; photoUrl: string | null };
+
+/**
+ * A mensagem para o iframe: a lista inteira que vale agora, na ordem (a foto primeiro, quem montou a lista ja ordenou).
+ * `relay`: o console de quem modera nao desenha ninguem; o arquivo da instancia so repassa a lista ao gravador.
+ */
+export function audienceFrameMessage(people: readonly AudienceTilePerson[], relay = false): { people: { id: string; name: string; photo: string }[]; relay?: true; type: string } {
+  const list = people.slice(0, AUDIENCE_TILES_MAX).map((person) => ({ id: person.id, name: person.name, photo: person.photoUrl ?? "" }));
+  return relay ? { people: list, relay: true, type: AUDIENCE_FRAME_MESSAGE } : { people: list, type: AUDIENCE_FRAME_MESSAGE };
+}
+
 /** Os nomes que POST .../room-events aceita (o mesmo ROOM_EVENT_NAMES de src/server/webinars/live-schemas.ts). */
 export type RoomEventSignal =
   | "audioMuteStatusChanged"

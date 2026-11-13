@@ -193,5 +193,20 @@ export const SIMULACAO_COPY = {
     "Samuel E.",
     "Tatiana J.",
     "Vinícius Q."
-  ]
+  ],
+  /**
+   * Os nomes das miniaturas dos participantes simulados que a equipe nao criou (docs/30 D117): cada primeiro nome com
+   * cada inicial, no formato de todo aluno na sala (o primeiro nome e a inicial do sobrenome, D64). Os 20 primeiros
+   * nomes e as iniciais cobrem os `nomesGenericos` das entradas: quem "entrou" no chat tem miniatura. Nunca nomes de
+   * alunos reais.
+   */
+  primeirosNomes: [
+    "Ana", "Bruno", "Carla", "Diego", "Elisa", "Felipe", "Gabriela", "Henrique", "Isabela", "João",
+    "Karina", "Lucas", "Mariana", "Nicolas", "Olívia", "Pedro", "Rafaela", "Samuel", "Tatiana", "Vinícius",
+    "Amanda", "André", "Beatriz", "Caio", "Camila", "Daniela", "Eduardo", "Fernanda", "Gustavo", "Helena",
+    "Igor", "Júlia", "Larissa", "Leandro", "Letícia", "Marcelo", "Marina", "Natália", "Otávio", "Patrícia",
+    "Paulo", "Renata", "Ricardo", "Roberta", "Rodrigo", "Sabrina", "Sérgio", "Simone", "Thiago", "Vanessa",
+    "Vitor", "Aline", "Bianca", "Cláudio", "Débora", "Fábio", "Jéssica", "Luana", "Márcio", "Priscila"
+  ],
+  iniciais: ["A", "B", "C", "D", "E", "F", "G", "H", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "V"]
 } as const;

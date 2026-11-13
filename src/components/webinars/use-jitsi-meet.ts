@@ -11,7 +11,7 @@
 // a live nunca cai por troca de token. Nenhuma frase de tela aqui.
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
-import { JITSI_IFRAME_ALLOW, JITSI_LISTENED_EVENTS, externalApiUrl, type JitsiListenedEvent } from "@/lib/jitsi-room-config";
+import { JITSI_IFRAME_ALLOW, JITSI_LISTENED_EVENTS, aboutSimulatedParticipant, externalApiUrl, meetOrigin, type JitsiListenedEvent } from "@/lib/jitsi-room-config";
 
 /** O pedaco do IFrame API que usamos (o mesmo que o duble salaFalsaDoJitsi de tests/e2e/fixtures.ts imita). */
 export type JitsiMeetApi = {
@@ -145,6 +145,11 @@ export type UseJitsiMeet = {
   mountedInterfaceConfig: Readonly<Record<string, unknown>> | null;
   /** O id do proprio participante no Jitsi (do videoConferenceJoined), para filtrar mao levantada e papel. */
   participantId: string | null;
+  /**
+   * Manda uma mensagem a pagina do iframe (window.postMessage, so para a origem do nosso motor); falso sem iframe
+   * montado. So os participantes simulados usam (docs/30 D117): a lista vai ao arquivo da instancia, que a desenha.
+   */
+  postToFrame: (message: unknown) => boolean;
   /** Remonta a sala com o token mais novo ("Tentar de novo" ou depois de uma queda). */
   retry: () => void;
   status: JitsiStatus;
@@ -201,7 +206,9 @@ export function useJitsiMeet<E extends string = JitsiListenedEvent>(input: UseJi
         for (const name of events) {
           const signal: string = name;
           instance.addListener(signal, (payload) => {
-            if (disposed) {
+            // O motor avisa a entrada e a saida de um participante simulado (docs/30 D117) como as de uma pessoa: o
+            // sinal para aqui, antes de qualquer conta da pagina (quem esta na sala, os papeis, o que vai ao servidor).
+            if (disposed || aboutSimulatedParticipant(payload)) {
               return;
             }
             if (signal === "videoConferenceJoined") {
@@ -253,8 +260,24 @@ export function useJitsiMeet<E extends string = JitsiListenedEvent>(input: UseJi
     }
   }, []);
 
+  const postToFrame = useCallback(
+    (message: unknown) => {
+      const target = api.current?.getIFrame?.()?.contentWindow ?? null;
+      if (!target || !domain) {
+        return false;
+      }
+      try {
+        target.postMessage(message, meetOrigin(domain));
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [domain]
+  );
+
   const retry = useCallback(() => setMountKey((key) => key + 1), []);
 
   // Montando (o script ainda carrega ou a sala acabou de ser pedida de novo): "loading".
-  return { api, executeCommand, mountedInterfaceConfig, participantId, retry, status: ready ? (status === "idle" ? "loading" : status) : "idle" };
+  return { api, executeCommand, mountedInterfaceConfig, participantId, postToFrame, retry, status: ready ? (status === "idle" ? "loading" : status) : "idle" };
 }

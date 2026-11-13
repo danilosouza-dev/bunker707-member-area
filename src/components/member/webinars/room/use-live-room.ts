@@ -302,6 +302,8 @@ export type LiveRoomController = {
   /** Sair: o iframe sai (hangup) e o que sobrou da fila vai pelo sendBeacon. */
   hangUp: () => void;
   jitsiStatus: JitsiStatus;
+  /** Uma mensagem para a pagina do iframe (o postToFrame do useJitsiMeet): a lista dos participantes simulados (D117). */
+  postToFrame: (message: unknown) => boolean;
   reply: JoinTokenReply | null;
   retryNow: () => void;
   /** O aviso saiu da tela (o tempo acabou, outro tomou o lugar ou a acao foi usada): o mesmo aviso pode voltar. */
@@ -1134,6 +1136,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     jitsiStatus: jitsi.status,
     notice,
     pendingToggle,
+    postToFrame: jitsi.postToFrame,
     reply,
     retryNow,
     setView,

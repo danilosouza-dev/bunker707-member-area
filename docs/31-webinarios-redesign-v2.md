@@ -759,3 +759,20 @@ aberta no topo do card).
   compacta (uma linha por item, com rolagem até metade da tela) e não mudou.
 - **Por que não uma janela**: o **Remover** abre uma confirmação, que ficaria uma janela dentro de outra, e o console em
   tela cheia precisaria levar as duas para o portal dele. A lista que abre ali mesmo resolve o espaço sem isso.
+## 18. Os participantes simulados nas miniaturas (13/11/2026, `docs/30` D117)
+
+O produtor pediu que as pessoas simuladas apareçam na lista de miniaturas da Live ao vivo, "para parecer uma live real". As decisões e o que roda por dentro estão no `docs/30` (D117 e §6.9); aqui fica o desenho.
+
+- **Quem desenha**: o próprio motor. Cada simulado é uma miniatura igual à de quem está com a câmera desligada: a foto (a da pessoa que comenta, do card Roteiro) ou as iniciais coloridas do motor, o nome embaixo e o microfone riscado. Nada de novo na folha `bunker707.css`: os cantos, o fundo e o contorno são os mesmos das outras miniaturas.
+- **A ordem**, de cima para baixo na coluna e da esquerda para a direita na Grade: a miniatura do próprio aluno, quem modera (com a tela compartilhada dele, quando há), os alunos de verdade, os simulados com foto, os simulados sem foto.
+- **Quantos**: os do número de participantes simulados daquele segundo, até 300. O número que sobe ou desce põe ou tira as últimas miniaturas; nenhuma animação nova.
+- **O palco**: nunca mostra um simulado. O anel verde de quem fala e o selo da mão nunca aparecem num simulado.
+- **O console**: o vídeo de quem modera mostra só pessoas de verdade; os simulados continuam no selo dos presentes ("+N simulados") e no controle da Presença. O menu ⋮ da miniatura nunca abre sobre um simulado, porque eles não existem ali.
+- **A gravação**: sai com as miniaturas simuladas, no visual padrão do motor (o gravador não recebe o nosso tema, §3).
+- **No celular** nada muda: a sala não mostra miniaturas (V2-18).
+
+| # | Pergunta | Padrão assumido |
+|---|---|---|
+| V2-A95 | As iniciais dos simulados sem foto devem ter uma cor só, para não chamar atenção? | não: as cores são as do motor para todo mundo sem foto, simulado ou de verdade; uma cor só marcaria quem é simulado |
+| V2-A96 | A Grade do aluno deve mostrar mais de 9 por vez quando há simulados? | não: fica o limite de hoje (`tileView.numberOfVisibleTiles`), com a rolagem do motor |
+
