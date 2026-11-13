@@ -1,7 +1,8 @@
 "use client";
 
-import { Download, Plus, Trash2, Upload } from "lucide-react";
-import { useId, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { ChevronDown, Download, Plus, Search, Trash2, Upload } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { RoomCommentAvatar } from "@/components/member/webinars/room/room-comment";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatSaoPauloDateTime } from "@/server/communications/campaign-model";
@@ -13,6 +14,8 @@ import { deletePersona, savePersona } from "@/server/webinars/persona-actions";
 import {
   LIVE_SCRIPT_TRIGGER_LABELS,
   NO_PERSONA_LIST,
+  matchesPersonaSearch,
+  personaAvatarUrl,
   personaCopyOf,
   personaUsage,
   withPersonaCopy,
@@ -56,6 +59,14 @@ import { minuteMarkOf, minuteMarkToMs } from "./simulation/simulation-card-model
 // "(fora da lista)". A caixa "Usar esta foto em todos" saiu: a pessoa e a unidade. No banco sem a lista (`initialPersonas`
 // com `available` falso), o card segue como antes: o Nome, o Aparece como e a Foto em cada linha, e a frase da migracao
 // no lugar da lista.
+//
+// As linhas fechadas (pedido do produtor de 13/11/2026, docs/30 D118: "se a gente criar 30 pessoas com 30 comentarios,
+// fica uma lista enorme [...] Fica listando tudo aberto"): cada mensagem e uma linha so (o minuto ou o gatilho, a foto,
+// o nome, o Tipo Pergunta, a situacao quando diz algo (rascunho, desligada, frase nao achada ou o minuto da frase; a
+// "Pronta" de sempre nao repete em toda linha) e o comeco do texto) e so uma abre por vez, com os campos de sempre. Adicionar
+// abre a nova; o Salvar com problema abre a primeira linha com problema. A partir de 9 mensagens, a lista fica numa
+// caixa com rolagem propria e ganha a busca pelo nome ou pelo texto (sem acento nem caixa); a lista de pessoas da
+// escola fica numa linha que abre para gerenciar (persona-list.tsx, D119).
 
 const copy = WEBINAR_ADMIN_COPY.script;
 const COMENTARIOS = WEBINAR_COPY.naTela.comentarios;
@@ -100,7 +111,18 @@ type ScriptCardProps = {
   initialPersonas?: PersonaListData;
   /** A linha (pela chave) com o formulario da pessoa nova aberto ao desenhar (o teste de tela). */
   initialCreatingFor?: string | null;
+  /** A linha (pela chave, o id do item) aberta ao desenhar (o teste de tela). */
+  initialOpenKey?: string | null;
+  /** A busca do roteiro ja escrita ao desenhar (o teste de tela). */
+  initialQuery?: string;
+  /** A lista de pessoas aberta ao desenhar (o teste de tela). */
+  initialPersonasOpen?: boolean;
+  /** A origem do nosso Supabase (a foto de quem comenta na linha fechada); sem ela, a do ambiente. */
+  origin?: string | null;
 };
+
+/** As linhas fechadas do roteiro (D118): a busca a partir de 9 mensagens, e a caixa com rolagem propria tambem. */
+export const SCRIPT_COMPACT = { searchFrom: 9 } as const;
 
 const TRIGGER_OPTIONS: readonly { label: string; value: ScriptTrigger }[] = [
   { label: SCRIPT_TRIGGER_LABELS.at_offset, value: "at_offset" },
@@ -242,6 +264,17 @@ function rowProblem(row: Row, linked = false): string | null {
   return null;
 }
 
+/** O que a linha fechada mostra antes do nome: o minuto (mm:ss), "Frase" ou "Botão". */
+function whenLabel(row: Row): string {
+  if (row.triggerKind === "manual") {
+    return copy.row.manual;
+  }
+  if (row.triggerKind === "on_phrase") {
+    return copy.row.phrase;
+  }
+  return row.offsetMs == null ? "—" : formatOffsetText(row.offsetMs);
+}
+
 function formatOf(fileName: string, text: string): WebinarTranscriptFormat {
   const lower = fileName.toLowerCase();
   if (lower.endsWith(".srt")) {
@@ -270,9 +303,13 @@ export function ScriptCard({
   hasRecording,
   initialCreatingFor = null,
   initialItems,
+  initialOpenKey = null,
   initialPersonas = NO_PERSONA_LIST,
+  initialPersonasOpen = false,
+  initialQuery = "",
   initialTranscript,
   initialUploading = [],
+  origin,
   readOnly = false,
   sessions,
   webinarId,
@@ -298,6 +335,11 @@ export function ScriptCard({
   // As pessoas que comentam (D75): a lista do webinario e a linha com o formulario da pessoa nova aberto.
   const [personas, setPersonas] = useState<readonly WebinarPersona[]>(initialPersonas.personas);
   const [creatingFor, setCreatingFor] = useState<string | null>(initialCreatingFor);
+  // As linhas fechadas (D118): a unica aberta, a busca e a linha que pede foco depois de abrir (a nova, a com problema).
+  const [openKey, setOpenKey] = useState<string | null>(initialCreatingFor ?? initialOpenKey);
+  const [query, setQuery] = useState(initialQuery);
+  const focusRow = useRef<string | null>(null);
+  const photoOrigin = origin === undefined ? (process.env.NEXT_PUBLIC_SUPABASE_URL ?? null) : origin;
   const linked = initialPersonas.available;
 
   const summary = useMemo(() => scriptSummary(saved), [saved]);
@@ -307,6 +349,22 @@ export function ScriptCard({
   );
   const usage = useMemo(() => Object.fromEntries(personas.map((persona) => [persona.id, personaUsage(rows, persona.id)])), [personas, rows]);
   const ended = sessions.filter((session) => session.kind !== "replay" && session.status === "ended");
+  const compact = rows.length >= SCRIPT_COMPACT.searchFrom;
+  // Abaixo de 9 mensagens a busca some, e nada fica escondido por uma busca que nao aparece.
+  const activeQuery = compact ? query.trim() : "";
+  const visible = rows.map((row, index) => ({ index, row })).filter(({ row }) => matchesPersonaSearch([row.personaName, row.body], activeQuery));
+
+  // A linha que acabou de abrir (a nova, ou a primeira com problema no Salvar) aparece na caixa e recebe o foco.
+  useEffect(() => {
+    const key = focusRow.current;
+    if (!key || openKey !== key) {
+      return;
+    }
+    focusRow.current = null;
+    const item = Array.from(document.querySelectorAll<HTMLElement>("[data-script-row-key]")).find((element) => element.dataset.scriptRowKey === key);
+    item?.scrollIntoView({ block: "nearest" });
+    item?.querySelector<HTMLElement>("[data-script-row-panel] select, [data-script-row-panel] input, [data-script-row-panel] textarea")?.focus();
+  }, [openKey, rows]);
   // As exportacoes so leem: seguem no arquivado (`readOnly`), que tranca o resto do card.
   const reading = disabled || busy !== null;
   const locked = reading || readOnly;
@@ -314,6 +372,34 @@ export function ScriptCard({
   function applySaved(items: ScriptItem[]) {
     setSaved(items);
     setRows(sortScriptItems(items).map((item) => rowOf(item, live)));
+    // A linha aberta continua aberta quando ja era um item gravado (a chave e o id); a nova ganha o id e fecha.
+    setOpenKey((current) => (current && items.some((item) => item.id === current) ? current : null));
+  }
+
+  /** Abre a linha (e fecha a que estava aberta), ou fecha a aberta. */
+  function toggleRow(key: string) {
+    setOpenKey((current) => (current === key ? null : key));
+  }
+
+  /** Abre a linha e leva o foco ao primeiro campo dela; a busca sai para a linha aparecer. */
+  function openAndFocus(key: string) {
+    focusRow.current = key;
+    setQuery("");
+    setOpenKey(key);
+  }
+
+  function addRow() {
+    const row = emptyRow(live);
+    setRows((current) => [...current, row]);
+    openAndFocus(row.key);
+  }
+
+  function removeRow(key: string) {
+    setRows((current) => current.filter((item) => item.key !== key));
+    setOpenKey((current) => (current === key ? null : current));
+    if (creatingFor === key) {
+      setCreatingFor(null);
+    }
   }
 
   function setRowUploading(key: string, on: boolean) {
@@ -352,6 +438,7 @@ export function ScriptCard({
   function pickPersona(key: string, value: string | null) {
     if (value === NEW_PERSONA_VALUE) {
       setCreatingFor(key);
+      setOpenKey(key);
       return;
     }
     const persona = value ? (personas.find((item) => item.id === value) ?? null) : null;
@@ -391,7 +478,7 @@ export function ScriptCard({
   async function removePersona(persona: WebinarPersona) {
     setBusy("persona");
     setFailure(null);
-    const result = await deletePersona({ id: persona.id });
+    const result = await deletePersona({ id: persona.id, webinarId });
     setBusy(null);
     if (!result.ok) {
       return result;
@@ -408,6 +495,8 @@ export function ScriptCard({
     const problem = rows.map((row, index) => ({ index, problem: rowProblem(row, linked) })).find((entry) => entry.problem);
     if (problem) {
       setFailure({ message: `Mensagem ${problem.index + 1}: ${problem.problem}`, status: 400 });
+      // A linha com problema abre (as outras fecham) para a equipe corrigir ali.
+      openAndFocus(rows[problem.index].key);
       return;
     }
     if (uploading.size > 0) {
@@ -566,9 +655,11 @@ export function ScriptCard({
         <PersonaList
           available={linked}
           busy={busy !== null || disabled}
+          initialOpen={initialPersonasOpen}
           onDelete={removePersona}
           onSave={(draft) => submitPersona(draft)}
           onUpload={(image) => uploadPersonaPhoto({ image })}
+          origin={photoOrigin}
           personas={personas}
           readOnly={readOnly}
           usage={usage}
@@ -582,172 +673,229 @@ export function ScriptCard({
         </p>
       ) : null}
 
-      <ol className="flex min-w-0 flex-col gap-3">
-        {rows.map((row, index) => {
-          const base = `${idBase}-${row.key}`;
-          const statusLabel = copy.statuses[row.status];
-          const resolvedLabel = row.triggerKind === "on_phrase" && row.resolvedOffsetMs != null ? ` · ${formatOffsetText(row.resolvedOffsetMs)}` : "";
+      {compact ? (
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
+            {copy.search.label}
+            <span className="relative flex min-w-0 items-center">
+              <Search aria-hidden="true" className="pointer-events-none absolute left-3 size-4 text-[var(--text-tertiary)]" />
+              <input className={cn(adminInputClass, "pl-9")} data-script-search="" onChange={(event) => setQuery(event.target.value)} placeholder={copy.search.placeholder} type="search" value={query} />
+            </span>
+          </label>
+          {activeQuery ? (
+            <p aria-live="polite" className="text-xs leading-5 text-[var(--text-secondary)]" data-script-search-count="">
+              {visible.length === 0 ? copy.search.empty(activeQuery) : copy.search.count(visible.length, rows.length)}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
-          return (
-            <li className={cn("flex min-w-0 flex-col gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-2)] p-3", row.status === "disabled" && "opacity-70")} data-script-row={index} key={row.key}>
-              <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-                <div className="flex min-w-0 flex-wrap items-center gap-2 text-[13px] leading-5 text-[var(--text-secondary)]">
-                  <span className="font-medium text-[var(--text-primary)]">#{index + 1}</span>
-                  <StatusChip tone={STATUS_TONE[row.status]}>
-                    {statusLabel}
-                    {resolvedLabel}
-                  </StatusChip>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Button className="px-2 text-[var(--text-secondary)]" disabled={locked} onClick={() => updateRow(row.key, { status: row.status === "disabled" ? "draft" : "disabled" })} type="button" variant="ghost">
-                    {row.status === "disabled" ? copy.toggleOn : copy.toggleOff}
-                  </Button>
-                  <Button aria-label={`${copy.remove} ${index + 1}`} className="px-2 text-[var(--text-secondary)]" disabled={locked} onClick={() => setRows((current) => current.filter((item) => item.key !== row.key))} type="button" variant="ghost">
+      {visible.length > 0 ? (
+        <ol className={cn("flex min-w-0 flex-col gap-2", compact && "max-h-[min(70vh,640px)] overflow-y-auto pr-1")} data-script-rows="">
+          {visible.map(({ index, row }) => {
+            const base = `${idBase}-${row.key}`;
+            const open = openKey === row.key;
+            const panelId = `${base}-painel`;
+            const statusLabel = copy.statuses[row.status];
+            const resolvedLabel = row.triggerKind === "on_phrase" && row.resolvedOffsetMs != null ? ` · ${formatOffsetText(row.resolvedOffsetMs)}` : "";
+            const text = row.body.trim();
+
+            return (
+              <li
+                className={cn("flex min-w-0 flex-col rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-2)]", row.status === "disabled" && !open && "opacity-70")}
+                data-script-open={open ? "true" : "false"}
+                data-script-row={index}
+                data-script-row-key={row.key}
+                key={row.key}
+              >
+                {/* A linha fechada (D118): o minuto ou o gatilho, a foto, o nome, os selos e o comeco do texto. */}
+                <div className="flex min-w-0 items-center gap-1 py-1 pr-1 pl-3">
+                  <button
+                    aria-controls={panelId}
+                    aria-expanded={open}
+                    className="flex min-w-0 flex-1 items-center gap-3 rounded-md py-1.5 text-left focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)] focus-visible:outline-solid"
+                    data-script-row-toggle=""
+                    onClick={() => toggleRow(row.key)}
+                    type="button"
+                  >
+                    <span className="w-12 shrink-0 text-xs leading-5 text-[var(--text-secondary)] tabular-nums" data-script-row-when="">
+                      {whenLabel(row)}
+                    </span>
+                    <RoomCommentAvatar imageSrc={personaAvatarUrl(row.personaAvatarPath, photoOrigin)} kind={row.personaRole === "team" ? "team" : "person"} name={row.personaName} />
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      {/* No celular os selos descem para baixo do nome; "Pronta" so aparece na frase (com o minuto achado). */}
+                      <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="sr-only">{copy.row.label(index + 1)}: </span>
+                        <span className="max-w-full truncate text-sm leading-5 font-medium text-[var(--text-primary)]">{row.personaName.trim() || copy.row.noPerson}</span>
+                        {row.kind === "question" ? <StatusChip tone="neutral">{PESSOAS.seloPergunta}</StatusChip> : null}
+                        {row.status !== "ready" || row.triggerKind === "on_phrase" ? (
+                          <StatusChip tone={STATUS_TONE[row.status]}>
+                            {statusLabel}
+                            {resolvedLabel}
+                          </StatusChip>
+                        ) : null}
+                      </span>
+                      <span className={cn("truncate text-[13px] leading-5", text ? "text-[var(--text-secondary)]" : "text-[var(--text-tertiary)] italic")} data-script-row-text="">
+                        {text || copy.row.noText}
+                      </span>
+                    </span>
+                    <ChevronDown aria-hidden="true" className={cn("size-4 shrink-0 text-[var(--text-tertiary)] transition-transform motion-reduce:transition-none", open && "rotate-180")} />
+                  </button>
+                  <Button aria-label={`${copy.remove} ${index + 1}`} className="px-2 text-[var(--text-secondary)]" disabled={locked} onClick={() => removeRow(row.key)} type="button" variant="ghost">
                     <Trash2 aria-hidden="true" className="size-4" />
                   </Button>
                 </div>
-              </div>
 
-              {linked ? (
-                <>
-                  {/* "Quem comenta" (D75): a pessoa da lista, com a foto ou as iniciais, ou "Criar nova pessoa" ali mesmo. */}
-                  <PersonaPicker
-                    disabled={locked}
-                    fallbackName={row.personaId ? null : row.personaName.trim() || null}
-                    id={`${base}-pessoa`}
-                    onChange={(value) => pickPersona(row.key, value)}
-                    personas={personas}
-                    value={creatingFor === row.key ? NEW_PERSONA_VALUE : row.personaId}
-                  />
-                  {creatingFor === row.key ? (
-                    <PersonaForm
-                      busy={busy !== null}
-                      editing={null}
-                      onCancel={() => setCreatingFor(null)}
-                      onSave={(draft) => submitPersona(draft, row.key)}
-                      onUpload={(image) => uploadPersonaPhoto({ image })}
-                      personas={personas}
-                    />
-                  ) : null}
-                </>
-              ) : (
-                <>
-                  <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                    <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
-                      {copy.columns.name}
-                      <input className={adminInputClass} disabled={locked} maxLength={CHAT_LIMITS.personaName} onChange={(event) => updateRow(row.key, { personaName: event.target.value })} type="text" value={row.personaName} />
-                    </label>
-                    <div className="flex min-w-0 flex-col gap-1.5">
-                      <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{copy.columns.role}</span>
-                      <PillGroup
-                        ariaLabel={`${copy.columns.role} da mensagem ${index + 1}`}
+                {open ? (
+                  <div className="flex min-w-0 flex-col gap-3 border-t border-[var(--border-subtle)] p-3" data-script-row-panel="" id={panelId}>
+                  {linked ? (
+                    <>
+                      {/* "Quem comenta" (D75): a pessoa da lista, com a foto ou as iniciais, ou "Criar nova pessoa" ali mesmo. */}
+                      <PersonaPicker
                         disabled={locked}
-                        name={`${base}-role`}
-                        onChange={(personaRole: PersonaRole) => updateRow(row.key, { personaRole })}
+                        fallbackName={row.personaId ? null : row.personaName.trim() || null}
+                        id={`${base}-pessoa`}
+                        onChange={(value) => pickPersona(row.key, value)}
+                        personas={personas}
+                        value={creatingFor === row.key ? NEW_PERSONA_VALUE : row.personaId}
+                      />
+                      {creatingFor === row.key ? (
+                        <PersonaForm
+                          busy={busy !== null}
+                          editing={null}
+                          onCancel={() => setCreatingFor(null)}
+                          onSave={(draft) => submitPersona(draft, row.key)}
+                          onUpload={(image) => uploadPersonaPhoto({ image })}
+                          personas={personas}
+                        />
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                        <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
+                          {copy.columns.name}
+                          <input className={adminInputClass} disabled={locked} maxLength={CHAT_LIMITS.personaName} onChange={(event) => updateRow(row.key, { personaName: event.target.value })} type="text" value={row.personaName} />
+                        </label>
+                        <div className="flex min-w-0 flex-col gap-1.5">
+                          <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{copy.columns.role}</span>
+                          <PillGroup
+                            ariaLabel={`${copy.columns.role} da mensagem ${index + 1}`}
+                            disabled={locked}
+                            name={`${base}-role`}
+                            onChange={(personaRole: PersonaRole) => updateRow(row.key, { personaRole })}
+                            options={[
+                              { label: copy.roles.student, value: "student" },
+                              { label: copy.roles.team, value: "team" }
+                            ]}
+                            value={row.personaRole}
+                          />
+                        </div>
+                      </div>
+
+                      <PersonaPhotoField
+                        disabled={locked}
+                        idBase={`${base}-persona`}
+                        name={row.personaName}
+                        onChange={(path) => setPhoto(row.key, path)}
+                        onUpload={(image) => uploadPersonaPhoto({ image })}
+                        onUploadingChange={(on) => setRowUploading(row.key, on)}
+                        path={row.personaAvatarPath}
+                        uploading={uploading.has(row.key)}
+                      />
+                    </>
+                  )}
+
+                  {/* O Tipo (D77): o comentario no chat ou a pergunta simulada na aba Perguntas (pede a lista no banco). */}
+                  {linked ? (
+                    <div className="flex min-w-0 flex-col gap-1.5" data-script-kind="">
+                      <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{PESSOAS.tipo}</span>
+                      <PillGroup
+                        ariaLabel={`${PESSOAS.tipo} da mensagem ${index + 1}`}
+                        disabled={locked}
+                        name={`${base}-tipo`}
+                        onChange={(kind: Row["kind"]) => updateRow(row.key, { kind })}
                         options={[
-                          { label: copy.roles.student, value: "student" },
-                          { label: copy.roles.team, value: "team" }
+                          { label: PESSOAS.tipos.message, value: "message" },
+                          { label: PESSOAS.tipos.question, value: "question" }
                         ]}
-                        value={row.personaRole}
+                        value={row.kind}
                       />
                     </div>
-                  </div>
+                  ) : null}
 
-                  <PersonaPhotoField
-                    disabled={locked}
-                    idBase={`${base}-persona`}
-                    name={row.personaName}
-                    onChange={(path) => setPhoto(row.key, path)}
-                    onUpload={(image) => uploadPersonaPhoto({ image })}
-                    onUploadingChange={(on) => setRowUploading(row.key, on)}
-                    path={row.personaAvatarPath}
-                    uploading={uploading.has(row.key)}
-                  />
-                </>
-              )}
-
-              {/* O Tipo (D77): o comentario no chat ou a pergunta simulada na aba Perguntas (pede a lista no banco). */}
-              {linked ? (
-                <div className="flex min-w-0 flex-col gap-1.5" data-script-kind="">
-                  <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{PESSOAS.tipo}</span>
-                  <PillGroup
-                    ariaLabel={`${PESSOAS.tipo} da mensagem ${index + 1}`}
-                    disabled={locked}
-                    name={`${base}-tipo`}
-                    onChange={(kind: Row["kind"]) => updateRow(row.key, { kind })}
-                    options={[
-                      { label: PESSOAS.tipos.message, value: "message" },
-                      { label: PESSOAS.tipos.question, value: "question" }
-                    ]}
-                    value={row.kind}
-                  />
-                </div>
-              ) : null}
-
-              <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
-                {row.kind === "question" ? PESSOAS.pergunta : copy.columns.body}
-                <textarea
-                  className={cn(adminTextareaClass, "min-h-16")}
-                  disabled={locked}
-                  maxLength={row.kind === "question" ? CHAT_LIMITS.question : CHAT_LIMITS.body}
-                  onChange={(event) => updateRow(row.key, { body: event.target.value })}
-                  rows={2}
-                  value={row.body}
-                />
-              </label>
-
-              <div className="flex min-w-0 flex-col gap-1.5">
-                <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{copy.columns.trigger}</span>
-                <PillGroup ariaLabel={`${copy.columns.trigger} da mensagem ${index + 1}`} disabled={locked} name={`${base}-trigger`} onChange={(triggerKind: ScriptTrigger) => updateRow(row.key, { triggerKind })} options={triggerOptions} value={row.triggerKind} />
-              </div>
-
-              {row.triggerKind === "at_offset" ? (
-                <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
-                  {live ? COMENTARIOS.minutoDaLive : copy.columns.time}
-                  <input
-                    aria-invalid={row.offsetMs == null ? true : undefined}
-                    className={cn(adminInputClass, "w-36")}
-                    disabled={locked}
-                    inputMode="numeric"
-                    onBlur={() => updateRow(row.key, { offsetText: row.offsetMs == null ? row.offsetText : offsetTextOf(row.offsetMs, live) })}
-                    onChange={(event) => updateRow(row.key, { offsetMs: scriptOffsetInput(event.target.value, live), offsetText: event.target.value })}
-                    placeholder={live ? "12:30" : copy.timePlaceholder}
-                    type="text"
-                    value={row.offsetText}
-                  />
-                  {live ? <span className="text-xs leading-5 font-normal text-[var(--text-secondary)]">{COMENTARIOS.minutoDaLiveDica}</span> : null}
-                </label>
-              ) : null}
-
-              {row.triggerKind === "on_phrase" ? (
-                <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,120px)]">
                   <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
-                    {copy.columns.phrase}
-                    <input className={adminInputClass} disabled={locked} maxLength={CHAT_LIMITS.phraseMax} onChange={(event) => updateRow(row.key, { phrase: event.target.value })} type="text" value={row.phrase} />
-                  </label>
-                  <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
-                    {copy.columns.delay}
-                    <input
-                      className={adminInputClass}
+                    {row.kind === "question" ? PESSOAS.pergunta : copy.columns.body}
+                    <textarea
+                      className={cn(adminTextareaClass, "min-h-16")}
                       disabled={locked}
-                      inputMode="numeric"
-                      max={CHAT_LIMITS.phraseDelayMaxMs / 1000}
-                      min={CHAT_LIMITS.phraseDelayMinMs / 1000}
-                      onChange={(event) => updateRow(row.key, { phraseDelaySeconds: Math.trunc(Number(event.target.value)) || 0 })}
-                      type="number"
-                      value={row.phraseDelaySeconds}
+                      maxLength={row.kind === "question" ? CHAT_LIMITS.question : CHAT_LIMITS.body}
+                      onChange={(event) => updateRow(row.key, { body: event.target.value })}
+                      rows={2}
+                      value={row.body}
                     />
                   </label>
-                  {!transcript ? <p className="text-xs leading-5 text-[var(--text-secondary)] sm:col-span-2">{copy.transcriptNone}</p> : null}
-                </div>
-              ) : null}
-            </li>
-          );
-        })}
-      </ol>
+
+                  <div className="flex min-w-0 flex-col gap-1.5">
+                    <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{copy.columns.trigger}</span>
+                    <PillGroup ariaLabel={`${copy.columns.trigger} da mensagem ${index + 1}`} disabled={locked} name={`${base}-trigger`} onChange={(triggerKind: ScriptTrigger) => updateRow(row.key, { triggerKind })} options={triggerOptions} value={row.triggerKind} />
+                  </div>
+
+                  {row.triggerKind === "at_offset" ? (
+                    <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
+                      {live ? COMENTARIOS.minutoDaLive : copy.columns.time}
+                      <input
+                        aria-invalid={row.offsetMs == null ? true : undefined}
+                        className={cn(adminInputClass, "w-36")}
+                        disabled={locked}
+                        inputMode="numeric"
+                        onBlur={() => updateRow(row.key, { offsetText: row.offsetMs == null ? row.offsetText : offsetTextOf(row.offsetMs, live) })}
+                        onChange={(event) => updateRow(row.key, { offsetMs: scriptOffsetInput(event.target.value, live), offsetText: event.target.value })}
+                        placeholder={live ? "12:30" : copy.timePlaceholder}
+                        type="text"
+                        value={row.offsetText}
+                      />
+                      {live ? <span className="text-xs leading-5 font-normal text-[var(--text-secondary)]">{COMENTARIOS.minutoDaLiveDica}</span> : null}
+                    </label>
+                  ) : null}
+
+                  {row.triggerKind === "on_phrase" ? (
+                    <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,120px)]">
+                      <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
+                        {copy.columns.phrase}
+                        <input className={adminInputClass} disabled={locked} maxLength={CHAT_LIMITS.phraseMax} onChange={(event) => updateRow(row.key, { phrase: event.target.value })} type="text" value={row.phrase} />
+                      </label>
+                      <label className="flex min-w-0 flex-col gap-1.5 text-[13px] leading-5 font-medium text-[var(--text-primary)]">
+                        {copy.columns.delay}
+                        <input
+                          className={adminInputClass}
+                          disabled={locked}
+                          inputMode="numeric"
+                          max={CHAT_LIMITS.phraseDelayMaxMs / 1000}
+                          min={CHAT_LIMITS.phraseDelayMinMs / 1000}
+                          onChange={(event) => updateRow(row.key, { phraseDelaySeconds: Math.trunc(Number(event.target.value)) || 0 })}
+                          type="number"
+                          value={row.phraseDelaySeconds}
+                        />
+                      </label>
+                      {!transcript ? <p className="text-xs leading-5 text-[var(--text-secondary)] sm:col-span-2">{copy.transcriptNone}</p> : null}
+                    </div>
+                  ) : null}
+                    <div className="flex min-w-0 justify-end">
+                      <Button className="px-2 text-[var(--text-secondary)]" disabled={locked} onClick={() => updateRow(row.key, { status: row.status === "disabled" ? "draft" : "disabled" })} type="button" variant="ghost">
+                        {row.status === "disabled" ? copy.toggleOn : copy.toggleOff}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ol>
+      ) : null}
 
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <Button className="px-3" disabled={locked || rows.length >= CHAT_LIMITS.scriptItemsMax} onClick={() => setRows((current) => [...current, emptyRow(live)])} type="button" variant="secondary">
+        <Button className="px-3" data-script-add="" disabled={locked || rows.length >= CHAT_LIMITS.scriptItemsMax} onClick={addRow} type="button" variant="secondary">
           <Plus aria-hidden="true" className="size-4" />
           {copy.add}
         </Button>

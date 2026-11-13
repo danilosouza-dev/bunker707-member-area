@@ -814,7 +814,10 @@ export async function limparWebinarios(db) {
     ["Apagando banidos de teste", () => (ids.length === 0 ? nada() : db.from("webinar_user_bans").delete().in("user_id", ids))],
     ["Apagando pedidos do gravador de teste", () => (sessoes.length === 0 ? nada() : db.from("webinar_recording_events").delete().in("session_id", sessoes))],
     ["Apagando pedidos do gravador sem sessao de teste", () => db.from("webinar_recording_events").delete().is("session_id", null).like("payload->>sessionId", "bbbbbbbb-%")],
-    ["Apagando webinarios de teste", () => db.from("webinars").delete().like("slug", "teste-%")]
+    ["Apagando webinarios de teste", () => db.from("webinars").delete().like("slug", "teste-%")],
+    // A lista de pessoas que comentam e da escola desde a 202611180001 (docs/30 D117): a pessoa nao sai com o webinario
+    // (a origem fica nula). No banco local de teste, a lista inteira sai, e cada teste comeca sem ninguem.
+    ["Apagando pessoas que comentam de teste", () => db.from("webinar_personas").delete().not("id", "is", null)]
   ];
 
   for (const [contexto, etapa] of etapas) {

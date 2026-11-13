@@ -241,17 +241,17 @@ function withAvatarColumn(upsert: ScriptItemUpsert, item: ScriptItemDraft, avata
 }
 
 /**
- * As pessoas dos itens que vao para o banco, pelo id: a lista inteira (listPersonas le em paginas) e, das que o item
- * pede e a lista nao trouxe (a que entrou na lista depois da leitura), uma leitura pelos ids. So a pessoa que nao existe
- * mais (ou e de outro webinario) solta o item; nunca a que a leitura deixou de fora (correcao da revisao v8, achado 4).
+ * As pessoas dos itens que vao para o banco, pelo id: a lista da escola inteira (listPersonas le em paginas; D117) e,
+ * das que o item pede e a lista nao trouxe (a que entrou na lista depois da leitura), uma leitura pelos ids. So a pessoa
+ * que nao existe mais solta o item; nunca a que a leitura deixou de fora (correcao da revisao v8, achado 4).
  */
-async function personasOfItems(db: WebinarsDb, webinarId: string, items: readonly ScriptItemDraft[], avatars: PersonaAvatars): Promise<Map<string, WebinarPersona>> {
-  const personas = new Map((await listPersonas(db, webinarId)).personas.map((persona) => [persona.id, persona] as const));
+async function personasOfItems(db: WebinarsDb, items: readonly ScriptItemDraft[], avatars: PersonaAvatars): Promise<Map<string, WebinarPersona>> {
+  const personas = new Map((await listPersonas(db)).personas.map((persona) => [persona.id, persona] as const));
   const wanted = items
     .map((item) => (item.personaId !== undefined ? item.personaId : item.id ? (avatars.personaIds.get(item.id) ?? null) : null))
     .filter((id): id is string => Boolean(id) && !personas.has(id as string));
   if (wanted.length > 0) {
-    for (const persona of await fetchPersonasByIds(db, webinarId, wanted)) {
+    for (const persona of await fetchPersonasByIds(db, wanted)) {
       personas.set(persona.id, persona);
     }
   }
@@ -377,7 +377,7 @@ export async function saveScriptItems(input: SaveScriptItemsInput): Promise<Acti
       throw new WebinarError(SCRIPTED_QUESTION_MIGRATION_MESSAGE, 409);
     }
     // A pessoa da lista e a fonte da copia de cada item ligado a ela (D75).
-    const personas = avatars.linked ? await personasOfItems(db, row.id, data.items, avatars) : new Map<string, WebinarPersona>();
+    const personas = avatars.linked ? await personasOfItems(db, data.items, avatars) : new Map<string, WebinarPersona>();
     const { transcript } = live ? { transcript: null } : await loadTranscriptFor(db, row.id);
     // Um id de outro webinario nao e deste roteiro: entra como item novo (nunca um upsert la).
     const known = new Set((await listScriptItemRows(db, row.id)).map((item) => item.id));
