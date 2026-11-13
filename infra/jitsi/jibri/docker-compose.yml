@@ -24,9 +24,10 @@ services:
       - /tmp:size=256M,mode=1777,noexec
     # O Chrome do gravador precisa de 2 GB em /dev/shm (a imagem recusa subir com menos).
     shm_size: "2gb"
-    # Saude pela API HTTP do Jibri, so em 127.0.0.1 (jibri-status.sh e a espera do jibri-up).
-    ports:
-      - "${JIBRI_HEALTH_BIND:-127.0.0.1}:${JIBRI_HTTP_API_EXTERNAL_PORT:-2222}:${JIBRI_HTTP_API_EXTERNAL_PORT:-2222}"
+    # Saude pela API HTTP do Jibri, sempre DENTRO do container (este healthcheck, o jibri-status.sh e a espera do
+    # jibri-up, por `docker compose exec`). Nenhuma porta e publicada: o Jibri so escuta a API no 127.0.0.1 do proprio
+    # container (jibri.api.http.external-api-host, sem variavel na imagem), entao a porta no host nunca respondia
+    # (13/11/2026: o jibri-up desistia de um gravador saudavel).
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${JIBRI_HTTP_API_EXTERNAL_PORT:-2222}/jibri/api/v1.0/health | grep -q HEALTHY"]
       interval: 15s
@@ -66,7 +67,11 @@ services:
       JIBRI_RECORDING_CONSTANT_RATE_FACTOR: "${JIBRI_RECORDING_CONSTANT_RATE_FACTOR:-25}"
       JIBRI_RECORDING_VIDEO_ENCODE_PRESET_RECORDING: "${JIBRI_RECORDING_VIDEO_ENCODE_PRESET_RECORDING:-ultrafast}"
       JIBRI_RECORDING_QUEUE_SIZE: "${JIBRI_RECORDING_QUEUE_SIZE:-4096}"
-      JIBRI_SINGLE_USE_MODE: "${JIBRI_SINGLE_USE_MODE:-0}"
+      # false/true, nunca 0/1: a imagem escreve o valor cru no jibri.conf (single-use-mode = ...), e o Jibri so le a
+      # chave quando a primeira gravacao termina. Com 0 a leitura falha (NUMBER no lugar de BOOLEAN), o gravador nao
+      # volta a ficar livre e o Gravar de novo na mesma live nao acha gravador (achado em 13/11/2026 lendo o jibri.conf da
+      # imagem e conferido com a biblioteca de configuracao do Jibri, antes da primeira gravacao de verdade).
+      JIBRI_SINGLE_USE_MODE: "${JIBRI_SINGLE_USE_MODE:-false}"
       JIBRI_USAGE_TIMEOUT: "${JIBRI_USAGE_TIMEOUT:-0}"
       JIBRI_HTTP_API_EXTERNAL_PORT: "${JIBRI_HTTP_API_EXTERNAL_PORT:-2222}"
       JIBRI_HTTP_API_INTERNAL_PORT: "${JIBRI_HTTP_API_INTERNAL_PORT:-3333}"
