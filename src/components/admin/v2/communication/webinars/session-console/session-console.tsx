@@ -105,6 +105,7 @@ import { ConsoleLeaveDialog } from "./console-leave-dialog";
 import { CONSOLE_LEAVE_WAIT_MS, consoleLeaveGuarded, type ConsoleLeaveTarget } from "./console-leave-model";
 import { consoleSkeleton } from "./console-layout-model";
 import { ConsoleOffer } from "./console-offer";
+import { ConsoleReplayLesson } from "./console-replay-lesson";
 import { ConsolePanel } from "./console-panel";
 import { ConsoleRail, visibleConsoleTabControl } from "./console-rail";
 import { ConsolePeopleTab } from "./console-people-tab";
@@ -1290,6 +1291,8 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                       />
                     ) : null}
                     <LiveAttachRecording busyKey={busyKey} canWrite={permissions.canWrite} onAttach={attach} recording={live.recording} />
+                    {/* docs/30 §6.8 (D114): para qual curso o replay desta live vai, sem sair do console. */}
+                    <ConsoleReplayLesson canWrite={permissions.canWrite} webinarId={webinar.id} />
                   </>
                 ) : null,
                 // Fase 4b (docs/30 §2.4): a Oferta na sessao gravada e no Replay, com a propria leitura.
