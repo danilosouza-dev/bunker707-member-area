@@ -203,6 +203,24 @@ export async function listRecentChatRows(
   return rows.filter((row) => !(input.afterCreatedAt && row.created_at === input.afterCreatedAt && input.afterId && row.id <= input.afterId)).slice(0, limit);
 }
 
+/**
+ * O que ja foi dito antes de um ponto da propria sessao (o historico de quem entra na Live ao vivo): as `limit` linhas
+ * mais novas com o offset abaixo de `beforeMs`, as aprovadas e as do proprio aluno na moderacao, devolvidas na ordem
+ * do relogio. Uma consulta so, com limite: quem entra no meio de uma live grande nunca le o chat inteiro.
+ */
+export async function listChatBacklogRows(db: WebinarsDb, input: { beforeMs: number; limit: number; sessionId: string; userId: string | null }): Promise<ChatMessageRow[]> {
+  const limit = Math.min(CHAT_LIMITS.chatPageMax, Math.max(1, Math.trunc(input.limit)));
+  let query = db.from("webinar_chat_messages").select(CHAT_MESSAGE_COLUMNS).eq("session_id", input.sessionId).is("deleted_at", null).lt("offset_ms", Math.trunc(input.beforeMs));
+  if (input.userId) {
+    query = query.or(`approved.eq.true,author_user_id.eq.${input.userId}`);
+  } else {
+    query = query.eq("approved", true);
+  }
+  const { data, error } = await query.order("offset_ms", { ascending: false }).order("created_at", { ascending: false }).limit(limit);
+  assertNoDbError(error, "Webinarios: historico do chat");
+  return ((data ?? []) as ChatMessageRow[]).reverse();
+}
+
 /** A mesa da equipe: as linhas da sessao (pendentes primeiro, se pedido), as mais novas no fim. */
 export async function listSessionChatRows(db: WebinarsDb, input: { limit?: number; onlyPending?: boolean; sessionId: string }): Promise<ChatMessageRow[]> {
   const limit = Math.min(500, Math.max(1, input.limit ?? 200));

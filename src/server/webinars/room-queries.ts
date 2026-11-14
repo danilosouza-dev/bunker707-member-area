@@ -25,6 +25,7 @@ import {
   listQuestionLikeRows,
   listQuestionReplyRows,
   listQuestionRows,
+  listChatBacklogRows,
   listReactionRowsSince,
   listRecentChatRows,
   listPresentUserIds,
@@ -52,6 +53,7 @@ import { loadStudentWebinarById, type StudentWebinarRecord } from "./registratio
 import {
   authorPhotoUrl,
   bunnyEmbedTokenInput,
+  CHAT_BACKLOG_MESSAGES,
   bunnyEmbedUrl,
   canJoinSimulated,
   displayNameFor,
@@ -464,6 +466,25 @@ export async function readChatWindow(db: WebinarsDb, context: RoomContext, userI
     serverTime,
     window: served
   };
+}
+
+/** O historico de quem entra na Live ao vivo: as ultimas mensagens da sessao antes de `beforeMs`, na ordem do relogio. */
+export type ChatBacklogReply = { messages: StudentChatMessage[]; mode: "backlog"; serverTime: string };
+
+/**
+ * O que ja foi dito na Live ao vivo antes da primeira janela de quem entra (docs/30 §5.1; teste do produtor de
+ * 13/11/2026): as CHAT_BACKLOG_MESSAGES mensagens mais novas da propria sessao com o offset abaixo de `beforeMs`, nunca
+ * alem do segundo do servidor. So na live: na gravada e no replay o chat aparece no segundo dele, e o historico seria
+ * o que ainda nao passou para outra turma (lista vazia).
+ */
+export async function readChatBacklog(db: WebinarsDb, context: RoomContext, userId: string, input: { beforeMs: number }, now = Date.now()): Promise<ChatBacklogReply> {
+  const serverTime = new Date(now).toISOString();
+  if (context.session.kind !== "live" || !Number.isInteger(input.beforeMs)) {
+    return { messages: [], mode: "backlog", serverTime };
+  }
+  const beforeMs = Math.min(input.beforeMs, chatWindowLimitMs(context.session, now) + 1);
+  const rows = await listChatBacklogRows(db, { beforeMs, limit: CHAT_BACKLOG_MESSAGES, sessionId: context.session.id, userId });
+  return { messages: await studentMessagesWithPhotos(db, rows.map(chatMessageFromRow), userId, context.session.kind, now), mode: "backlog", serverTime };
 }
 
 /**

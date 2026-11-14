@@ -20,6 +20,7 @@ import type { StudentRoomPayload } from "@/server/webinars/student-model";
 import {
   beaconLeave,
   deleteMyChat,
+  getChatBacklog,
   getChatWindow,
   getReactionCounts,
   getRecentChat,
@@ -202,6 +203,12 @@ export type ChatFeed = {
 };
 
 export function useRoomChat(input: {
+  /**
+   * A Live ao vivo: quem entra (ou volta) recebe tambem o que ja foi dito antes da primeira janela, as ultimas
+   * mensagens da sessao, de uma vez (teste do produtor de 13/11/2026: sem isso, o aluno que saia e voltava perdia o
+   * chat de antes dos 5 min). Na gravada e no replay o chat aparece no segundo dele: sem historico.
+   */
+  backlog?: boolean;
   enabled: boolean;
   getPlayerOffsetMs: () => number;
   /** A Na tela: o carimbo que a sala tem (vai em `tela` na consulta de 5 s); nulo, a consulta vai sem ele. */
@@ -213,6 +220,7 @@ export function useRoomChat(input: {
   webinarId: string;
 }): ChatFeed {
   const { enabled, initialServerTime, sessionId, webinarId } = input;
+  const backlog = input.backlog === true;
   const [messages, setMessages] = useState<RoomMessage[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -235,7 +243,36 @@ export function useRoomChat(input: {
     }
     let stopped = false;
     windowRef.current = null;
+    // O historico da live: pedido uma vez, logo depois da primeira janela, do comeco dela para tras. Uma falha tenta de
+    // novo na conferencia seguinte das janelas, ate tres vezes; o chat de agora nunca espera por ele.
+    let backlogLeft = backlog ? 3 : 0;
+    let backlogBusy = false;
+    const fetchBacklog = async (beforeMs: number) => {
+      if (backlogLeft <= 0 || backlogBusy) {
+        return;
+      }
+      backlogBusy = true;
+      backlogLeft -= 1;
+      try {
+        const answer = await getChatBacklog(webinarId, sessionId, beforeMs);
+        if (stopped) {
+          return;
+        }
+        backlogLeft = 0;
+        if (answer.data.messages.length > 0) {
+          setMessages((previous) => mergeMessages(previous, answer.data.messages));
+        }
+      } catch {
+        // O chat de agora continua; o historico tenta de novo na proxima conferencia.
+      } finally {
+        backlogBusy = false;
+      }
+    };
+    let firstWindowFromMs: number | null = null;
     const fetchWindow = async () => {
+      if (firstWindowFromMs !== null && backlogLeft > 0) {
+        void fetchBacklog(firstWindowFromMs);
+      }
       if (busyRef.current) {
         return;
       }
@@ -255,6 +292,10 @@ export function useRoomChat(input: {
         setMessages((previous) => (seeked ? mergeMessages(previous.filter((message) => message.mine), answer.data.messages) : mergeMessages(previous, answer.data.messages)));
         setLoaded(true);
         setError(null);
+        if (firstWindowFromMs === null) {
+          firstWindowFromMs = next.fromMs;
+          void fetchBacklog(next.fromMs);
+        }
       } catch (failure) {
         if (!stopped) {
           setError(failure instanceof WebinarsRequestError ? failure.message : WEBINAR_COPY.sala.erroCarregarChat);
@@ -289,7 +330,7 @@ export function useRoomChat(input: {
       stopWindows();
       stopPolling();
     };
-  }, [enabled, sessionId, webinarId]);
+  }, [backlog, enabled, sessionId, webinarId]);
 
   const seeked = useCallback(() => {
     seekedRef.current = true;

@@ -688,7 +688,7 @@ test("o pedido do microfone acaba na queda e no iframe novo: o 'ligado' guardado
   assert.ok(onEvent.indexOf("joinedApiRef.current !== frame") < onEvent.indexOf("micAskOnSignal("), "antes do pedido do microfone e do lote");
   assert.match(onEvent, /if \(name === "videoConferenceJoined"\) \{[\s\S]*?joinedApiRef\.current = frame;/);
   assert.match(sala, /meetApiRef\.current = jitsi\.api;/);
-  assert.match(sala, /const hangUp = useCallback\(\(\) => \{\s*leavingRef\.current = true;\s*micAskRef\.current = null;/);
+  assert.match(sala, /const hangUp = useCallback\(\(onGone\?: \(\) => void\) => \{\s*leavingRef\.current = true;\s*micAskRef\.current = null;/);
 });
 
 test("o pedido do microfone nao vence por prazo: o aluno que libera depois de minutos (o pedido escondido no Firefox) liga a barra e a linha, nunca o microfone aberto com a barra desligada", () => {

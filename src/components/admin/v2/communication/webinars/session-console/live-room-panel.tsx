@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type Dispatch, type RefObject } from "react";
 import { useJitsiDevices, type UseJitsiDevices } from "@/components/webinars/use-jitsi-devices";
 import { mountedThumbsRow, onStageParticipantOf } from "@/components/member/webinars/room/live-room-model";
+import { useAudienceTiles } from "@/components/member/webinars/room/use-room-audience";
 import { useJitsiMeet, type JitsiMeetApi, type JitsiStatus } from "@/components/webinars/use-jitsi-meet";
 import { deviceEnvironmentOf, deviceSectionReady, deviceSettingsFor, type DeviceKind, type DeviceOption, type DeviceSettings } from "@/lib/jitsi-device-settings";
 import {
@@ -12,6 +13,7 @@ import {
   liveConfigOverwrite,
   liveInterfaceConfigOverwrite,
   tokenRefreshDelayMs,
+  type AudienceTilePerson,
   type ConsoleListenedEvent,
   type ConsoleScreenShareMode,
   type LiveEmbedLook
@@ -105,6 +107,9 @@ const DEVICE_NAMES: Record<DeviceKind, (position: number) => string> = {
   audioOutput: WEBINAR_COPY.aoVivo.config.reserva.altoFalante,
   videoInput: WEBINAR_COPY.aoVivo.config.reserva.camera
 };
+
+/** Sem participantes simulados: a mesma lista vazia a cada desenho. */
+const NO_AUDIENCE: readonly AudienceTilePerson[] = [];
 
 function subscribeNothing() {
   return () => undefined;
@@ -224,6 +229,11 @@ export type LiveRoomHandle = {
 };
 
 type UseLiveRoomInput = {
+  /**
+   * Os participantes simulados que aparecem agora nas miniaturas dos alunos (docs/30 D120). O console nao desenha
+   * ninguem: o arquivo da instancia so repassa a lista ao gravador, para a gravacao sair como a sala do aluno.
+   */
+  audience?: readonly AudienceTilePerson[];
   canPublish: boolean;
   /** Onde o iframe entra (o palco do ConsoleStage, console-stage.tsx). */
   container: RefObject<HTMLDivElement | null>;
@@ -642,6 +652,8 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
   const joined = meet.status === "joined";
   const command = meet.executeCommand;
   const api = meet.api;
+  // A lista dos simulados segue so para o gravador (o participante escondido): quem modera nunca os ve no proprio video.
+  useAudienceTiles({ joined, people: input.audience ?? NO_AUDIENCE, post: meet.postToFrame, relay: true });
 
   const devices = useJitsiDevices({
     api,
