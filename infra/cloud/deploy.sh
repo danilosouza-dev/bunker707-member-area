@@ -112,14 +112,21 @@ elif [ "$role" = "meet" ]; then
     fi
     # O JVB esta atras do NAT do Docker: anuncia o IPv4 publico do servidor.
     set_env "$target" "$envf" JVB_ADVERTISE_IPS "$ip"
-    # A foto do Perfil na miniatura (docs/30 D115) pede o bunker_presence_guard no Prosody. O .env de um servidor que ja
-    # existia nao e gerado de novo: o modulo entra na lista (o resto fica como esta), e o compose recria o prosody,
+    # A foto do Perfil na miniatura (docs/30 D115) pede o bunker_presence_guard no Prosody, e a miniatura que nao se
+    # repete quando alguem volta a sala (D122), o bunker_ghost_guard. O .env de um servidor que ja existia nao e gerado
+    # de novo: os modulos que faltam entram no fim da lista (o resto fica como esta), e o compose recria o prosody,
     # porque o ambiente dele mudou.
     muc_modules=$(get_env "$target" "$envf" XMPP_MUC_MODULES)
-    case ",${muc_modules:-token_affiliation,bunker_room_guard}," in
-        *,bunker_presence_guard,*) ;;
-        *) set_env "$target" "$envf" XMPP_MUC_MODULES "${muc_modules:-token_affiliation,bunker_room_guard},bunker_presence_guard" ;;
-    esac
+    muc_wanted="${muc_modules:-token_affiliation,bunker_room_guard}"
+    for muc_module in bunker_presence_guard bunker_ghost_guard; do
+        case ",$muc_wanted," in
+            *",$muc_module,"*) ;;
+            *) muc_wanted="$muc_wanted,$muc_module" ;;
+        esac
+    done
+    if [ "$muc_wanted" != "$muc_modules" ]; then
+        set_env "$target" "$envf" XMPP_MUC_MODULES "$muc_wanted"
+    fi
     jvb_port=$(get_env "$target" "$envf" JVB_PORT); jvb_port="${jvb_port:-10000}"
     log "Pastas dos volumes (uid 1000) e portas no ufw: UDP $jvb_port (midia) e TCP 5222 (so o Jibri; o firewall da Hetzner limita a origem)"
     remote "bash infra/jitsi/scripts/volumes.sh"

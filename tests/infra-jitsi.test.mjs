@@ -159,7 +159,7 @@ test("compose do Jitsi: web, prosody, jicofo e jvb na tag stable fixada, saude e
   const prosody = services.get("prosody");
   assert.match(prosody, /JWT_APP_SECRET: "\$\{JWT_APP_SECRET\}"/);
   assert.match(prosody, /JWT_ALLOW_EMPTY: "0"/);
-  assert.match(prosody, /XMPP_MUC_MODULES: "\$\{XMPP_MUC_MODULES:-token_affiliation,bunker_room_guard,bunker_presence_guard\}"/, "o modulo que barra quem foi removido ou banido e o que deixa so a foto do token (D115)");
+  assert.match(prosody, /XMPP_MUC_MODULES: "\$\{XMPP_MUC_MODULES:-token_affiliation,bunker_room_guard,bunker_presence_guard,bunker_ghost_guard\}"/, "o modulo que barra quem foi removido ou banido, o que deixa so a foto do token (D115) e o que tira a entrada antiga de quem volta (D122)");
   assert.match(prosody, /ROOM_GUARD_URL: "\$\{ROOM_GUARD_URL:-\}"/);
   assert.match(prosody, /- \.\/prosody\/plugins:\/prosody-plugins-custom:ro/, "a copia versionada do token_affiliation entra no caminho dos plugins");
   assert.match(prosody, /\/usr\/local\/bin\/healthcheck\.sh/);
@@ -307,12 +307,28 @@ test("custom-config.js e custom-interface_config.js, avaliados como o navegador 
   const generated = "config.toolbarButtons = ['microphone', 'desktop', 'recording'];\n";
   assert.match(toolbarCheck(`${generated}${customConfig}`), /cfg_ok=1/, "a nossa barra minima no fim passa");
   assert.match(toolbarCheck(generated), /FALHA config\.js barra padrao com 'desktop'/, "a barra do host no config.js servido falha");
-  // Os dois arquivos so atribuem: nada de fetch, script ou acesso a window. A unica excecao e o carregador do CSS
-  // nosso (docs/31 §3), entre as marcas (uma vez so): ele so le o hash e cria um <link> para um caminho desta origem.
+  // Os dois arquivos so atribuem: nada de fetch, script ou acesso a window. As unicas excecoes sao os dois carregadores
+  // nossos, cada um entre as suas marcas (uma vez so): o do CSS (docs/31 §3), que so le o hash e cria um <link> para um
+  // caminho desta origem, e o dos participantes simulados (docs/30 D120), que so le o hash e cria a tag de script para
+  // um caminho desta origem.
   assert.equal(customConfig.split("bunker707:css-loader:inicio").length, 2, "uma marca de inicio so: nada se esconde num segundo bloco");
   const loader = /\/\/ bunker707:css-loader:inicio\n([\s\S]*?)\/\/ bunker707:css-loader:fim\n/.exec(customConfig);
   assert.ok(loader, "o carregador do CSS fica entre as marcas bunker707:css-loader");
-  for (const source of [customConfig.replace(loader[0], ""), customInterface]) assert.doesNotMatch(source, /\b(fetch|XMLHttpRequest|document|window|import|require)\b/);
+  assert.equal(customConfig.split("bunker707:plateia-loader:inicio").length, 2, "uma marca de inicio so no carregador dos simulados");
+  const audienceLoader = /\/\/ bunker707:plateia-loader:inicio\n([\s\S]*?)\/\/ bunker707:plateia-loader:fim\n/.exec(customConfig);
+  assert.ok(audienceLoader, "o carregador dos simulados fica entre as marcas bunker707:plateia-loader");
+  for (const source of [customConfig.replace(loader[0], "").replace(audienceLoader[0], ""), customInterface]) assert.doesNotMatch(source, /\b(fetch|XMLHttpRequest|document|window|import|require)\b/);
+  assert.doesNotMatch(
+    audienceLoader[1],
+    /\b(fetch|XMLHttpRequest|import|require|eval|innerHTML|WebSocket|EventSource|sendBeacon|navigator|Function|setTimeout|setInterval|postMessage)\b|location\.(href|replace|assign)/,
+    "o carregador dos simulados nao busca nada, nao escuta nada e nao navega: so liga o arquivo"
+  );
+  assert.doesNotMatch(audienceLoader[1], /https?:|wss?:|['"]\/\//, "o arquivo fica nesta origem (nem endereco sem esquema)");
+  assert.match(audienceLoader[1], /script\.src = '\/libs\/bunker707-plateia\.js\?v=[0-9a-f]{8}';/, "o v e o comeco do sha256 do arquivo (infra-jitsi-plateia.guard confere o valor)");
+  // Os dois arquivos entram inline no index.html, depois de um texto de comentario de HTML no config.js gerado
+  // (subdir.startsWith com o abre-comentario). Com isso, o nome da tag de script escrito ali, ate em comentario, faz o
+  // navegador nao fechar o bloco e o index inteiro quebra (ensaio local de 13/11/2026: a sala nao abria).
+  for (const source of [customConfig, customInterface]) assert.doesNotMatch(source, /<\/?script|<!--/i, "nem a tag de script nem o abre-comentario de HTML escritos nos arquivos que entram inline");
   assert.doesNotMatch(
     loader[1],
     /\b(fetch|XMLHttpRequest|import|require|eval|innerHTML|src|WebSocket|EventSource|sendBeacon|navigator|Function|setTimeout|setInterval|postMessage)\b|location\.(href|replace|assign)/,
@@ -394,7 +410,7 @@ test("generate-secrets em producao: --domain e --email obrigatorios, --jwt-secre
   assert.equal(env.get("MEET_SITE_ADDRESS"), "meet.exemplo.com.br");
   assert.equal(env.get("MEET_FRAME_ANCESTORS"), "https://membros.exemplo.com.br", "a area de membros e membros.<mesmo dominio> por convencao");
   assert.equal(env.get("ROOM_GUARD_URL"), "https://membros.exemplo.com.br/api/webhooks/room-guard", "a lista de barrados do app");
-  assert.equal(env.get("XMPP_MUC_MODULES"), "token_affiliation,bunker_room_guard,bunker_presence_guard");
+  assert.equal(env.get("XMPP_MUC_MODULES"), "token_affiliation,bunker_room_guard,bunker_presence_guard,bunker_ghost_guard");
   assert.equal(env.get("ACME_EMAIL"), "equipe@exemplo.com.br");
   assert.equal(env.get("CADDY_BIND"), "0.0.0.0");
   assert.equal(env.get("CADDY_LOCAL_CERTS"), "");
@@ -461,9 +477,32 @@ test("mod_bunker_presence_guard (D115): toda presenca que chega de uma sessao pe
   assert.doesNotMatch(run.stdout, /FALHOU/);
 });
 
-test("deploy-meet poe o bunker_presence_guard na lista do Prosody de um servidor que ja existia, sem tirar os outros modulos (D115)", () => {
+test("mod_bunker_ghost_guard (D122): quem volta a sala tira so a propria entrada antiga, a da conexao que caiu; duas abas vivas ficam, a entrada de outra pessoa fica, e um erro nunca desfaz a entrada", () => {
+  const pluginPath = join(jitsiDir, "prosody", "plugins", "mod_bunker_ghost_guard.lua");
+  const plugin = read(pluginPath);
+  assert.match(plugin, /module:hook\("muc-occupant-joined", function\(event\)[\s\S]*?end, -\d+\);/, "depois da entrada (prioridade negativa): quem volta ja esta na sala");
+  assert.match(plugin, /session\.jitsi_meet_context_user/, "a conta e a do token assinado pelo app");
+  assert.match(plugin, /user_id_of\(session\) ~= user_id or not session\.hibernating/, "so a entrada da mesma conta com todas as conexoes caidas");
+  assert.match(plugin, /prosody\.full_sessions\[full_jid\]/, "confere a sessao de cada conexao da entrada");
+  assert.match(plugin, /room:set_role\(true, nick, "none"\)/, "a saida e feita pelo sistema, como um Remover");
+  assert.match(plugin, /stanza:tag\("flip_device"\):up\(\)/, "a marca que o motor trata como troca de aparelho: nenhum aviso de removido");
+  assert.match(plugin, /is_healthcheck_room\(room\.jid\) or is_admin\(occupant\.bare_jid\)/, "a sala de saude e o foco ficam fora");
+  assert.match(plugin, /pcall\(function\(\)/, "um erro vira aviso no log, nunca desfaz a entrada");
+  assert.doesNotMatch(plugin, /http\.request|os\.getenv|set_affiliation|"outcast"/, "nada de rede, de ambiente nem de banimento: so a entrada antiga sai");
+
+  // De verdade, com uma sala e sessoes de mentira (nada do Prosody precisa estar instalado), quando a maquina tem lua5.4.
+  const lua = spawnSync("lua5.4", ["-v"], { encoding: "utf8" });
+  if (lua.status !== 0) {
+    return;
+  }
+  const run = spawnSync("lua5.4", [fileURLToPath(new URL("./support/prosody-ghost-guard.lua", import.meta.url)), pluginPath], { encoding: "utf8" });
+  assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
+  assert.doesNotMatch(run.stdout, /FALHOU/);
+});
+
+test("deploy-meet poe o bunker_presence_guard e o bunker_ghost_guard na lista do Prosody de um servidor que ja existia, sem tirar os outros modulos (D115, D122)", () => {
   const start = deploySource.indexOf("    muc_modules=$(get_env");
-  const end = deploySource.indexOf("    esac\n", start) + "    esac\n".length;
+  const end = deploySource.indexOf("    fi\n", start) + "    fi\n".length;
   assert.ok(start > 0 && end > start, "o passo esta no ramo do meet");
   const meetBranch = deploySource.slice(deploySource.indexOf('elif [ "$role" = "meet" ]; then'));
   assert.ok(meetBranch.indexOf("muc_modules=$(get_env") < meetBranch.indexOf("$jitsi_compose up -d"), "antes do compose up (o prosody e recriado com o ambiente novo)");
@@ -471,10 +510,12 @@ test("deploy-meet poe o bunker_presence_guard na lista do Prosody de um servidor
     const script = `get_env() { printf '%s' "$ATUAL"; }\nset_env() { echo "set $3=$4"; }\ntarget=t; envf=e\n${deploySource.slice(start, end)}echo fim`;
     return spawnSync("bash", ["-c", script], { encoding: "utf8", env: { ...process.env, ATUAL: atual } }).stdout.trim();
   };
-  assert.equal(passo("token_affiliation,bunker_room_guard"), "set XMPP_MUC_MODULES=token_affiliation,bunker_room_guard,bunker_presence_guard\nfim");
-  assert.equal(passo(""), "set XMPP_MUC_MODULES=token_affiliation,bunker_room_guard,bunker_presence_guard\nfim", "sem a linha: o padrao do compose mais o modulo");
-  assert.equal(passo("token_affiliation,bunker_room_guard,outro"), "set XMPP_MUC_MODULES=token_affiliation,bunker_room_guard,outro,bunker_presence_guard\nfim", "um modulo a mais fica");
-  assert.equal(passo("token_affiliation,bunker_presence_guard,bunker_room_guard"), "fim", "ja esta: nada muda e o prosody nao e recriado");
+  const todos = "token_affiliation,bunker_room_guard,bunker_presence_guard,bunker_ghost_guard";
+  assert.equal(passo("token_affiliation,bunker_room_guard"), `set XMPP_MUC_MODULES=${todos}\nfim`, "o servidor de antes do D115: os dois entram");
+  assert.equal(passo("token_affiliation,bunker_room_guard,bunker_presence_guard"), `set XMPP_MUC_MODULES=${todos}\nfim`, "o servidor de hoje: so o que falta entra, no fim");
+  assert.equal(passo(""), `set XMPP_MUC_MODULES=${todos}\nfim`, "sem a linha: o padrao de antes mais os dois");
+  assert.equal(passo("token_affiliation,bunker_room_guard,outro"), "set XMPP_MUC_MODULES=token_affiliation,bunker_room_guard,outro,bunker_presence_guard,bunker_ghost_guard\nfim", "um modulo a mais fica");
+  assert.equal(passo("token_affiliation,bunker_ghost_guard,bunker_presence_guard,bunker_room_guard"), "fim", "ja estao: nada muda e o prosody nao e recriado");
 });
 
 test("licenca e atribuicao ficam no repositorio, nao na tela: LICENSE-jitsi (Apache 2.0), NOTICE e a copia do mod_token_affiliation", () => {
@@ -1040,7 +1081,7 @@ test("o carregador do CSS: so com config.bunkerTheme no hash cria o <link> (v = 
     const documentElement = { attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } };
     const fakeDocument = { createElement: (tag) => ({ tag }), documentElement, head };
     vm.runInNewContext(customConfig, { config: { videoQuality: {} }, document: fakeDocument, window: { location: { hash } } });
-    return { link: head.children[0] ?? null, theme: documentElement.attributes["data-bunker-theme"] ?? null };
+    return { link: head.children.find((element) => element.tag === "link") ?? null, theme: documentElement.attributes["data-bunker-theme"] ?? null };
   };
   const link = { href: `/css/bunker707.css?v=${v}`, rel: "stylesheet", tag: "link" };
   // O external_api.js serializa configOverwrite.bunkerTheme = "light" como config.bunkerTheme=%22light%22.
@@ -1058,6 +1099,30 @@ test("o carregador do CSS: so com config.bunkerTheme no hash cria o <link> (v = 
   const config = { videoQuality: {} };
   vm.runInNewContext(customConfig, { config });
   assert.equal(config.channelLastN, 9);
+});
+
+// Os participantes simulados desenhados pelo motor (docs/30 D120): o carregador do arquivo no custom-config.js, avaliado
+// como o navegador faria. So liga o arquivo no iframe do nosso app (a chave do tema no hash) e no gravador
+// (config.iAmRecorder=true, que o Jibri manda); uma sala aberta pelo endereco nao carrega nada. O que o arquivo faz
+// tem teste de comportamento em tests/infra-jitsi-plateia.test.mjs; a montagem e o smoke, a guarda ao lado.
+test("o carregador dos simulados: liga /libs/bunker707-plateia.js (v = sha256 do arquivo) so no iframe do nosso app e no gravador", () => {
+  const v = createHash("sha256").update(readFileSync(join(jitsiDir, "web", "bunker707-plateia.js"))).digest("hex").slice(0, 8);
+  const run = (hash) => {
+    const head = { children: [], appendChild(element) { this.children.push(element); } };
+    const documentElement = { setAttribute() {} };
+    const fakeDocument = { createElement: (tag) => ({ tag }), documentElement, head };
+    vm.runInNewContext(customConfig, { config: { videoQuality: {} }, document: fakeDocument, window: { location: { hash } } });
+    return head.children.filter((element) => element.tag === "script");
+  };
+  const script = [{ async: true, src: `/libs/bunker707-plateia.js?v=${v}`, tag: "script" }];
+  assert.deepEqual(run("#jitsi_meet_external_api_id=0&config.bunkerTheme=%22dark%22&config.disableChat=true"), script, "o iframe do nosso app");
+  assert.deepEqual(run('#config.bunkerTheme="light"'), script);
+  assert.deepEqual(run("#config.iAmRecorder=true&config.externalConnectUrl=null&config.startWithAudioMuted=true"), script, "o gravador, como o Jibri abre a sala");
+  assert.deepEqual(run("#config.iAmRecorder=%22true%22"), script);
+  assert.deepEqual(run("#config.disableChat=true"), [], "uma sala aberta pelo endereco, sem as chaves: nada");
+  assert.deepEqual(run(""), []);
+  assert.deepEqual(run("#config.iAmRecorder=false"), [], "so o gravador de verdade");
+  assert.deepEqual(run("#config.iAmRecorder=trueish"), []);
 });
 
 // A linha do install -d da pasta do gravador tem o __DEPLOY_USER__ duas vezes: sem o /g do sed a segunda ficava, o

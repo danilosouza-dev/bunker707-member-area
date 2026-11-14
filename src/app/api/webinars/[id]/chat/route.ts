@@ -1,7 +1,7 @@
 import { scheduleAssistant } from "@/server/webinars/assistant";
 import { chatAssistantTrigger } from "@/server/webinars/assistant-model";
 import { chatDeleteBodySchema, chatPostBodySchema, chatWindowQuerySchema } from "@/server/webinars/chat-schemas";
-import { readChatWindow, readRecentChat, webinarsDb } from "@/server/webinars/room-queries";
+import { readChatBacklog, readChatWindow, readRecentChat, webinarsDb } from "@/server/webinars/room-queries";
 import { badRequest, guardRoomRequest, loadRoomContextFor, offsetMsFieldSchema, ok, parseRoomBody, recordAfterReply, roomErrorResponse, type RouteContext } from "@/server/webinars/room-route";
 import { postStudentChat, removeStudentChat } from "@/server/webinars/room-writes";
 import { webinarAssistantEnabled } from "@/server/webinars/v4-env";
@@ -9,7 +9,9 @@ import { WEBINARS_FEATURE } from "@/server/licensing/features";
 import { licenseRouteRefusal } from "@/server/licensing/guards";
 
 // O chat da Sala (docs/30 §5.1, §6.6 e §8.5). GET ?sessao=&from=&to= devolve a janela por offset (a linha mestre ja
-// deslocada pela ancora + as linhas da sessao, as pendentes so do proprio aluno); GET ?sessao=&since=&after= devolve as
+// deslocada pela ancora + as linhas da sessao, as pendentes so do proprio aluno); GET ?sessao=&before= devolve o
+// historico de quem entra na Live ao vivo (as 200 ultimas mensagens da sessao antes daquele offset, nunca alem de
+// agora; vazio na gravada e no replay: teste do produtor de 13/11/2026); GET ?sessao=&since=&after= devolve as
 // mensagens novas da sessao depois do cursor (a consulta de 5 s) e o proximo cursor; com &tela=<carimbo>, leva tambem
 // `screen`, o estado da Na tela, so quando o carimbo da sessao mudou (nulo quando e igual, sem `tela` e no Replay; o
 // estado vem da memoria do processo, screen-queries.ts). POST { sessionId, body, kind,
@@ -47,7 +49,9 @@ export async function GET(request: Request, context: RouteContext) {
   }
   const query = parsed.data;
   const windowMode = query.from !== undefined && query.to !== undefined;
-  if (!windowMode && query.since === undefined) {
+  // O historico de quem entra na Live ao vivo: so `before`, sem janela nem cursor.
+  const backlogMode = !windowMode && query.since === undefined && query.before !== undefined;
+  if (!windowMode && !backlogMode && query.since === undefined) {
     return badRequest();
   }
 
@@ -55,7 +59,9 @@ export async function GET(request: Request, context: RouteContext) {
     const room = await loadRoomContextFor(guarded.userId, guarded.webinarId, query.sessao.toLowerCase());
     const data = windowMode
       ? await readChatWindow(webinarsDb(), room, guarded.userId, { fromMs: query.from as number, toMs: query.to as number })
-      : await readRecentChat(webinarsDb(), room, guarded.userId, { after: query.after ?? null, since: query.since as string }, Date.now(), { stamp: query.tela });
+      : backlogMode
+        ? await readChatBacklog(webinarsDb(), room, guarded.userId, { beforeMs: query.before as number })
+        : await readRecentChat(webinarsDb(), room, guarded.userId, { after: query.after ?? null, since: query.since as string }, Date.now(), { stamp: query.tela });
     return ok(data);
   } catch (error) {
     return roomErrorResponse(error, "Não foi possível ler o chat.");

@@ -12,6 +12,12 @@ export { ROOM_OPENS_MINUTES_BEFORE };
 /** Quanto do chat anterior quem entra atrasado recebe de uma vez (depois, so a janela a frente). */
 export const CHAT_BACKLOG_SECONDS = 300;
 
+/**
+ * Na Live ao vivo, quem entra (ou volta) recebe tambem o que ja foi dito antes dessa janela: as ultimas mensagens da
+ * sessao, de uma vez (teste do produtor de 13/11/2026: o aluno que saiu e voltou perdia o chat de antes dos 5 min).
+ */
+export const CHAT_BACKLOG_MESSAGES = 200;
+
 export type SessionClock = Pick<WebinarSession, "kind" | "recordingAnchorAt" | "scheduledAt" | "startedAt">;
 
 /**
