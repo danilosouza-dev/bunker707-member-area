@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePanelMotion } from "@/components/member/webinars/room/use-panel-motion";
 import { useConsoleAnswerAuthor, useConsolePanelOpen, useConsoleTheme, useConsoleThumbs } from "@/components/member/webinars/room/use-room-prefs";
 import { Button } from "@/components/ui/button";
-import type { ActionResult } from "@/lib/action-result";
+import { settleAction, type ActionResult } from "@/lib/action-result";
 import type { LiveEmbedLook } from "@/lib/jitsi-room-config";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
@@ -286,7 +286,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
       return false;
     }
 
-    const result = await markRecordingAnchor({ sessionId });
+    const result = await settleAction(() => markRecordingAnchor({ sessionId }));
 
     if (!result.ok) {
       setFailure({ message: result.error, status: result.status });
@@ -490,7 +490,11 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     };
   }, [refresh, sessionId]);
 
-  /** Roda uma acao da mesa: banner no erro, retrato novo no sucesso. Devolve se deu certo. */
+  /**
+   * Roda uma acao da mesa: banner no erro, retrato novo no sucesso. Devolve se deu certo. O pedido que fica sem
+   * resposta (a rede caiu, o app reiniciou) vira erro comum pelo settleAction: a mesa nunca fica presa em "ocupada"
+   * com o Encerrar desligado.
+   */
   async function run<T>(key: string, action: () => Promise<ActionResult<T>>, onOk?: (data: T) => void): Promise<boolean> {
     if (busyKey) {
       return false;
@@ -498,7 +502,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
 
     setBusyKey(key);
     setFailure(null);
-    const result = await action();
+    const result = await settleAction(action);
     setBusyKey(null);
 
     if (!result.ok) {
@@ -739,7 +743,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     setBusyKey("script:comment");
     setFailure(null);
     const payload = { ...input, sessionId };
-    const result = mode === "send" ? await sendScriptedComment(payload) : await saveScriptComment(payload);
+    const result = mode === "send" ? await settleAction(() => sendScriptedComment(payload)) : await settleAction(() => saveScriptComment(payload));
     setBusyKey(null);
     if (result.ok) {
       const question = input.kind === "question";
@@ -762,7 +766,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     }
     setBusyKey("script:persona");
     setFailure(null);
-    const result = await savePersona({ avatarPath: draft.avatarPath, id: draft.id ?? null, name: draft.name, role: draft.role, webinarId: webinar.id });
+    const result = await settleAction(() => savePersona({ avatarPath: draft.avatarPath, id: draft.id ?? null, name: draft.name, role: draft.role, webinarId: webinar.id }));
     setBusyKey(null);
     if (result.ok) {
       adminToast.success(result.data.created ? pessoasCopy.avisos.criada(result.data.persona.name) : pessoasCopy.avisos.salva);
@@ -781,7 +785,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     }
     setBusyKey("script:persona");
     setFailure(null);
-    const result = await deletePersona({ id: persona.id, webinarId: webinar.id });
+    const result = await settleAction(() => deletePersona({ id: persona.id, webinarId: webinar.id }));
     setBusyKey(null);
     if (result.ok) {
       adminToast.success(pessoasCopy.avisos.removida(persona.name));
@@ -805,7 +809,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     }
     setBusyKey("poll:create");
     setFailure(null);
-    const result = await createConsolePoll({ ...input, launch, sessionId });
+    const result = await settleAction(() => createConsolePoll({ ...input, launch, sessionId }));
     setBusyKey(null);
     if (result.ok) {
       if (result.data.launchError) {
@@ -830,7 +834,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     }
     setBusyKey(`screen:${itemId}`);
     setFailure(null);
-    const result = await archiveScreenItem({ id: itemId });
+    const result = await settleAction(() => archiveScreenItem({ id: itemId }));
     setBusyKey(null);
     if (result.ok) {
       adminToast.success(naTelaCopy.avisos.excluido);
@@ -851,7 +855,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
 
     setBusyKey("screen:save");
     setFailure(null);
-    const saved = await saveScreenItem(input);
+    const saved = await settleAction(() => saveScreenItem(input));
 
     if (!saved.ok) {
       setBusyKey(null);
@@ -859,7 +863,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     }
 
     if (show) {
-      const shown = await showScreenItem({ itemId: saved.data.item.id, sessionId });
+      const shown = await settleAction(() => showScreenItem({ itemId: saved.data.item.id, sessionId }));
 
       if (shown.ok) {
         adminToast.success(naTelaCopy.avisos.naTela);
