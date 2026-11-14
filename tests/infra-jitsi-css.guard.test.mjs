@@ -110,7 +110,7 @@ test("montagem e smoke: a folha no nginx do web (somente leitura), servida em /c
   assert.match(smoke, /css_sha=\$\(sha256sum "\$css_file" \| cut -c1-64\); css_v=\$\{css_sha:0:8\}/, "o smoke calcula o v pela folha do commit");
   assert.match(smoke, /check "css\/bunker707\.css[^"]*" 200 "\$public_url\/css\/bunker707\.css"/, "o smoke confere que a folha e servida");
   assert.match(smoke, /served_sha=\$\(curl [^\n]*"\$public_url\/css\/bunker707\.css\?v=\$css_v"[^\n]*\| sha256sum/, "e que a servida e a do commit");
-  assert.match(smoke, /"css\/bunker707\.css\?v=\$css_v"; do/, "e que o config.js servido traz o carregador com o v atual");
+  assert.match(smoke, /"css\/bunker707\.css\?v=\$css_v"[^\n]*; do/, "e que o config.js servido traz o carregador com o v atual");
   const deploy = read(join(here, "..", "infra", "cloud", "deploy.sh"));
   assert.match(deploy, /up -d --force-recreate --no-deps web"\n\s+remote "\$jitsi_compose up -d && /, "o web e recriado no deploy-meet com o stack no ar: o config.js servido so muda na partida dele");
 });

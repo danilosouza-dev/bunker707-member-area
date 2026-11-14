@@ -19,6 +19,7 @@ import {
   cameraRequestUnanswered,
   columnWanted,
   consentForVideoSignal,
+  createRoomLeave,
   declineMic,
   DEVICE_SWITCH_KINDS,
   deviceSwitchCheck,
@@ -65,6 +66,7 @@ import {
   type LiveNotice,
   type LiveSignalState,
   type MicAsk,
+  type RoomLeave,
   type SwitchGate
 } from "./live-room-model";
 import { beaconRoomEvents, postJoinToken, postRoomEvents, retryAfterOf } from "./room-api";
@@ -300,8 +302,14 @@ export type LiveRoomController = {
   enter: () => void;
   entry: LiveEntry;
   /** Sair: o iframe sai (hangup) e o que sobrou da fila vai pelo sendBeacon. */
-  hangUp: () => void;
+  /**
+   * Sai da sala. O iframe so sai da pagina depois que o motor de video avisa a saida (ou no prazo de
+   * ROOM_LEAVE_WAIT_MS); `onGone` roda nessa hora (o Sair troca de pagina ali). Docs/30 D122.
+   */
+  hangUp: (onGone?: () => void) => void;
   jitsiStatus: JitsiStatus;
+  /** Uma mensagem para a pagina do iframe (o postToFrame do useJitsiMeet): a lista dos participantes simulados (D120). */
+  postToFrame: (message: unknown) => boolean;
   reply: JoinTokenReply | null;
   retryNow: () => void;
   /** O aviso saiu da tela (o tempo acabou, outro tomou o lugar ou a acao foi usada): o mesmo aviso pode voltar. */
@@ -433,6 +441,8 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     }, ms);
     timersRef.current.add(id);
   }, []);
+  /** A espera da despedida do motor de video no Sair (createRoomLeave; nasce no primeiro Sair). */
+  const leaveWaitRef = useRef<RoomLeave | null>(null);
 
   const refuse = useCallback((failure: Exclude<LiveJoinFailure, "error">) => {
     droppingRef.current = false;
@@ -592,6 +602,10 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
   const onEvent = useCallback(
     (name: JitsiListenedEvent, payload: unknown) => {
       if (leavingRef.current) {
+        // Saindo pelo Sair: o aviso de saida do motor solta o iframe (docs/30 D122); nenhum outro sinal vale mais.
+        if (name === "videoConferenceLeft" || name === "readyToClose") {
+          leaveWaitRef.current?.gone();
+        }
         return;
       }
       // O mudo de um iframe antes da entrada dele (o startWithAudioMuted aplicado na chegada, base/media de falso para
@@ -880,6 +894,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
 
   const enter = useCallback(() => {
     leavingRef.current = false;
+    leaveWaitRef.current?.cancel();
     droppingRef.current = false;
     setEntry("opening");
     postJoinToken(webinarId, sessionId)
@@ -909,17 +924,33 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     enter();
   }, [enter]);
 
-  const hangUp = useCallback(() => {
+  const hangUp = useCallback((onGone?: () => void) => {
     leavingRef.current = true;
     micAskRef.current = null;
-    // A saida do proprio aluno vira o sinal de saida da sala (o iframe desmonta antes de avisar) e vai pelo beacon.
+    const leaveWait = leaveWaitRef.current ?? createRoomLeave(later);
+    leaveWaitRef.current = leaveWait;
+    const finish = () => {
+      setEntry("idle");
+      onGone?.();
+    };
+    if (leaveWait.pending()) {
+      // Um segundo Sair com a saida a caminho: nada e pedido de novo, so a continuacao troca.
+      leaveWait.start({ finish, wait: true });
+      return;
+    }
+    // A saida do proprio aluno vira o sinal de saida da sala (a pagina nao espera o aviso do iframe para contar) e vai
+    // pelo beacon.
     if (joinedRef.current) {
       pushEvent(toRoomEvent("videoConferenceLeft", {}, { nowIso: new Date().toISOString(), ownId: ownIdRef.current }));
     }
-    commandRef.current("hangup");
+    // Este iframe esta dentro da sala de video: ele fica na pagina ate o motor avisar a saida ao servidor da sala (ou
+    // ate o prazo). Tirado antes, o servidor guardava a conexao por 1 min e a miniatura ficava para todos (D122).
+    const frame = meetApiRef.current?.current ?? null;
+    const inConference = frame !== null && joinedApiRef.current === frame;
+    const asked = commandRef.current("hangup");
     beaconQueue();
-    setEntry("idle");
-  }, [beaconQueue, pushEvent]);
+    leaveWait.start({ finish, wait: asked && inConference });
+  }, [beaconQueue, later, pushEvent]);
 
   const toggleHand = useCallback(() => {
     if (commandRef.current("toggleRaiseHand")) {
@@ -1134,6 +1165,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomController {
     jitsiStatus: jitsi.status,
     notice,
     pendingToggle,
+    postToFrame: jitsi.postToFrame,
     reply,
     retryNow,
     setView,

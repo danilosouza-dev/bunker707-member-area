@@ -183,6 +183,64 @@ test("janela do chat: a linha mestre vem deslocada pela ancora (100 s na live = 
   assert.deepEqual(repetida.body.data.next, novas.body.data.next, "o cursor se mantem");
 });
 
+test("o historico de quem entra na Live ao vivo (?before=): as ultimas mensagens da sessao antes do ponto, no maximo 200, em ordem, sem as apagadas nem a pendente de outro; vazio na gravada", async () => {
+  // Teste do produtor de 13/11/2026: o aluno que saiu e voltou so recebia os 5 min da primeira janela e perdia o chat de antes.
+  const { db, userId } = montar({ kind: "live", scheduledAt: Date.now() - 40 * MIN, status: "live" });
+  Object.assign(db.tables.webinar_sessions.find((row) => row.id === SESSION), { kind: "live", recording_id: null, source_session_id: null, started_at: iso(Date.now() - 30 * MIN), status: "live" });
+  db.tables.webinar_chat_messages.length = 0;
+  const linha = (n, offsetMs, extra = {}) => ({
+    approved: true, author_user_id: "11111111-1111-4111-8111-111111111112", body: `mensagem ${n}`, created_at: iso(Date.now() - 30 * MIN + offsetMs), deleted_at: null, display_name: "Bia C.",
+    id: `dddddddd-aaaa-4000-8000-${String(n).padStart(12, "0")}`, kind: "message", master: false, offset_ms: offsetMs, pinned_at: null, reply_to_id: null, role: "student", script_item_id: null,
+    session_id: SESSION, source: "audience", webinar_id: WEBINAR, ...extra
+  });
+  db.tables.webinar_chat_messages.push(
+    linha(1, -2 * MIN, { body: "na espera, antes de começar" }),
+    linha(2, 4 * MIN),
+    linha(3, 5 * MIN, { deleted_at: iso(Date.now() - 20 * MIN) }),
+    linha(4, 6 * MIN, { approved: false }),
+    linha(5, 7 * MIN, { approved: false, author_user_id: userId, body: "minha pendente", display_name: "Ana S." }),
+    linha(6, 24 * MIN),
+    linha(7, 26 * MIN, { body: "ja dentro da primeira janela" }),
+    linha(8, 5 * MIN, { body: "de outra sessao", session_id: OTHER_SESSION })
+  );
+  // A primeira janela de quem entra aos 30 min comeca aos 25: o historico vem do que ha antes dela.
+  const antes = 25 * MIN;
+  const answer = await json(await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${SESSION}&before=${antes}`), contexto()));
+  assert.equal(answer.status, 200, JSON.stringify(answer.body));
+  assert.equal(answer.body.data.mode, "backlog");
+  assert.deepEqual(
+    answer.body.data.messages.map((message) => [message.body, message.offsetMs, message.pending, message.mine]),
+    [
+      ["na espera, antes de começar", -2 * MIN, false, false],
+      ["mensagem 2", 4 * MIN, false, false],
+      ["minha pendente", 7 * MIN, true, true],
+      ["mensagem 6", 24 * MIN, false, false]
+    ],
+    "em ordem; sem a apagada, sem a pendente de outro, sem a de outra sessao e sem o que ja esta na primeira janela"
+  );
+  assert.equal(answer.headers?.get?.("cache-control") ?? "private, no-store, max-age=0", "private, no-store, max-age=0");
+
+  // Nunca alem de agora, mesmo com um `before` la na frente; e no maximo 200, as mais novas.
+  for (let n = 100; n < 330; n += 1) db.tables.webinar_chat_messages.push(linha(n, 10 * MIN + n * 1000));
+  db.tables.webinar_chat_messages.push(linha(999, 90 * MIN, { body: "do futuro" }));
+  const muitas = await json(await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${SESSION}&before=${120 * MIN}`), contexto()));
+  assert.equal(muitas.body.data.messages.length, 200);
+  assert.equal(muitas.body.data.messages.some((message) => message.body === "do futuro"), false, "o que ainda nao aconteceu nunca sai");
+  const offsets = muitas.body.data.messages.map((message) => message.offsetMs);
+  assert.deepEqual(offsets, [...offsets].sort((a, b) => a - b), "na ordem do relogio");
+  assert.equal(muitas.body.data.messages.at(-1).body, "ja dentro da primeira janela", "as mais novas ficam");
+  assert.equal(db.calls.writes?.length ?? 0, 0, "o historico so le");
+
+  assert.equal((await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${SESSION}&before=abc`), contexto())).status, 400);
+
+  // Na gravada (e no replay) o chat aparece no segundo dele: sem historico.
+  montar();
+  const gravada = await json(await chatRoute.GET(pedido(`${WEBINAR}/chat?sessao=${SESSION}&before=${200_000}`), contexto()));
+  assert.equal(gravada.status, 200);
+  assert.deepEqual(gravada.body.data.messages, []);
+  assert.equal(gravada.body.data.mode, "backlog");
+});
+
 test("janela do chat na gravada: nunca passa da janela a frente do relogio do servidor (o chat original de depois de agora fica para depois); no replay, ate onde o aluno pedir", async () => {
   const { db } = montar();
   // A sessao gravada esta no minuto 10 (600 s); a linha mestre do minuto 15 (900 s no video) ainda nao pode sair.

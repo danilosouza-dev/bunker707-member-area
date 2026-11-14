@@ -74,6 +74,8 @@ const replayOffsetSchema = offsetSchema.optional();
  */
 export const chatWindowQuerySchema = z.object({
   after: uuidSchema.optional(),
+  // O historico de quem entra na Live ao vivo: as ultimas mensagens da sessao antes deste offset (docs/30 §5.1).
+  before: z.coerce.number().int().min(CHAT_LIMITS.offsetMinMs).max(CHAT_LIMITS.offsetMaxMs).optional(),
   from: z.coerce.number().int().min(CHAT_LIMITS.offsetMinMs).max(CHAT_LIMITS.offsetMaxMs).optional(),
   sessao: sessionIdSchema,
   since: z.iso.datetime({ offset: true }).optional(),
