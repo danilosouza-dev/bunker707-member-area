@@ -234,13 +234,50 @@ test("o arquivo do gravador nunca le nada alem da senha do proprio Jibri e nunca
   assert.match(fonte, /nome \+ '\\n' \+ arquivo \+ '\\n' \+ n \+ '\\n' \+ ts \+ '\\n' \+ resumo/, "o mesmo texto que o receptor assina");
 });
 
+test("o comando que liga as amostras de CPU volta na hora e deixa o laco rodando (o jibri-up de 15/11/2026 parou nele)", async () => {
+  // O SSH so devolve o controle quando ninguem mais segura a saida do comando remoto. Roda o mesmo texto do jibri.sh num
+  // bash com a saida num cano, como o sshd faz: o cano tem de fechar logo, com o laco das amostras vivo.
+  const comando = /rsh "\$target" "(cd '\$JIBRI_REMOTE_DIR' && [^\n]*cpu-amostras\.sh[^\n]*?)" \|\| true/.exec(read("infra/cloud/jibri.sh"))?.[1];
+  assert.ok(comando, "o jibri.sh liga as amostras pelo rsh");
+  const pasta = mkdtempSync(join(tmpdir(), "amostras-"));
+  writeFileSync(join(pasta, "cpu-amostras.sh"), 'echo $$ > "$(dirname "$0")/pid"\nwhile :; do sleep 1; done\n');
+  try {
+    const inicio = Date.now();
+    const filho = spawn("bash", ["-c", comando.replaceAll("$JIBRI_REMOTE_DIR", pasta)], { stdio: ["ignore", "pipe", "pipe"] });
+    filho.stdout.resume();
+    filho.stderr.resume();
+    const fechou = await new Promise((resolve) => {
+      const prazo = setTimeout(() => resolve(false), 5_000);
+      filho.on("close", () => {
+        clearTimeout(prazo);
+        resolve(true);
+      });
+    });
+    const passou = Date.now() - inicio;
+    let pid = "";
+    for (let i = 0; i < 50 && !pid; i += 1) {
+      pid = existsSync(join(pasta, "pid")) ? readFileSync(join(pasta, "pid"), "utf8").trim() : "";
+      if (!pid) await new Promise((r) => setTimeout(r, 100));
+    }
+    const vivo = Boolean(pid) && spawnSync("kill", ["-0", pid]).status === 0;
+    // Limpa antes de conferir: com a saida presa, o laco e o cano segurariam o processo do teste.
+    if (pid) spawnSync("kill", [pid]);
+    filho.stdout.destroy();
+    filho.stderr.destroy();
+    assert.ok(fechou && passou < 5_000, "a saida continuou presa: o rsh do jibri-up nunca voltaria");
+    assert.ok(vivo, "o laco das amostras comecou e continua rodando depois que o comando voltou");
+  } finally {
+    rmSync(pasta, { force: true, recursive: true });
+  }
+});
+
 test("a CPU do gravador: as amostras a cada 5 s no host e o resumo de 30 s que o finalize.sh manda no aviso de fim", () => {
   const amostras = join(root, "infra/jitsi/jibri/cpu-amostras.sh");
   assert.ok((statSync(amostras).mode & 0o111) !== 0);
   assert.equal(spawnSync("sh", ["-n", amostras]).status, 0);
   const jibri = read("infra/cloud/jibri.sh");
   assert.match(jibri, /rcopy "\$JITSI_DIR\/jibri\/cpu-amostras\.sh"/);
-  assert.match(jibri, /setsid nohup sh \.\/cpu-amostras\.sh >\/dev\/null 2>&1 < \/dev\/null &" \|\| true/, "fora do SSH, e uma falha nunca impede a gravacao");
+  assert.match(jibri, /\{ setsid nohup sh \.\/cpu-amostras\.sh >\/dev\/null 2>&1 < \/dev\/null & \}" \|\| true/, "fora do SSH, e uma falha nunca impede a gravacao");
   assert.ok(jibri.indexOf("cpu-amostras.sh >/dev/null") > jibri.indexOf("docker compose up -d\""), "depois de subir o gravador");
 
   const finalize = read("infra/jitsi/jibri/finalize.sh");
