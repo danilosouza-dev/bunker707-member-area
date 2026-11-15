@@ -287,7 +287,9 @@ services:
       PECAS_SEGREDO: "${JIBRI_RECORDER_PASSWORD}"
       PYTHONDONTWRITEBYTECODE: "1"
     volumes:
-      - ./pecas/receptor.py:/app/receptor.py:ro
+      # A pasta (o receptor, a previa.html e o previa.js da equipe): o deploy troca os arquivos por novos, e a montagem
+      # de um arquivo so continuaria presa ao de antes (a mesma licao do Caddyfile, docs/20 §8B.10).
+      - ./pecas:/app:ro
       - ./volumes/pecas:/dados
     networks:
       meet.jitsi:
