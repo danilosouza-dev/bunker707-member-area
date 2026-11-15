@@ -178,7 +178,8 @@ up() {
     rcopy "$JITSI_DIR/jibri/docker-compose.yml" "$target:$JIBRI_REMOTE_DIR/docker-compose.yml"
     rcopy "$JITSI_DIR/jibri/finalize.sh" "$target:$JIBRI_REMOTE_DIR/finalize.sh"
     rcopy "$JITSI_DIR/scripts/jibri-status.sh" "$target:$JIBRI_REMOTE_DIR/jibri-status.sh"
-    rsh "$target" "chmod 755 '$JIBRI_REMOTE_DIR/finalize.sh' '$JIBRI_REMOTE_DIR/jibri-status.sh'; [ -f '$envj' ] || { umask 077; cat > '$envj'; }" < "$JITSI_DIR/jibri/.env.example"
+    rcopy "$JITSI_DIR/jibri/cpu-amostras.sh" "$target:$JIBRI_REMOTE_DIR/cpu-amostras.sh"
+    rsh "$target" "chmod 755 '$JIBRI_REMOTE_DIR/finalize.sh' '$JIBRI_REMOTE_DIR/jibri-status.sh' '$JIBRI_REMOTE_DIR/cpu-amostras.sh'; [ -f '$envj' ] || { umask 077; cat > '$envj'; }" < "$JITSI_DIR/jibri/.env.example"
     set_env "$target" "$envj" JITSI_IMAGE_REPO "$image_repo"
     set_env "$target" "$envj" JITSI_IMAGE_VERSION "$image_version"
     set_env "$target" "$envj" TZ UTC
@@ -211,6 +212,9 @@ up() {
 
     log "5/6 Subindo o gravador e esperando a saude"
     rsh "$target" "cd '$JIBRI_REMOTE_DIR' && docker compose up -d"
+    # A CPU da maquina a cada 5 s, para o finalize.sh mandar o resumo junto com o aviso de fim (docs/30 A62). Fora do
+    # SSH (setsid): continua depois que a conexao fecha. Uma falha aqui nunca impede a gravacao.
+    rsh "$target" "cd '$JIBRI_REMOTE_DIR' && setsid nohup sh ./cpu-amostras.sh >/dev/null 2>&1 < /dev/null &" || true
     local healthy="" i out=""
     for i in $(seq 60); do
         out=$(rsh "$target" "cd '$JIBRI_REMOTE_DIR' && $HEALTH_CMD 2>/dev/null" || true)

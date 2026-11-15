@@ -14,7 +14,13 @@ import { fetchSessionSimulationFeed } from "./simulation-store";
 // que comentam (a da escola, D117) e uma dos itens do roteiro deste webinario (quem comenta aqui vem antes das outras
 // pessoas da escola); a conta e de audience-tiles-model.ts. A turma inteira pede a lista ao entrar e a cada mudanca da
 // decisao: a resposta fica 30 s na memoria do processo por sessao (a pessoa criada ou a foto trocada no console chega
-// em ate 30 s). So a Live ao vivo: a Live gravada nao tem o motor de video.
+// em ate 30 s). A Live ao vivo manda a lista ao motor de video, que desenha as miniaturas; a Live gravada (desde
+// 14/11/2026, D124) desenha a coluna pela propria pagina, ao lado do video. O Replay nunca.
+
+/** As sessoes com miniaturas simuladas: a Live ao vivo (o motor desenha, D120) e a Live gravada (a pagina desenha, D124). */
+export function audienceTilesKind(kind: WebinarSession["kind"]): boolean {
+  return kind === "live" || kind === "simulated";
+}
 
 /** Quanto a lista de uma sessao vale na memoria do processo. */
 export const AUDIENCE_TILES_CACHE_MS = 30_000;
@@ -47,13 +53,13 @@ async function loadScriptPersonaIds(db: WebinarsDb, webinarId: string): Promise<
 }
 
 /**
- * A lista dos simulados da sessao, ou desligado com a lista vazia: sessao que nao e a Live ao vivo, cancelada ou
- * encerrada, sem a decisao registrada (§8.6), sem participantes simulados possiveis, sem a linha, ou banco sem as
+ * A lista dos simulados da sessao, ou desligado com a lista vazia: o Replay (so a Live ao vivo e a Live gravada tem
+ * miniaturas, D120 e D124), sessao cancelada ou encerrada, sem a decisao registrada (§8.6), sem participantes simulados possiveis, sem a linha, ou banco sem as
  * colunas da Simulacao. Banco sem a lista de pessoas (202611140001): so os nomes genericos.
  * A lista de pessoas e a da escola inteira (D117); `webinarId` so decide quem vem primeiro (quem comenta neste roteiro).
  */
 export async function loadAudienceTiles(db: WebinarsDb, input: { session: Pick<WebinarSession, "id" | "kind">; webinarId: string }, nowMs: number = Date.now()): Promise<AudienceTilesFeed> {
-  if (input.session.kind !== "live") {
+  if (!audienceTilesKind(input.session.kind)) {
     return NO_AUDIENCE_TILES;
   }
   const cached = memory.get(input.session.id);

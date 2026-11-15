@@ -788,6 +788,31 @@ Antes de cada live: **Testar sala** no console (com a sessao ainda agendada, o A
 sessao sem os alunos) e, com o gravador pedido, conferir que o cartao Gravacao chega a **Pronto**. Durante: o console
 mostra a maquina ligada ha quanto tempo e a ancora da gravacao.
 
+### 8B.10 O teste das pecas da Live gravada (plano A, `docs/30` A62; 15/11/2026)
+
+O que roda: no gravador, `infra/jitsi/web/bunker707-pecas.js` (carregado pelo `custom-config.js` so com
+`config.iAmRecorder=true`) grava a camera com o audio e a tela de quem apresenta em pecas separadas e manda os pedacos,
+assinados com a senha do usuario do gravador, ao receptor do C (servico `pecas`, `infra/jitsi/pecas/receptor.py`, atras
+do Caddy em `https://meet.<dominio>/pecas/`). So nas salas dos webinarios listados em
+`infra/jitsi/volumes/pecas/ativas.txt` (fora do git; vazio ou ausente: nada). Os 2 primeiros minutos do gravador na
+sala sao a base, sem as pecas. A gravacao de sempre do Jibri nao muda. No gravador, `cpu-amostras.sh` anota a CPU a
+cada 5 s e o `finalize.sh` manda o resumo no aviso de fim (o campo `cpu`, guardado cru em
+`webinar_recording_events.payload`), em toda gravacao.
+
+Ligar um webinario (sem reiniciar nada; o receptor le a lista a cada pedido):
+`exec-meet` com `cd infra/jitsi && echo <id do webinario> >> volumes/pecas/ativas.txt && cat volumes/pecas/ativas.txt`.
+
+Depois da live de teste, os resultados:
+
+- as pecas e as medidas: `exec-meet` com `cd infra/jitsi/volumes/pecas && ls -la */ && tail -n 3 */metricas.jsonl && cat */linha-do-tempo.jsonl`;
+- a duracao e os quadros das pecas: `exec-meet` com `docker run --rm -v "$PWD/infra/jitsi/volumes/pecas:/d:ro" alpine:3.22 sh -c 'apk add -q ffmpeg >/dev/null && for f in /d/*/*.webm; do echo "$f"; ffprobe -v error -show_entries format=duration -of csv=p=0 "$f"; done'`;
+- a CPU do gravador: `exec-membros` com `cd /opt/bunker707 && docker compose -f infra/compose/docker-compose.yml exec -T db psql -U postgres -At -c "select created_at, payload->'cpu' from webinar_recording_events where state = 'uploaded' order by created_at desc limit 1"`.
+
+Desligar e limpar: tirar o id de `ativas.txt` e `exec-meet` com `rm -rf infra/jitsi/volumes/pecas/w-*` (os arquivos
+ficam no disco do C, 40 GB, ate isso; o receptor recusa acima de 8 GB por sala e com menos de 4 GB livres). O
+`deploy-meet` recarrega o Caddy depois do `up -d` (a rota `/pecas/` so existe com o Caddyfile novo) e o `smoke.sh`
+confere o arquivo servido e o receptor (`/pecas/ativo` responde 204 ou 404; 502 seria o servico fora do ar).
+
 ## 8C. Emissor de licencas: o servidor `bunker707-licencas` (10/11/2026)
 
 O desenho esta no `docs/32` (§10, §11.2 e D39; o codigo, no repositorio privado `bunker-licensing`); aqui fica so a

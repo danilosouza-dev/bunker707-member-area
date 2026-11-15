@@ -14,6 +14,8 @@ import { roomMediaLessonId } from "@/lib/webinar-room-client";
 // palco leva os mesmos atributos do palco da aula (data-lesson-player-stage etc.): o sinal de midia (lesson-media-signal)
 // enxerga o player e o pop-up nunca abre com ele tocando. O iframe nunca desmonta ao girar o aparelho (o som continua).
 // Abaixo de lg deitado o palco deixa o 16:9 e ocupa a caixa, como no computador (roomSkeleton, docs/31 V2-18).
+// O iframe desconta a direita do palco (--room-video-right): a coluna de miniaturas da Live gravada (docs/30 D124) fica
+// ao lado do video, nunca por cima dele; sem a coluna, a variavel e 0 e o video ocupa a largura toda.
 
 export type RoomStageState = "ended" | "live" | "replay" | "unavailable" | "waiting";
 
@@ -62,7 +64,7 @@ export function RoomStage({ countdownLabel, coverUrl, embedUrl, iframeRef, muted
         <iframe
           allow={state === "replay" ? "autoplay; encrypted-media; fullscreen; picture-in-picture" : "autoplay; encrypted-media"}
           allowFullScreen={state === "replay"}
-          className="absolute inset-0 size-full border-0"
+          className="absolute inset-y-0 left-0 h-full w-[calc(100%-var(--room-video-right,0px))] border-0"
           loading="eager"
           ref={iframeRef}
           referrerPolicy="strict-origin-when-cross-origin"

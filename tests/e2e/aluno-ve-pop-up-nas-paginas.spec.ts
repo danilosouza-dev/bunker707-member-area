@@ -20,6 +20,7 @@ import {
   zerarProgressoDosAlunos
 } from "./fixtures";
 import { ESCOLA_DE_TESTE } from "../fixtures/escola-de-teste.mjs";
+import { popupDayBounds } from "../../src/server/communications/popup-display-model";
 
 // Pop-ups com paginas, momentos, frequencia e "Como fechar" no navegador (docs/25 §1 e §8; docs/18 §3.1).
 // Cada grupo publica os seus pop-ups pela tela do produtor (publicarPopUp: a publicacao renova a lista de
@@ -172,6 +173,7 @@ test.describe("em qualquer página, menos Perfil, com 1 minuto entre uma vez e o
 
     // 1 minuto depois: o navegador adianta o relogio e o banco volta a abertura no tempo (o servidor usa a
     // hora de verdade). Na proxima pagina ele aparece de novo.
+    const primeira = Date.parse((await estadoDoPopUpDaAluna(TITULO))?.lastSeenAt ?? "") - 65_000;
     expect(await envelhecerPopup(id, aluna.id, 65 / 3_600)).toBe(1);
     await page.clock.fastForward("01:05");
     await irPeloMenu(page, "Materiais", "/materiais");
@@ -179,7 +181,11 @@ test.describe("em qualquer página, menos Perfil, com 1 minuto entre uma vez e o
     expect(resumos.total).toBe(1);
     expect(aberturas.total).toBe(1);
     await expect.poll(async () => (await estadoDoPopUpDaAluna(TITULO))?.impressions ?? 0).toBe(2);
-    expect((await estadoDoPopUpDaAluna(TITULO))?.dayImpressions).toBe(2);
+    // As vezes do dia contam pelo dia de Sao Paulo: quando a meia-noite de Brasilia (03:00 UTC) cai entre a
+    // primeira abertura (voltada 65 s) e a segunda, o dia novo comeca em 1 (o CI de 15/11/2026 rodou na virada).
+    const segunda = await estadoDoPopUpDaAluna(TITULO);
+    const mesmoDia = primeira >= popupDayBounds(Date.parse(segunda?.lastSeenAt ?? "")).start;
+    expect(segunda?.dayImpressions).toBe(mesmoDia ? 2 : 1);
     await popUp.getByRole("button", { name: "Fechar" }).click();
     await expect(popUp).toHaveCount(0);
   });
