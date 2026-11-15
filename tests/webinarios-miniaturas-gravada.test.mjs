@@ -76,11 +76,16 @@ test("o video da gravada desconta a coluna: a mesma folga da coluna do motor na 
   assert.match(palco, /className="absolute inset-y-0 left-0 h-full w-\[calc\(100%-var\(--room-video-right,0px\)\)\] border-0"/, "o iframe com a largura descontada (um iframe nao estica entre left e right)");
 });
 
+test("a coluna esta pronta e desligada ate a entrega 2 do plano A (A62): ligada antes, uma gravacao com as miniaturas no video mostraria duas plateias", () => {
+  const coluna = semComentarios(ler("src/components/member/webinars/room/room-audience-column.tsx"));
+  assert.match(coluna, /export const RECORDED_AUDIENCE_COLUMN = false;/);
+});
+
 test("a ligacao na sala: so a Live gravada com a Simulacao ligada e o video no ar, no computador e no desenho normal", () => {
   const sala = semComentarios(ler("src/components/member/webinars/room/webinar-room.tsx"));
   assert.match(
     sala,
-    /const audienceOn = !readOnly && !unavailable && kind === "simulated" && phase === "live" && !vertical && desktop && simulation\.enabled === true;/,
+    /const audienceOn = RECORDED_AUDIENCE_COLUMN && !readOnly && !unavailable && kind === "simulated" && phase === "live" && !vertical && desktop && simulation\.enabled === true;/,
     "nunca no Replay, no ver como, fora do acesso, antes do comeco, no celular nem sem Simulacao"
   );
   assert.match(sala, /const audienceRoster = useRoomAudience\(\{ enabled: audienceOn, sessionId, simulationKey: naTela\.simulationKey, webinarId \}\);/, "a mesma lista e o mesmo ritmo da live");

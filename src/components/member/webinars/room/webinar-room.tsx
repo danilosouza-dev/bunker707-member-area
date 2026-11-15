@@ -57,7 +57,7 @@ import { useRoomQuestionNews } from "./use-room-question-news";
 import { RoomReactionBubbles } from "./room-reactions";
 import { RoomSimulationJoins, RoomSimulationSales } from "./room-simulation";
 import { RoomSnackbarHost, RoomSnackbarProvider, useRoomSnackbarController } from "./room-snackbar";
-import { RoomAudienceColumn } from "./room-audience-column";
+import { RECORDED_AUDIENCE_COLUMN, RoomAudienceColumn } from "./room-audience-column";
 import { RoomStage } from "./room-stage";
 import { RoomStageBadges, type RoomStageTopLeft } from "./room-stage-badges";
 import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from "./use-room-data";
@@ -606,13 +606,14 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const countdown = kind === "simulated" ? formatCountdown(zeroMs, nowMs + clock.skewMs) : "";
   /** O numero do contador: o real mais a parte simulada daquele instante (sem Simulacao, o real). */
   const shownCount = simulation.displayCount(presentNow, currentOffsetMs);
-  // A coluna de miniaturas da Live gravada (docs/30 D124): a pagina desenha ao lado do video (gravado sem miniaturas) a
+  // A coluna de miniaturas da Live gravada (docs/30 D124; pronta e desligada ate a entrega 2 do plano A, A62, pela
+  // RECORDED_AUDIENCE_COLUMN): a pagina desenha ao lado do video (gravado sem miniaturas) a
   // miniatura do proprio aluno e os participantes simulados daquele segundo, como o motor desenha na Live ao vivo
   // (D120). So com a Simulacao ligada e o video no ar, no computador e no desenho normal; nunca no Replay, no "ver
   // como" nem fora do acesso. A lista vem da mesma rota da live (GET .../audience), pedida ao entrar, quando a decisao
   // da Simulacao muda e a cada 2 min.
   const desktop = useRoomDesktop();
-  const audienceOn = !readOnly && !unavailable && kind === "simulated" && phase === "live" && !vertical && desktop && simulation.enabled === true;
+  const audienceOn = RECORDED_AUDIENCE_COLUMN && !readOnly && !unavailable && kind === "simulated" && phase === "live" && !vertical && desktop && simulation.enabled === true;
   const audienceRoster = useRoomAudience({ enabled: audienceOn, sessionId, simulationKey: naTela.simulationKey, webinarId });
   const audienceColumn = audienceOn && audienceRoster.length > 0;
   const audienceNow = audienceColumn ? audienceTilesNow(audienceRoster, simulation.displayCount(0, currentOffsetMs)) : audienceRoster;

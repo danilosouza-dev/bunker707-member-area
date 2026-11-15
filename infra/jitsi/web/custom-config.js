@@ -112,3 +112,25 @@ config.localRecording = { disable: false };
     }
 })();
 // bunker707:plateia-loader:fim
+
+// Bunker707: as pecas da Live gravada em teste (docs/30 A62). So no gravador (config.iAmRecorder=true no hash, que o
+// Jibri manda): liga /libs/bunker707-pecas.js, servido por este mesmo nginx (montado em docker-compose.yml). O arquivo
+// so grava alguma coisa na sala de um webinario ligado no receptor do servidor (a lista ativas.txt); fora dela, nada.
+// A gravacao de sempre do Jibri nao muda. Como no carregador acima, o nome da tag nunca aparece escrito com os sinais
+// de menor e maior neste arquivo, nem em comentario.
+// bunker707:pecas-loader:inicio
+(function () {
+    if (typeof document === 'undefined' || typeof window === 'undefined') { return; }
+    try {
+        var hash = String((window.location && window.location.hash) || '');
+        if (!/config\.iAmRecorder=(?:%22|"|%27|')?true\b/.test(hash)) { return; }
+        var script = document.createElement('script');
+        // O v e o comeco do sha256 do arquivo (a guarda da infra confere e diz o valor novo).
+        script.src = '/libs/bunker707-pecas.js?v=3e222c83';
+        script.async = true;
+        (document.head || document.documentElement).appendChild(script);
+    } catch (e) {
+        // Sem o arquivo, o gravador segue como sempre.
+    }
+})();
+// bunker707:pecas-loader:fim
