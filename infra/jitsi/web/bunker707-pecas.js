@@ -13,8 +13,14 @@
  * instante: camera.webm (o canvas da camera + o audio, por uma faixa de WebAudio que existe o tempo todo) e tela.webm.
  * A qualidade recebida e pedida por cima da que a tela do gravador pede (a camera em 720p e a tela em 1080p; sem isso,
  * com a tela no palco, a camera chega em 180p). Os pedacos de 2 s vao em ordem ao receptor (infra/jitsi/pecas), no
- * mesmo endereco da sala, assinados com HMAC-SHA256 pela senha do usuario do gravador, que o proprio Jibri poe no
- * localStorage (xmpp_password_override). Nada de rede para a propria maquina: o Chrome 153 pediria permissao.
+ * mesmo endereco da sala, assinados com HMAC-SHA256 pela senha do usuario do gravador. O Jibri da tag fixada manda essa
+ * senha no endereco da sala (config.useHostPageLocalStorage=true e appData.localStorageContent, com o JSON codificado
+ * duas vezes), e o Jitsi a guarda so na memoria: o localStorage de verdade fica vazio (o teste de 15/11/2026 parou ai,
+ * sem nenhuma peca; docs/20 §8B.10). A senha vem do endereco, como o Jitsi le, e o localStorage fica de reserva. Nada
+ * de rede para a propria maquina: o Chrome 153 pediria permissao.
+ *
+ * Cada passo vai ao receptor (GET /pecas/estado, sem segredo nenhum): na sala, sem senha, base, gravando, parado, e
+ * cada envio recusado com o codigo. Uma falha no gravador de verdade deixa o motivo no log do receptor.
  *
  * O teste: os 2 primeiros minutos na sala sao a base (sem as pecas); depois as pecas e as medidas a cada 5 s
  * (quadros que chegam e que sao desenhados, a altura recebida, o atraso do caminho ate o canvas, a pressao de CPU e a
@@ -35,6 +41,9 @@
     var FPS = 30;
     var enc = new TextEncoder();
     var api = window.__bunker707Pecas;
+    // O endereco como chegou: o carregador do custom-config.js guarda antes de o Jitsi limpar (o hash de agora ja vem
+    // sem as contas); sem ele, o hash deste instante.
+    var enderecoInicial = String(window.__bunker707PecasEndereco || window.location.hash || '');
 
     function hex(buf) {
         return Array.prototype.map.call(new Uint8Array(buf), function (b) { return (b < 16 ? '0' : '') + b.toString(16); }).join('');
@@ -44,6 +53,42 @@
         if (!xs.length) { return null; }
         var s = xs.slice().sort(function (a, b) { return a - b; });
         return Math.round(s[Math.min(s.length - 1, Math.floor(p * s.length))]);
+    }
+
+    // A senha do usuario do gravador: o appData.localStorageContent do endereco (o JSON das contas, codificado mais de uma
+    // vez), como o proprio Jitsi le; sem ele, o localStorage, onde o Jibri de antes a punha.
+    function senhaDoGravador() {
+        var partes = (enderecoInicial + '&' + String(window.location.hash || '')).replace(/^#/, '').split('&');
+        for (var i = 0; i < partes.length; i++) {
+            var igual = partes[i].indexOf('=');
+            if (igual < 0 || partes[i].slice(0, igual) !== 'appData.localStorageContent') { continue; }
+            var valor = partes[i].slice(igual + 1);
+            for (var volta = 0; volta < 6 && typeof valor === 'string'; volta++) {
+                try { valor = JSON.parse(valor); continue; } catch (e) { /* ainda codificado no endereco */ }
+                var antes = valor;
+                try { valor = decodeURIComponent(valor); } catch (e2) { break; }
+                if (valor === antes) { break; }
+            }
+            if (valor && typeof valor === 'object' && typeof valor.xmpp_password_override === 'string' && valor.xmpp_password_override) {
+                return { de: 'endereco', senha: valor.xmpp_password_override };
+            }
+        }
+        try {
+            var guardada = window.localStorage.getItem('xmpp_password_override');
+            if (guardada) { return { de: 'localStorage', senha: guardada }; }
+        } catch (e3) { /* sem localStorage */ }
+        return null;
+    }
+
+    // Cada passo ao receptor, sem segredo: o estado e um detalhe curto (o receptor so anota as salas da lista).
+    var salaNome = String(window.location.pathname.split('/').pop() || '').toLowerCase();
+    function avisar(estado, detalhe) {
+        api.estado = estado;
+        try {
+            var url = '/pecas/estado?sala=' + encodeURIComponent(salaNome) + '&estado=' + encodeURIComponent(estado);
+            if (detalhe) { url += '&detalhe=' + encodeURIComponent(String(detalhe).slice(0, 120)); }
+            fetch(url, { cache: 'no-store', keepalive: true }).catch(function () {});
+        } catch (e) { /* o aviso nunca atrapalha */ }
     }
 
     async function sala() {
@@ -61,16 +106,20 @@
 
     async function comecar() {
         var achada = await sala();
-        if (!achada) { api.estado = 'sem-sala'; return; }
+        if (!achada) { avisar('sem-sala'); return; }
         var nome = achada.nome;
         var room = achada.room;
+        salaNome = nome;
         var ativo = await fetch('/pecas/ativo?sala=' + encodeURIComponent(nome), { cache: 'no-store' }).then(function (r) { return r.status === 204; }, function () { return false; });
         if (!ativo) { api.estado = 'desligado'; return; }
-        var senha = null;
-        try { senha = window.localStorage.getItem('xmpp_password_override'); } catch (e) { senha = null; }
-        if (!senha) { api.estado = 'sem-senha'; return; }
-        var chave = await crypto.subtle.importKey('raw', enc.encode(senha), { hash: 'SHA-256', name: 'HMAC' }, false, ['sign']);
-        api.estado = 'base';
+        avisar('na-sala');
+        var achou = senhaDoGravador();
+        if (!achou) {
+            avisar('sem-senha', 'appData no endereco: ' + (/appData\.localStorageContent=/.test(enderecoInicial) ? 'sim' : 'nao') + ', guardado pelo carregador: ' + (window.__bunker707PecasEndereco ? 'sim' : 'nao'));
+            return;
+        }
+        var chave = await crypto.subtle.importKey('raw', enc.encode(achou.senha), { hash: 'SHA-256', name: 'HMAC' }, false, ['sign']);
+        avisar('base', 'senha do ' + achou.de);
         var entrouEm = Date.now();
 
         // ---- o envio: uma fila por arquivo, em ordem; uma falha que nao passa em 4 tentativas para a peca
@@ -79,6 +128,7 @@
             var seq = 0;
             var cadeia = Promise.resolve();
             var parada = false;
+            var ultimo = null;
             enviados[arquivo] = 0;
             async function um(corpo, n) {
                 var buf = typeof corpo === 'string' ? enc.encode(corpo) : new Uint8Array(await corpo.arrayBuffer());
@@ -94,12 +144,14 @@
                             method: 'POST'
                         });
                         if (r.status === 204 || r.status === 200) { enviados[arquivo] += buf.length; return; }
+                        ultimo = r.status;
                         if (r.status !== 429 && r.status < 500) { break; }
-                    } catch (e) { /* a rede: tenta de novo */ }
+                    } catch (e) { ultimo = 'rede'; }
                     await esperar(1000 * Math.pow(2, tentativa));
                 }
                 parada = true;
                 api.erros = (api.erros || 0) + 1;
+                avisar('erro-envio', arquivo + ' pedaco ' + n + ': ' + ultimo);
             }
             return function (corpo) {
                 if (parada) { return; }
@@ -295,12 +347,12 @@
         });
         inicio = performance.now();
         gravadores.forEach(function (par) { par[0].start(PEDACO_MS); });
-        api.estado = 'gravando';
+        avisar('gravando', 'camera ' + (estado.camMuda ? 'desligada' : 'ligada') + ', tela ' + (estado.scr ? 'ligada' : 'desligada'));
         marcar('start', { camera: !estado.camMuda, screen: Boolean(estado.scr) });
         pedirQualidade();
         function parar() {
             if (api.estado !== 'gravando') { return; }
-            api.estado = 'parado';
+            avisar('parado', 'erros de envio: ' + (api.erros || 0));
             marcar('stop');
             gravadores.forEach(function (par) { try { par[0].stop(); } catch (e) { /* ja parado */ } });
         }
@@ -309,5 +361,5 @@
         api.parar = parar;
     }
 
-    comecar().catch(function () { api.estado = 'erro'; });
+    comecar().catch(function (e) { avisar('erro', (e && (e.name + ': ' + e.message)) || 'desconhecido'); });
 })();

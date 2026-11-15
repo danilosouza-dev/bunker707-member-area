@@ -312,7 +312,9 @@ services:
       ACME_EMAIL: ${ACME_EMAIL}
       CADDY_LOCAL_CERTS: ${CADDY_LOCAL_CERTS:-}
     volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # A pasta, e nao o arquivo: o deploy troca o Caddyfile por um arquivo novo (git archive | tar), e a montagem de
+      # um arquivo so continua presa ao antigo; o `caddy reload` do deploy-meet leria a configuracao de antes.
+      - ./caddy:/etc/caddy:ro
       - caddy-data:/data
       - caddy-config:/config
     networks:
