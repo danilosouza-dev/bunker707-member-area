@@ -129,7 +129,7 @@ config.localRecording = { disable: false };
         if (!ours && !recorder) { return; }
         var script = document.createElement('script');
         // O v e o comeco do sha256 do arquivo (a guarda da infra confere e diz o valor novo), como no CSS.
-        script.src = '/libs/bunker707-gravacao.js?v=52f84b92';
+        script.src = '/libs/bunker707-gravacao.js?v=d385ea22';
         script.async = true;
         (document.head || document.documentElement).appendChild(script);
     } catch (e) {

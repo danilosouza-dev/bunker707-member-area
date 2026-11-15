@@ -113,6 +113,14 @@ services:
       DESKTOP_SHARING_FRAMERATE_AUTO: "0"
       DESKTOP_SHARING_FRAMERATE_MIN: "${DESKTOP_SHARING_FRAMERATE_MIN:-5}"
       DESKTOP_SHARING_FRAMERATE_MAX: "${DESKTOP_SHARING_FRAMERATE_MAX:-30}"
+      # A ordem dos codecs no computador (docs/30 A65): VP8 primeiro. O padrao da imagem e AV1, o mais pesado de
+      # comprimir em tempo real: no navegador de quem apresenta ele segura os quadros por segundo (o envio limitado
+      # pela CPU, visto no ensaio local de 15/11/2026). O celular continua com o padrao da imagem (VP8 primeiro).
+      CODEC_ORDER_JVB: '${CODEC_ORDER_JVB:-["VP8", "VP9", "H264", "AV1"]}'
+      CODEC_ORDER_P2P: '${CODEC_ORDER_P2P:-["VP8", "VP9", "H264", "AV1"]}'
+      # A tela compartilhada tem a propria escolha: sem ela, o motor usa AV1 sempre que o navegador sabe (visto no
+      # ensaio local de 15/11/2026, com a camera ja em VP8).
+      VIDEOQUALITY_SCREENSHARE_CODEC: "${VIDEOQUALITY_SCREENSHARE_CODEC:-VP8}"
       # Tetos de bitrate por nivel (low 180p, standard 360p, high 720p, fullHd 1080p; ss = tela compartilhada),
       # iguais para os tres codecs que o JVB negocia; minHeightForQualityLvl fica em web/custom-config.js.
       VIDEOQUALITY_BITRATE_VP8_LOW: "${VIDEOQUALITY_BITRATE_LOW:-200000}"

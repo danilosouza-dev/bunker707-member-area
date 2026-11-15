@@ -37,14 +37,21 @@ function engine({ framed = true, moderator = true, recorder = false, storeReady 
   const actions = [];
   const posted = [];
   const timers = [];
+  const intervals = [];
+  const frames = [];
+  const logs = [];
   const subscribers = [];
   const appended = [];
   let now = 1_000_000;
-  const makeConference = ({ joined = true, members = [] } = {}) => {
+  const makeConference = ({ joined = true, localTracks = [], members = [], stats = null } = {}) => {
     const handlers = {};
     const own = {};
+    const report = { current: stats };
     return {
+      getLocalTracks: () => localTracks,
       getParticipants: () => members,
+      jvbJingleSession: { peerconnection: { peerconnection: { getStats: () => Promise.resolve(new Map((report.current ?? []).map((row) => [row.id, row]))) } } },
+      report,
       handlers,
       isJoined: () => joined,
       isModerator: () => moderator,
@@ -71,18 +78,29 @@ function engine({ framed = true, moderator = true, recorder = false, storeReady 
     getState: () => state,
     subscribe(listener) { subscribers.push(listener); }
   };
-  const element = (tag) => ({ attributes: {}, children: [], appendChild(child) { this.children.push(child); }, play() { this.playing = true; return { catch() {} }; }, setAttribute(name, value) { this.attributes[name] = value; }, tag });
+  const element = (tag) => ({
+    attributes: {},
+    children: [],
+    appendChild(child) { this.children.push(child); },
+    getVideoPlaybackQuality() { return { droppedVideoFrames: this.dropped ?? 0, totalVideoFrames: 0 }; },
+    play() { this.playing = true; return { catch() {} }; },
+    requestVideoFrameCallback(callback) { frames.push(callback); },
+    setAttribute(name, value) { this.attributes[name] = value; },
+    tag
+  });
   const body = element("body");
   const parent = { postMessage(data, origin) { posted.push({ data: plain(data), origin }); } };
   let onMessage = null;
   const window = {
     APP: storeReady ? { store } : undefined,
     addEventListener(name, handler) { if (name === "message") onMessage = handler; },
-    document: { body: { appendChild(child) { appended.push(child); body.appendChild(child); } }, createElement: element, documentElement: body },
+    document: { body: { appendChild(child) { appended.push(child); body.appendChild(child); } }, createElement: element, documentElement: body, getElementById: () => null },
+    requestAnimationFrame() {},
+    setInterval(callback, delay) { intervals.push({ callback, delay }); return intervals.length; },
     setTimeout(callback, delay) { timers.push({ callback, delay }); return timers.length; }
   };
   window.parent = framed ? parent : window;
-  vm.runInNewContext(source, { Date: { now: () => now }, window });
+  vm.runInNewContext(source, { console: { log: (text) => logs.push(String(text)) }, Date: { now: () => now }, window });
   return {
     actions,
     advance(ms) { now += ms; },
@@ -90,7 +108,13 @@ function engine({ framed = true, moderator = true, recorder = false, storeReady 
     conference: () => state["features/base/conference"].conference,
     /** Um sinal da conferencia de agora (as escutas sao de cada conferencia). */
     fire(name, ...args) { for (const handler of state["features/base/conference"].conference.handlers[name] ?? []) handler(...args); },
+    intervals,
     layer: () => appended[0] ?? null,
+    logs,
+    /** O video desenha n quadros (requestVideoFrameCallback). */
+    paint(n) { for (let i = 0; i < n; i += 1) { const next = frames.splice(0); for (const callback of next) callback(); } },
+    /** A medida de 10 s: roda o intervalo e espera o getStats. */
+    async measure() { for (const item of intervals) item.callback(); await new Promise((resolve) => setImmediate(resolve)); },
     makeConference,
     notify,
     /** A mensagem da pagina que montou o iframe (ou de outra janela, com `from`). */
@@ -290,4 +314,63 @@ test("um erro do motor nunca sai do arquivo: a gravacao segue", () => {
   broken.setLocalParticipantProperty = () => { throw new Error("estourou"); };
   assert.doesNotThrow(() => room.setConference(broken));
   assert.doesNotThrow(() => room.post({ modo: "tela", type: MESSAGE }));
+});
+
+/* A fluidez (docs/30 A65) */
+
+const inbound = (id, extra) => ({ codecId: "c-vp9", decoderImplementation: "libvpx", frameHeight: 1080, id, kind: "video", type: "inbound-rtp", ...extra });
+const codec = { id: "c-vp9", mimeType: "video/VP9", type: "codec" };
+const mediaTrack = (id) => ({ id });
+
+test("a fluidez no gravador: a cada 10 s, uma linha so com o que chegou, o que abriu, o que desenhou e o que quem modera envia, sem aspas", async () => {
+  const room = engine({ framed: false, recorder: true });
+  const screen = { ...screenTrack("host0001-v1"), getTrack: () => mediaTrack("t-tela") };
+  const host = member("host0001", { moderator: true, properties: { bunkerEnvio: "camera:720p:24fps:cpu,tela:1080p:30fps:none", bunkerGravacao: "tela" }, tracks: [screen] });
+  room.state["features/video-layout"] = { remoteScreenShares: ["host0001-v1"] };
+  const conference = room.makeConference({ members: [host], stats: [codec, inbound("in-1", { framesDecoded: 1000, framesDropped: 3, framesReceived: 1100, freezeCount: 1, jitterBufferDelay: 40, jitterBufferEmittedCount: 1000, timestamp: 0, totalDecodeTime: 20, trackIdentifier: "t-tela" })] });
+  room.setConference(conference);
+  assert.equal(room.intervals.length, 1);
+  assert.equal(room.intervals[0].delay, 10000);
+
+  await room.measure();
+  assert.deepEqual(room.logs.map((line) => line.split(" | ")[0].replace(/t=\d+/, "t=?")), ["bunker707-fluidez t=? m=tela pintou=0 perdeu=0 raf=0"], "o primeiro retrato nao tem conta por segundo");
+
+  // 10 s depois: 300 quadros chegaram, 180 abertos em 7,2 s de decodificacao, 120 desenhados.
+  conference.report.current = [codec, inbound("in-1", { decoderImplementation: 'lib"vpx\\x', framesDecoded: 1180, framesDropped: 5, framesReceived: 1400, freezeCount: 2, jitterBufferDelay: 49, jitterBufferEmittedCount: 1180, timestamp: 10000, totalDecodeTime: 27.2, trackIdentifier: "t-tela" })];
+  room.paint(120);
+  await room.measure();
+  const line = room.logs.at(-1);
+  assert.doesNotMatch(line, /["\\]/, "sem aspas nem barra invertida: o finalize.sh tira a linha do log como texto");
+  assert.equal(line.replace(/t=\d+/, "t=?"), "bunker707-fluidez t=? m=tela pintou=12 perdeu=0 raf=0 | tela* VP9 libvpxx 1080p rec=30 dec=18 drop=2 ms=40 fz=1 jb=50 | envio camera:720p:24fps:cpu,tela:1080p:30fps:none");
+});
+
+test("a fluidez no console de quem modera: o que este navegador envia vai na propriedade, so com o gravador na sala; o iframe do aluno nao conta nada", async () => {
+  const outbound = (id, extra) => ({ id, kind: "video", type: "outbound-rtp", ...extra });
+  const local = [
+    { getTrack: () => mediaTrack("t-cam"), getVideoType: () => "camera" },
+    { getTrack: () => mediaTrack("t-tela"), getVideoType: () => "desktop" }
+  ];
+  const stats = [
+    { id: "ms-cam", kind: "video", trackIdentifier: "t-cam", type: "media-source" },
+    { id: "ms-tela", kind: "video", trackIdentifier: "t-tela", type: "media-source" },
+    outbound("o-1", { frameHeight: 180, framesPerSecond: 24, mediaSourceId: "ms-cam", qualityLimitationReason: "cpu" }),
+    outbound("o-2", { frameHeight: 720, framesPerSecond: 23.6, mediaSourceId: "ms-cam", qualityLimitationReason: "cpu" }),
+    outbound("o-3", { frameHeight: 1080, framesPerSecond: 30, mediaSourceId: "ms-tela", qualityLimitationReason: "none" }),
+    outbound("o-4", { active: false, frameHeight: 2160, framesPerSecond: 0, mediaSourceId: "ms-tela" })
+  ];
+  const room = engine();
+  const conference = room.makeConference({ localTracks: local, members: [member("aaaa0001")], stats });
+  room.setConference(conference);
+  await room.measure();
+  assert.equal(conference.own.bunkerEnvio, undefined, "sem gravador na sala, nada");
+
+  conference.members.push(member("rec00001", { hidden: true }));
+  await room.measure();
+  assert.equal(conference.own.bunkerEnvio, "camera:720p:24fps:cpu,tela:1080p:30fps:none", "a camada mais alta de cada video, os quadros e o que segura o envio");
+
+  const learner = engine({ moderator: false });
+  const other = learner.makeConference({ localTracks: local, members: [member("rec00001", { hidden: true })], stats });
+  learner.setConference(other);
+  await learner.measure();
+  assert.equal(other.own.bunkerEnvio, undefined, "o iframe do aluno nao conta nada");
 });

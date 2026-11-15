@@ -81,7 +81,7 @@ printf '%s' "$last" | grep -q 'false' || { brand_ok=0; falha "interface_config.j
 [ "$brand_ok" = 1 ] && ok "interface_config.js" "custom-interface_config.js no fim, sem a marca"
 cfg=$(curl -sS "${insecure[@]}" --max-time 20 "$public_url/config.js" 2>/dev/null || true)
 cfg_ok=1
-for expr in "config.disableChat = true" "config.readOnlyName = true" "config.hideConferenceTimer = true" "config.channelLastN = 9" "css/bunker707.css?v=$css_v" "libs/bunker707-plateia.js?v=$plateia_v" "libs/bunker707-gravacao.js?v=$gravacao_v"; do
+for expr in 'config.videoQuality.codecPreferenceOrder = ["VP8"' "config.videoQuality.screenshareCodec = 'VP8'" "config.disableChat = true" "config.readOnlyName = true" "config.hideConferenceTimer = true" "config.channelLastN = 9" "css/bunker707.css?v=$css_v" "libs/bunker707-plateia.js?v=$plateia_v" "libs/bunker707-gravacao.js?v=$gravacao_v"; do
     printf '%s' "$cfg" | grep -qF "$expr" || { cfg_ok=0; falha "config.js" "falta: $expr"; }
 done
 # A barra padrao servida e a minima (docs/30 §8.1): a ultima toolbarButtons nao tem tela, gravar, seguranca nem a lista.

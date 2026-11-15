@@ -23,9 +23,21 @@
  *   mesmo que a visao seguida de quem apresenta tenha outra pessoa no palco;
  * - zera o volume de quem nao modera (SET_VOLUME, so neste navegador): na gravacao fica so a voz de quem modera.
  *
+ * A fluidez (docs/30 A65: o video gravado precisa de 30 quadros por segundo), medida a cada 10 s, so com um gravador na
+ * sala e sem mudar nada no video:
+ * - no gravador, uma linha "bunker707-fluidez ..." no console (o Jibri guarda no log do navegador, e o finalize.sh manda
+ *   as linhas no aviso de fim): para cada video que chega, o codec, o decodificador, a altura, quantos quadros por
+ *   segundo chegaram e quantos ele abriu, os descartados, o tempo para abrir cada quadro, os congelamentos e a espera
+ *   no buffer; quantos quadros por segundo o video da pagina desenhou (a camada no modo tela, o palco do motor na sala)
+ *   e quantas voltas de desenho a pagina deu; e o que cada moderador disse que esta enviando;
+ * - no console de quem modera, o que o proprio navegador envia de cada video (a altura, os quadros por segundo e o que
+ *   segura o envio: cpu, banda ou nada), numa propriedade do participante (bunkerEnvio), que o gravador escreve na linha.
+ * So numeros e palavras curtas; nada de nome, conteudo ou endereco.
+ *
  * Nomes conferidos na tag fixada no .env.example (stable-11248): os sinais conference.participant_property_changed,
  * conference.userJoined, conference.userLeft, conference.trackAdded, conference.trackRemoved e track.trackMuteChanged;
- * setLocalParticipantProperty, getProperty, getTracks, getVideoType, getSourceName e getOriginalStream da biblioteca;
+ * setLocalParticipantProperty, getProperty, getTracks, getVideoType, getSourceName, getOriginalStream, getLocalTracks e
+ * jvbJingleSession.peerconnection.peerconnection (a conexao com o servidor, para o getStats) da biblioteca;
  * as acoes PIN_PARTICIPANT e SET_VOLUME; as fatias base/conference, base/config, large-video e video-layout. A cada
  * troca de tag, o ensaio do docs/30 A63 se repete. Tudo em try/catch: um erro aqui nunca derruba a sala nem a gravacao.
  * Nada daqui busca nada na rede; a unica mensagem para fora e a palavra do modo, para a pagina que montou o iframe.
@@ -63,6 +75,18 @@
     // A conferencia em que as escutas estao (outra conferencia = escutar de novo).
     var boundConference = null;
     var subscribed = false;
+    // A fluidez: o ultimo retrato de cada video (para a conta por segundo), os quadros desenhados, as voltas de desenho
+    // e o ultimo envio contado na propriedade.
+    var STATS_MS = 10000;
+    var PROP_SENDING = 'bunkerEnvio';
+    var lastIn = {};
+    var lastOut = {};
+    var paintCount = 0;
+    var paintTarget = null;
+    var paintQuality = null;
+    var rafCount = 0;
+    var sentReport = null;
+    var measuring = false;
 
     function store() {
         try { return (window.APP && window.APP.store) || null; } catch (e) { return null; }
@@ -254,6 +278,193 @@
         }
     }
 
+    /* ---- a fluidez (docs/30 A65) ---- */
+
+    function round(value) { return Math.round(value * 10) / 10; }
+
+    function peerConnectionOf(conference) {
+        try {
+            var session = conference && conference.jvbJingleSession;
+            var tpc = session && session.peerconnection;
+
+            return (tpc && tpc.peerconnection && typeof tpc.peerconnection.getStats === 'function' && tpc.peerconnection) || null;
+        } catch (e) { return null; }
+    }
+
+    function hasRecorder(conference) {
+        var all = participantsOf(conference);
+
+        for (var i = 0; i < all.length; i += 1) { if (call(all[i], 'isHidden') === true) { return true; } }
+
+        return false;
+    }
+
+    /** A faixa do motor pelo id da faixa do navegador: "tela" ou "camera", com * quando e de quem modera. */
+    function labelOf(conference, trackId, local) {
+        var lists = [];
+
+        if (local) {
+            lists.push({ moderator: true, tracks: call(conference, 'getLocalTracks') || [] });
+        } else {
+            var all = participantsOf(conference);
+
+            for (var i = 0; i < all.length; i += 1) { lists.push({ moderator: call(all[i], 'isModerator') === true, tracks: call(all[i], 'getTracks') || [] }); }
+        }
+        for (var j = 0; j < lists.length; j += 1) {
+            for (var k = 0; k < lists[j].tracks.length; k += 1) {
+                var track = lists[j].tracks[k];
+                var media = call(track, 'getTrack');
+
+                if (media && media.id === trackId) {
+                    return (call(track, 'getVideoType') === 'desktop' ? 'tela' : 'camera') + (lists[j].moderator && !local ? '*' : '');
+                }
+            }
+        }
+
+        return 'video';
+    }
+
+    /** Conta os quadros desenhados do video que vai para a gravacao (requestVideoFrameCallback) e as voltas de desenho. */
+    function watchPaint(target) {
+        if (!target || target === paintTarget || typeof target.requestVideoFrameCallback !== 'function') { return; }
+        paintTarget = target;
+        paintQuality = null;
+        var onFrame = function () {
+            if (paintTarget !== target) { return; }
+            paintCount += 1;
+            try { target.requestVideoFrameCallback(onFrame); } catch (e) { /* para de contar */ }
+        };
+
+        try { target.requestVideoFrameCallback(onFrame); } catch (e) { /* sem a conta */ }
+    }
+
+    function countRaf() {
+        rafCount += 1;
+        try { window.requestAnimationFrame(countRaf); } catch (e) { /* sem a conta */ }
+    }
+
+    /** No gravador: a linha da fluidez dos ultimos 10 s. */
+    function measureRecorder(conference, pc) {
+        var paintedNow = paintCount;
+        var rafNow = rafCount;
+
+        paintCount = 0;
+        rafCount = 0;
+        pc.getStats().then(function (report) {
+            var codecs = {};
+            var rows = [];
+
+            report.forEach(function (r) { if (r.type === 'codec') { codecs[r.id] = String(r.mimeType || '').split('/')[1] || '?'; } });
+            report.forEach(function (r) {
+                if (r.type !== 'inbound-rtp' || r.kind !== 'video') { return; }
+                var prev = lastIn[r.id];
+
+                lastIn[r.id] = r;
+                if (!prev || !(r.timestamp > prev.timestamp)) { return; }
+                var dt = (r.timestamp - prev.timestamp) / 1000;
+                var decoded = (r.framesDecoded || 0) - (prev.framesDecoded || 0);
+                var received = (r.framesReceived || 0) - (prev.framesReceived || 0);
+
+                if (decoded <= 0 && received <= 0) { return; }
+                var emitted = (r.jitterBufferEmittedCount || 0) - (prev.jitterBufferEmittedCount || 0);
+
+                rows.push([
+                    labelOf(conference, r.trackIdentifier, false),
+                    codecs[r.codecId] || '?',
+                    String(r.decoderImplementation || '?').replace(/[^A-Za-z0-9_.()-]/g, ''),
+                    (r.frameHeight || 0) + 'p',
+                    'rec=' + round(received / dt),
+                    'dec=' + round(decoded / dt),
+                    'drop=' + ((r.framesDropped || 0) - (prev.framesDropped || 0)),
+                    'ms=' + round(((r.totalDecodeTime || 0) - (prev.totalDecodeTime || 0)) * 1000 / Math.max(1, decoded)),
+                    'fz=' + ((r.freezeCount || 0) - (prev.freezeCount || 0)),
+                    'jb=' + Math.round(emitted > 0 ? ((r.jitterBufferDelay || 0) - (prev.jitterBufferDelay || 0)) * 1000 / emitted : 0)
+                ].join(' '));
+            });
+            var lost = 0;
+
+            if (paintTarget && typeof paintTarget.getVideoPlaybackQuality === 'function') {
+                var q = paintTarget.getVideoPlaybackQuality();
+
+                lost = paintQuality ? q.droppedVideoFrames - paintQuality.droppedVideoFrames : 0;
+                paintQuality = q;
+            }
+            var sending = [];
+            var all = participantsOf(conference);
+
+            for (var i = 0; i < all.length; i += 1) {
+                var text = call(all[i], 'isModerator') === true ? readProperty(all[i], PROP_SENDING) : null;
+
+                if (typeof text === 'string' && /^[a-z0-9:.,]{1,200}$/.test(text)) { sending.push(text); }
+            }
+            var head = 't=' + Math.round(Date.now() / 1000) + ' m=' + (mode || '?') + ' pintou=' + round(paintedNow / (STATS_MS / 1000)) + ' perdeu=' + lost + ' raf=' + round(rafNow / (STATS_MS / 1000));
+
+            // Uma linha so, sem aspas nem barra invertida: o finalize.sh a tira do log do navegador como texto.
+            console.log('bunker707-fluidez ' + [head].concat(rows).concat(sending.length ? ['envio ' + sending.join(';')] : []).join(' | '));
+        }).catch(function () { /* sem a medida desta vez */ });
+    }
+
+    /** No console de quem modera: o que este navegador envia, na propriedade lida pelo gravador. */
+    function measureSender(conference, pc) {
+        pc.getStats().then(function (report) {
+            var sources = {};
+            var best = {};
+
+            report.forEach(function (r) { if (r.type === 'media-source' && r.kind === 'video') { sources[r.id] = r.trackIdentifier; } });
+            report.forEach(function (r) {
+                if (r.type !== 'outbound-rtp' || r.kind !== 'video' || r.active === false) { return; }
+                var prev = lastOut[r.id];
+
+                lastOut[r.id] = r;
+                var fps = typeof r.framesPerSecond === 'number' ? r.framesPerSecond : prev && r.timestamp > prev.timestamp ? ((r.framesSent || 0) - (prev.framesSent || 0)) * 1000 / (r.timestamp - prev.timestamp) : 0;
+
+                if (!(fps > 0)) { return; }
+                var label = labelOf(conference, sources[r.mediaSourceId], true);
+                var current = best[label];
+
+                if (!current || (r.frameHeight || 0) > current.height) {
+                    best[label] = { fps: fps, height: r.frameHeight || 0, reason: String(r.qualityLimitationReason || 'none').replace(/[^a-z]/g, '') };
+                }
+            });
+            var parts = [];
+
+            Object.keys(best).sort().forEach(function (label) { parts.push(label + ':' + best[label].height + 'p:' + Math.round(best[label].fps) + 'fps:' + best[label].reason); });
+            var text = parts.join(',');
+
+            if (text && text !== sentReport && typeof conference.setLocalParticipantProperty === 'function') {
+                sentReport = text;
+                conference.setLocalParticipantProperty(PROP_SENDING, text);
+            }
+        }).catch(function () { /* sem a medida desta vez */ });
+    }
+
+    /** A cada 10 s, com um gravador na sala: o gravador escreve a linha; o console de quem modera conta o envio. */
+    function measure() {
+        try {
+            var s = store();
+            var state = s && s.getState();
+            var conference = conferenceOf(state);
+            var pc = peerConnectionOf(conference);
+
+            if (!conference || !pc) { return; }
+            if (isRecorder(state)) {
+                var layerVideo = mode === 'tela' ? video : null;
+
+                watchPaint(layerVideo || (window.document && window.document.getElementById('largeVideo')));
+                measureRecorder(conference, pc);
+            } else if (framed && call(conference, 'isModerator') === true && hasRecorder(conference)) {
+                measureSender(conference, pc);
+            }
+        } catch (e) { /* a medida nunca mexe na sala */ }
+    }
+
+    function startMeasuring() {
+        if (measuring || typeof window.setInterval !== 'function') { return; }
+        measuring = true;
+        try { window.setInterval(measure, STATS_MS); } catch (e) { measuring = false; return; }
+        try { if (typeof window.requestAnimationFrame === 'function') { window.requestAnimationFrame(countRaf); } } catch (e) { /* sem a conta */ }
+    }
+
     /* ---- os dois ---- */
 
     function bind(conference, state) {
@@ -307,6 +518,7 @@
         subscribed = true;
         try { s.subscribe(onStoreChange); } catch (e) { subscribed = false; window.setTimeout(watch, 2000); return; }
         onStoreChange();
+        startMeasuring();
     }
 
     try {

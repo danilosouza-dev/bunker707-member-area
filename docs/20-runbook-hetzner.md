@@ -654,6 +654,14 @@ pela Cloudflare). O IP do C fica visivel; a protecao e o firewall da Hetzner, o 
   grava a sala como sempre. Conferir depois, numa live de teste com o gravador: o circulo **Live gravada** ao lado do
   **Gravar**, o cartao **Gravação** com "O gravador está gravando só a tela compartilhada e a voz de quem apresenta.",
   e o video na Bunny so com a tela (preto antes do compartilhamento), sem a voz de aluno.
+- **A fluidez da gravacao (15/11/2026, `docs/30` A65 e D126)**: o motor passa a usar VP8 na camera e na tela
+  (`CODEC_ORDER_JVB`, `CODEC_ORDER_P2P` e `VIDEOQUALITY_SCREENSHARE_CODEC` no compose; o `smoke.sh` confere no
+  `config.js`), e o gravador escreve a cada 10 s uma linha `bunker707-fluidez` que o `finalize.sh` manda no aviso de
+  fim. Para ler: `exec-membros` com `cd /opt/bunker707 && docker compose -f infra/compose/docker-compose.yml exec -T db psql -U postgres -At -c "select received_at, payload->'fluidez' from webinar_recording_events where state = 'uploaded' order by received_at desc limit 1"`.
+  Em cada linha: `pintou` (os quadros por segundo desenhados no video que vai para a gravacao), e por video `rec` (os
+  que chegaram), `dec` (os que o gravador abriu), `ms` (o tempo para abrir cada um), `fz` (congelamentos); `envio`
+  diz o que o navegador de quem modera manda e o que segura (`cpu`, `bandwidth` ou `none`). Com a live no ar, o
+  mesmo pelo `exec-jibri` em `volumes/storage/jibri/logs/browser.*.txt`.
 - O `.env` do C leva `XMPP_MUC_MODULES=token_affiliation,bunker_room_guard,bunker_presence_guard,bunker_ghost_guard` e `ROOM_GUARD_URL=<origem da area de
   membros>/api/webhooks/room-guard` (o `generate-secrets.sh` deriva os dois; num `.env` gerado antes de 29/10/2026,
   acrescentar as duas linhas a mao antes do proximo `deploy-meet`): o Prosody busca ali, a cada 5 s, quem a equipe

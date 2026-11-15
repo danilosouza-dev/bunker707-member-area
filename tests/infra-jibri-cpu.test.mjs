@@ -79,7 +79,8 @@ test("a CPU do gravador: as amostras a cada 5 s no host e o resumo de 30 s que o
   } finally {
     rmSync(pasta, { force: true, recursive: true });
   }
-  assert.match(finalize, /cpu=\$\(cpu_json "\$\{CPU_LOG:-\/storage\/cpu\.log\}"\)\n\[ -n "\$cpu" \] && body="\$body,\\"cpu\\":\$cpu"\nbody="\$body\}"/, "o resumo entra no aviso, antes de fechar o corpo");
+  assert.match(finalize, /cpu=\$\(cpu_json "\$\{CPU_LOG:-\/storage\/cpu\.log\}"\)\n\[ -n "\$cpu" \] && body="\$body,\\"cpu\\":\$cpu"\n/, "o resumo entra no aviso");
+  assert.match(finalize, /fluidez=\$\(fluidez_json\)\n\[ -n "\$fluidez" \] && body="\$body,\\"fluidez\\":\$fluidez"\nbody="\$body\}"/, "a fluidez tambem, antes de fechar o corpo");
 });
 
 test("o plano A saiu inteiro: nem arquivo no gravador, nem receptor, nem rota, nem servico, e o deploy tira o container que ficou", () => {
@@ -100,4 +101,23 @@ test("o plano A saiu inteiro: nem arquivo no gravador, nem receptor, nem rota, n
   const borda = compose.slice(compose.indexOf("\n  caddy:"), compose.indexOf("\nnetworks:"));
   assert.match(borda, /- \.\/caddy:\/etc\/caddy:ro/, "o Caddy monta a pasta, para o reload ler o Caddyfile novo");
   assert.doesNotMatch(borda, /\.\/caddy\/Caddyfile:/, "nada de montar o arquivo sozinho");
+});
+
+test("a fluidez do gravador (docs/30 A65): o finalize.sh tira do log do navegador as linhas bunker707-fluidez, as mais novas, como lista de textos", { skip: spawnSync("python3", ["--version"]).status !== 0 && "sem python3" }, () => {
+  const finalize = read("infra/jitsi/jibri/finalize.sh");
+  const funcao = /\nfluidez_json\(\) \{\n[\s\S]*?\nPY\n\}\n/.exec(finalize)[0];
+  const pasta = mkdtempSync(join(tmpdir(), "fluidez-"));
+  try {
+    // O formato do log do navegador do Jibri: a mensagem do console entre aspas, depois de console-api.
+    const linha = (n) => `2026-11-15 20:10:${String(n).padStart(2, "0")}.000 INFO: [52] browser.log: [INFO] console-api 2:1234 "bunker707-fluidez t=${1794770000 + n} m=tela pintou=29.8 perdeu=0 raf=60 | tela* VP9 libvpx 1080p rec=30 dec=29.9 drop=0 ms=4.1 fz=0 jb=40"`;
+    writeFileSync(join(pasta, "browser.0.txt"), ["2026-11-15 20:09:59.000 INFO: [52] outra coisa", ...Array.from({ length: 130 }, (_, n) => linha(n))].join("\n") + "\n");
+    const out = spawnSync("sh", ["-c", `${funcao}\nBROWSER_LOGS='${pasta}' fluidez_json`], { encoding: "utf8" }).stdout.trim();
+    const lista = JSON.parse(out);
+    assert.equal(lista.length, 120, "as 120 mais novas");
+    assert.equal(lista.at(-1), `t=${1794770000 + 129} m=tela pintou=29.8 perdeu=0 raf=60 | tela* VP9 libvpx 1080p rec=30 dec=29.9 drop=0 ms=4.1 fz=0 jb=40`);
+    assert.ok(Buffer.byteLength(out) < 26000, "cabe no aviso (o app aceita 64 KB)");
+    assert.equal(spawnSync("sh", ["-c", `${funcao}\nBROWSER_LOGS=/nao/existe fluidez_json`], { encoding: "utf8" }).stdout, "", "sem o log, nada");
+  } finally {
+    rmSync(pasta, { force: true, recursive: true });
+  }
 });
