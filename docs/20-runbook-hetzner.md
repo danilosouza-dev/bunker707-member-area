@@ -806,7 +806,19 @@ Depois da live de teste, os resultados:
 
 - as pecas e as medidas: `exec-meet` com `cd infra/jitsi/volumes/pecas && ls -la */ && tail -n 3 */metricas.jsonl && cat */linha-do-tempo.jsonl`;
 - a duracao e os quadros das pecas: `exec-meet` com `docker run --rm -v "$PWD/infra/jitsi/volumes/pecas:/d:ro" alpine:3.22 sh -c 'apk add -q ffmpeg >/dev/null && for f in /d/*/*.webm; do echo "$f"; ffprobe -v error -show_entries format=duration -of csv=p=0 "$f"; done'`;
-- a CPU do gravador: `exec-membros` com `cd /opt/bunker707 && docker compose -f infra/compose/docker-compose.yml exec -T db psql -U postgres -At -c "select created_at, payload->'cpu' from webinar_recording_events where state = 'uploaded' order by created_at desc limit 1"`.
+- os passos do arquivo das pecas no gravador e cada pedaco recusado: `exec-meet` com `docker logs --since 3h bunker707-meet-pecas` (as linhas `estado na-sala`, `estado base (senha do endereco)`, `estado gravando`, `estado parado`, ou o motivo: `sem-senha`, `erro-envio`, `erro`, e `recusado <codigo> (<motivo>)`; so as salas da lista, sem segredo nenhum);
+- a CPU do gravador: `exec-membros` com `cd /opt/bunker707 && docker compose -f infra/compose/docker-compose.yml exec -T db psql -U postgres -At -c "select received_at, payload->'cpu' from webinar_recording_events where state = 'uploaded' order by received_at desc limit 1"` (a porcentagem da maquina inteira a cada 30 s, com o numero de nucleos).
+
+O primeiro teste em producao (15/11/2026, 10 min, webinario "Teste pecas"): a gravacao de sempre foi para a Bunny e o
+gravador desligou sozinho, mas nenhuma peca chegou. Causa, reproduzida no motor local: o Jibri da tag fixada nao poe a
+senha no `localStorage`; manda as contas no endereco da sala (`config.useHostPageLocalStorage=true` e
+`appData.localStorageContent`, o JSON codificado duas vezes), o Jitsi guarda so na memoria e limpa o endereco logo
+depois. O arquivo parava em `sem-senha` sem avisar ninguem. Agora o carregador do `custom-config.js` guarda o endereco no
+primeiro instante (`window.__bunker707PecasEndereco`), o arquivo le a senha dele (o `localStorage` fica de reserva) e
+cada passo vai ao log do receptor. O ensaio local com o endereco do Jibri de verdade gravou as quatro saidas. A CPU do
+gravador (cpx42, 8 nucleos) na live de teste, sem as pecas: 9% (0,7 nucleo) so com a camera e 16% (1,3 nucleo) com a
+tela compartilhada. O mesmo teste achou dois defeitos de infra, corrigidos: o `jibri-up` parava no comando das amostras
+de CPU (o `&` fora das chaves segurava a saida do SSH) e o Caddy lia o Caddyfile antigo (a montagem do arquivo sozinho).
 
 Desligar e limpar: tirar o id de `ativas.txt` e `exec-meet` com `rm -rf infra/jitsi/volumes/pecas/w-*` (os arquivos
 ficam no disco do C, 40 GB, ate isso; o receptor recusa acima de 8 GB por sala e com menos de 4 GB livres). O
