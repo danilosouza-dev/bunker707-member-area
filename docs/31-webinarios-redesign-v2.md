@@ -776,3 +776,25 @@ O produtor pediu que as pessoas simuladas apareçam na lista de miniaturas da Li
 | V2-A95 | As iniciais dos simulados sem foto devem ter uma cor só, para não chamar atenção? | não: as cores são as do motor para todo mundo sem foto, simulado ou de verdade; uma cor só marcaria quem é simulado |
 | V2-A96 | A Grade do aluno deve mostrar mais de 9 por vez quando há simulados? | não: fica o limite de hoje (`tileView.numberOfVisibleTiles`), com a rolagem do motor |
 
+## 20. As miniaturas na Live gravada (14/11/2026, `docs/30` D124)
+
+O ponto 2 do pedido de 13/11/2026: na Live gravada o aluno também vê a lista de miniaturas, com a própria miniatura, como
+na Live ao vivo. As decisões estão no `docs/30` (D124, §6.9 e as perguntas A59 a A61); aqui fica o desenho.
+
+- **Onde**: uma coluna de 213 px presa à direita do palco, sobre o fundo preto, como a coluna do motor na live. O vídeo
+  encolhe para caber (a folga de 9 px entre os dois é a do puxador do motor); nada fica por cima do vídeo. Os selos de
+  cima à direita, as pílulas do chat e os cartões da Na tela param antes da coluna.
+- **Cada miniatura**: 120 px de altura, cantos de 8 px, fundo cinza escuro; no meio, a foto ou as iniciais coloridas
+  (64 px); embaixo à esquerda, o nome numa etiqueta escura com o microfone riscado. Todo mundo como quem está com a
+  câmera e o microfone desligados.
+- **A ordem**: a miniatura do próprio aluno no alto (o leitor de tela ouve "(você)" depois do nome; sem nome na conta,
+  "Você"), depois as pessoas que comentam com foto, as sem foto e os nomes genéricos. Quem apresenta não entra: a
+  câmera dele está dentro do vídeo.
+- **Quantos**: os do número de participantes simulados daquele segundo, até 300; a coluna rola sozinha.
+- **Quando**: com a Simulação ligada na sessão e o vídeo no ar, no computador e no desenho normal. Na espera, no fim, no
+  Replay, no celular e no desenho vertical, nenhuma coluna. Sem Simulação, a sala fica como era.
+
+| # | Pergunta | Padrão assumido |
+|---|---|---|
+| V2-A97 | A coluna da gravada deve ter o **Esconder** do menu, como a da live? | não nesta etapa: a gravada não tem o menu Visão do vídeo; se o produtor pedir, o mesmo Lateral e Esconder guardados no navegador |
+

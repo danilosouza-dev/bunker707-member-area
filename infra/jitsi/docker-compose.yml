@@ -72,6 +72,9 @@ services:
       # Os participantes simulados desenhados pelo motor (docs/30 D120), carregado pelo custom-config.js; o nginx serve
       # /libs/bunker707-plateia.js.
       - ./web/bunker707-plateia.js:/usr/share/jitsi-meet/libs/bunker707-plateia.js:ro
+      # As pecas da Live gravada em teste (docs/30 A62), so no gravador, carregado pelo custom-config.js; o nginx serve
+      # /libs/bunker707-pecas.js.
+      - ./web/bunker707-pecas.js:/usr/share/jitsi-meet/libs/bunker707-pecas.js:ro
     environment:
       <<: *common-env
       DISABLE_HTTPS: "1"
@@ -266,6 +269,26 @@ services:
       JVB_PORT: "${JVB_PORT:-10000}"
       JVB_BREWERY_MUC: "${JVB_BREWERY_MUC:-jvbbrewery}"
       VIDEOBRIDGE_MAX_MEMORY: "${VIDEOBRIDGE_MAX_MEMORY:-1536m}"
+    networks:
+      meet.jitsi:
+
+  # O receptor das pecas da Live gravada em teste (docs/30 A62; docs/20 §8B.7): o arquivo do gravador manda a camera,
+  # a tela, a linha do tempo e as medidas para https://meet.<dominio>/pecas/ (o Caddy repassa so esse caminho), cada
+  # pedaco assinado com a senha do usuario do gravador. Grava em volumes/pecas/<sala>/, so para os webinarios listados
+  # em volumes/pecas/ativas.txt (vazio: nada). Nenhuma porta publicada. So a biblioteca padrao do Python.
+  pecas:
+    container_name: bunker707-meet-pecas
+    image: python:3.12.16-alpine
+    restart: unless-stopped
+    read_only: true
+    user: "1000:1000"
+    command: ["python3", "-u", "/app/receptor.py"]
+    environment:
+      PECAS_SEGREDO: "${JIBRI_RECORDER_PASSWORD}"
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./pecas/receptor.py:/app/receptor.py:ro
+      - ./volumes/pecas:/dados
     networks:
       meet.jitsi:
 

@@ -208,5 +208,14 @@ export const SIMULACAO_COPY = {
     "Paulo", "Renata", "Ricardo", "Roberta", "Rodrigo", "Sabrina", "Sérgio", "Simone", "Thiago", "Vanessa",
     "Vitor", "Aline", "Bianca", "Cláudio", "Débora", "Fábio", "Jéssica", "Luana", "Márcio", "Priscila"
   ],
-  iniciais: ["A", "B", "C", "D", "E", "F", "G", "H", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "V"]
+  iniciais: ["A", "B", "C", "D", "E", "F", "G", "H", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "V"],
+  /** A coluna de miniaturas da Live gravada (docs/30 D124): a propria pagina desenha, ao lado do video. */
+  coluna: {
+    /** O nome da lista para o leitor de tela. */
+    rotulo: "Participantes na sala",
+    /** O que o leitor de tela ouve na miniatura do proprio aluno, depois do nome. */
+    voce: "(você)",
+    /** O nome na miniatura do proprio aluno quando a conta ainda nao tem nome. */
+    semNome: "Você"
+  }
 } as const;
