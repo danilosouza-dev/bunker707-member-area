@@ -129,7 +129,7 @@ config.localRecording = { disable: false };
         window.__bunker707PecasEndereco = hash;
         var script = document.createElement('script');
         // O v e o comeco do sha256 do arquivo (a guarda da infra confere e diz o valor novo).
-        script.src = '/libs/bunker707-pecas.js?v=59656a3d';
+        script.src = '/libs/bunker707-pecas.js?v=da585424';
         script.async = true;
         (document.head || document.documentElement).appendChild(script);
     } catch (e) {

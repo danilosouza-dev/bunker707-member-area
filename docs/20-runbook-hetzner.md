@@ -801,11 +801,17 @@ cada 5 s e o `finalize.sh` manda o resumo no aviso de fim (o campo `cpu`, guarda
 
 Ligar um webinario (sem reiniciar nada; o receptor le a lista a cada pedido):
 `exec-meet` com `cd infra/jitsi && echo <id do webinario> >> volumes/pecas/ativas.txt && cat volumes/pecas/ativas.txt`.
+A linha `<id> canvas` grava pelo jeito antigo (o canvas), para comparar; sem nada, `direto` (a faixa recebida, sem
+redesenhar). Cada gravacao (cada vez que o gravador entra na sala; o Gravar de novo e outra) fica na propria pasta,
+`volumes/pecas/<sala>/<gravacao>/`, e cada peca vem em partes (`camera-1.webm`, `tela-1.webm`...: uma parte nova quando
+a faixa de quem apresenta muda; a tela comeca no primeiro compartilhamento); a marca `arquivo` da linha do tempo diz
+quando cada parte comeca. Antes de 15/11/2026, a pasta era a da sala, e o Gravar de novo perdia o comeco da segunda
+gravacao (o receptor guardava a ordem dos pedacos por sala).
 
 Depois da live de teste, os resultados:
 
-- as pecas e as medidas: `exec-meet` com `cd infra/jitsi/volumes/pecas && ls -la */ && tail -n 3 */metricas.jsonl && cat */linha-do-tempo.jsonl`;
-- a duracao e os quadros das pecas: `exec-meet` com `docker run --rm -v "$PWD/infra/jitsi/volumes/pecas:/d:ro" alpine:3.22 sh -c 'apk add -q ffmpeg >/dev/null && for f in /d/*/*.webm; do echo "$f"; ffprobe -v error -show_entries format=duration -of csv=p=0 "$f"; done'`;
+- as pecas e as medidas: `exec-meet` com `cd infra/jitsi/volumes/pecas && ls -la */*/ && tail -n 3 */*/metricas.jsonl && cat */*/linha-do-tempo.jsonl`;
+- a duracao e os quadros das partes: `exec-meet` com `docker run --rm -v "$PWD/infra/jitsi/volumes/pecas:/d:ro" alpine:3.22 sh -c 'apk add -q ffmpeg >/dev/null && for f in /d/*/*/*.webm; do echo "$f"; ffprobe -v error -show_entries format=duration -of csv=p=0 "$f"; done'`;
 - os passos do arquivo das pecas no gravador e cada pedaco recusado: `exec-meet` com `docker logs --since 3h bunker707-meet-pecas` (as linhas `estado na-sala`, `estado base (senha do endereco)`, `estado gravando`, `estado parado`, ou o motivo: `sem-senha`, `erro-envio`, `erro`, e `recusado <codigo> (<motivo>)`; so as salas da lista, sem segredo nenhum);
 - a CPU do gravador: `exec-membros` com `cd /opt/bunker707 && docker compose -f infra/compose/docker-compose.yml exec -T db psql -U postgres -At -c "select received_at, payload->'cpu' from webinar_recording_events where state = 'uploaded' order by received_at desc limit 1"` (a porcentagem da maquina inteira a cada 30 s, com o numero de nucleos).
 
@@ -831,12 +837,13 @@ proxima rodada. As pecas agora nunca baixam a qualidade que a gravacao de sempre
 
 A previa da equipe (a Live gravada remontada a partir das pecas de um teste, so com link assinado):
 
-1. os arquivos com indice, para o video andar: `exec-meet` com `cd infra/jitsi/volumes/pecas/<sala> && docker run --rm --user 0 --entrypoint sh -v "$PWD:/d" alpine:3.22 -c 'apk add -q ffmpeg >/dev/null && for n in camera tela; do ffmpeg -v error -y -i /d/$n.webm -c copy /d/$n-previa.webm; done && chown 1000:1000 /d/*-previa.webm'` (so copia, sem recodificar);
-2. o link: `exec-meet` com `docker exec bunker707-meet-pecas python3 /app/receptor.py link <sala> 24` (horas, no maximo 7 dias), e o endereco e `https://meet.<dominio>` mais o caminho que ele imprime.
+1. as partes com indice, para o video andar: `exec-meet` com `cd infra/jitsi/volumes/pecas/<sala>/<gravacao> && docker run --rm --user 0 --entrypoint sh -v "$PWD:/d" alpine:3.22 -c 'apk add -q ffmpeg >/dev/null && for f in /d/camera-*.webm /d/tela-*.webm; do case "$f" in *-previa.webm) continue;; esac; ffmpeg -v error -y -i "$f" -c copy "${f%.webm}-previa.webm"; done && chown 1000:1000 /d/*-previa.webm'` (so copia, sem recodificar);
+2. o link: `exec-meet` com `docker exec bunker707-meet-pecas python3 /app/receptor.py link <sala> [gravacao] 24` (sem a gravacao, a mais nova da sala; horas, no maximo 7 dias), e o endereco e `https://meet.<dominio>` mais o caminho que ele imprime.
 
 O link so vale com o webinario em `ativas.txt` e ate vencer; sem ele, o receptor responde 404. A pagina toca a camera
-com a voz e a tela, a camera mandando e a tela seguindo, o palco pela linha do tempo, e mostra a diferenca entre as
-duas com a tela no palco (no ensaio local, 37 a 43 ms).
+com a voz e a tela, a camera mandando e a tela seguindo, o palco pela linha do tempo, cada video na parte que cobre o
+instante, e mostra a diferenca entre as duas com a tela no palco (no ensaio local, de 2 a 24 ms). Quando a tela no palco
+para para carregar, a camera espera por ela.
 
 Desligar e limpar: tirar o id de `ativas.txt` e `exec-meet` com `rm -rf infra/jitsi/volumes/pecas/w-*` (os arquivos
 ficam no disco do C, 40 GB, ate isso; o receptor recusa acima de 8 GB por sala e com menos de 4 GB livres). O

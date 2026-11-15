@@ -6,7 +6,9 @@
  * A camera (com a voz) manda e a tela segue: a diferenca entre as duas e corrigida pela velocidade da tela (de 0,8 a
  * 1,2) e, acima de 0,5 s, com um pulo; quando a tela esta no palco e para para carregar, a camera espera. A linha do
  * tempo diz o que aparece em cada instante: sem a tela, a camera no palco; com a tela, a tela no palco e a camera na
- * coluna ao lado; a camera desligada vira o cartao "Camera desligada".
+ * coluna ao lado; a camera desligada vira o cartao "Camera desligada". Cada peca vem em partes (camera-1.webm,
+ * tela-1.webm...), e a marca `arquivo` diz quando cada uma comeca: o relogio e o da linha do tempo, e cada video toca a
+ * parte que cobre o instante.
  */
 (function (raiz) {
     'use strict';
@@ -48,20 +50,36 @@
         return { pular: false, taxa: Math.max(0.8, Math.min(1.2, 1 - d)) };
     }
 
+    /** As partes de uma peca ('camera' ou 'tela') pelas marcas `arquivo`; sem marca nenhuma, a parte 1 desde o comeco. */
+    function partes(marcas, tipo) {
+        var lista = marcas
+            .filter(function (m) { return m.kind === 'arquivo' && typeof m.arquivo === 'string' && m.arquivo.indexOf(tipo + '-') === 0; })
+            .map(function (m) { return { arquivo: m.arquivo, t: m.t }; });
+        return lista.length || marcas.some(function (m) { return m.kind === 'arquivo'; }) ? lista : [{ arquivo: tipo + '-1.webm', t: 0 }];
+    }
+
+    /** A parte que cobre o instante `ms`: a ultima que comecou ate ele; antes da primeira, nenhuma. */
+    function parteEm(lista, ms) {
+        var achada = null;
+        for (var i = 0; i < lista.length; i++) { if (lista[i].t <= ms) { achada = lista[i]; } }
+        return achada;
+    }
+
     /** 125 -> "2:05". */
     function relogio(segundos) {
         var s = Math.max(0, Math.floor(Number(segundos) || 0));
         return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
     }
 
-    var api = { correcao: correcao, estadoEm: estadoEm, lerLinha: lerLinha, relogio: relogio };
+    var api = { correcao: correcao, estadoEm: estadoEm, lerLinha: lerLinha, parteEm: parteEm, partes: partes, relogio: relogio };
     raiz.__previa = api;
     if (typeof document === 'undefined' || !document.getElementById || !document.getElementById('previa')) { return; }
 
     // ---- a pagina
     var busca = window.location.search;
-    var sala = window.location.pathname.split('/').filter(Boolean).pop();
-    var url = function (arquivo) { return '/pecas/previa/' + sala + '/' + arquivo + busca; };
+    var caminho = window.location.pathname.split('/').filter(Boolean);
+    var base = '/' + caminho.slice(0, 4).join('/') + '/';
+    var url = function (arquivo) { return base + arquivo + busca; };
     var cam = document.getElementById('camera');
     var tela = document.getElementById('tela');
     var palco = document.getElementById('previa');
@@ -70,29 +88,60 @@
     var tempo = document.getElementById('tempo');
     var medidas = document.getElementById('medidas');
     var marcas = [];
+    var partesCam = [];
+    var partesTela = [];
+    var parteCam = null;
+    var parteTela = null;
+    var total = 0;
     var diferencas = [];
 
-    function aplicar() {
-        var e = estadoEm(marcas, cam.currentTime * 1000);
-        palco.dataset.tela = e.tela ? 'ligada' : 'desligada';
+    /** O instante da linha do tempo (ms): a parte da camera que toca mais o tempo dela. */
+    function agora() { return (parteCam ? parteCam.t : 0) + cam.currentTime * 1000; }
+
+    function carregar(video, parte, ms, tocar) {
+        video.src = url(parte.arquivo);
+        video.addEventListener('loadedmetadata', function () {
+            video.currentTime = Math.max(0, (ms - parte.t) / 1000);
+            if (tocar) { video.play().catch(function () {}); }
+        }, { once: true });
+    }
+
+    function irPara(ms, tocar) {
+        var c = parteEm(partesCam, ms) || partesCam[0];
+        if (c !== parteCam) { parteCam = c; carregar(cam, c, ms, tocar); } else { cam.currentTime = Math.max(0, (ms - c.t) / 1000); }
+        conferirTela(ms, tocar);
+    }
+
+    function conferirTela(ms, tocar) {
+        var t = parteEm(partesTela, ms);
+        if (t && t !== parteTela) { parteTela = t; carregar(tela, t, ms, tocar); }
+        if (!t) { parteTela = null; }
+    }
+
+    function aplicar(ms) {
+        var e = estadoEm(marcas, ms);
+        palco.dataset.tela = e.tela && parteTela ? 'ligada' : 'desligada';
         palco.dataset.camera = e.camera ? 'ligada' : 'desligada';
         return e;
     }
 
     function seguir() {
-        var e = aplicar();
-        if (!cam.paused && !cam.seeking) {
-            var d = tela.currentTime - cam.currentTime;
+        var ms = agora();
+        // A proxima parte da camera comecou: troca, sem parar.
+        var proxima = parteEm(partesCam, ms);
+        if (proxima && proxima !== parteCam) { irPara(ms, !cam.paused); }
+        conferirTela(ms, !cam.paused);
+        var e = aplicar(ms);
+        if (parteTela && !cam.paused && !cam.seeking && !tela.seeking && tela.readyState > 0) {
+            var d = tela.currentTime - (ms - parteTela.t) / 1000;
             var c = correcao(d);
-            if (c.pular) { tela.currentTime = cam.currentTime; }
+            if (c.pular) { tela.currentTime = Math.max(0, (ms - parteTela.t) / 1000); }
             tela.playbackRate = c.taxa;
             if (e.tela) { diferencas.push(Math.abs(d)); }
         }
-        if (isFinite(cam.duration)) {
-            barra.max = String(cam.duration);
-            barra.value = String(cam.currentTime);
-            tempo.textContent = relogio(cam.currentTime) + ' / ' + relogio(cam.duration);
-        }
+        barra.max = String(total / 1000);
+        barra.value = String(ms / 1000);
+        tempo.textContent = relogio(ms / 1000) + ' / ' + relogio(total / 1000);
         if (diferencas.length) {
             var ord = diferencas.slice().sort(function (a, b) { return a - b; });
             medidas.textContent = 'Tela x câmera com a tela no palco: mediana ' + Math.round(ord[Math.floor(ord.length / 2)] * 1000) + ' ms, pior ' + Math.round(ord[ord.length - 1] * 1000) + ' ms';
@@ -100,24 +149,41 @@
         window.requestAnimationFrame(seguir);
     }
 
+    // A camera espera a tela no palco carregar: essa pausa nao pausa a tela (senao as duas esperam uma pela outra).
+    var esperandoTela = false;
     cam.addEventListener('waiting', function () { tela.pause(); });
-    cam.addEventListener('playing', function () { tela.currentTime = cam.currentTime; tela.play().catch(function () {}); });
-    cam.addEventListener('pause', function () { tela.pause(); botao.textContent = 'Tocar'; });
+    cam.addEventListener('playing', function () { if (parteTela) { tela.play().catch(function () {}); } });
+    cam.addEventListener('pause', function () { if (!esperandoTela) { tela.pause(); } botao.textContent = esperandoTela ? 'Carregando…' : 'Tocar'; });
     cam.addEventListener('play', function () { botao.textContent = 'Pausar'; });
-    tela.addEventListener('waiting', function () { if (aplicar().tela && !cam.paused) { cam.pause(); tela.addEventListener('playing', function () { cam.play().catch(function () {}); }, { once: true }); } });
-    botao.addEventListener('click', function () { if (cam.paused) { cam.play().catch(function () {}); } else { cam.pause(); } });
-    barra.addEventListener('input', function () { cam.currentTime = Number(barra.value); tela.currentTime = Number(barra.value); aplicar(); });
+    tela.addEventListener('waiting', function () {
+        if (esperandoTela || cam.paused || !aplicar(agora()).tela) { return; }
+        esperandoTela = true;
+        cam.pause();
+    });
+    tela.addEventListener('playing', function () {
+        if (!esperandoTela) { return; }
+        esperandoTela = false;
+        cam.play().catch(function () {});
+    });
+    botao.addEventListener('click', function () {
+        if (esperandoTela) { esperandoTela = false; tela.pause(); botao.textContent = 'Tocar'; return; }
+        if (cam.paused) { cam.play().catch(function () {}); } else { cam.pause(); }
+    });
+    barra.addEventListener('input', function () { irPara(Number(barra.value) * 1000, !cam.paused); });
 
     fetch(url('linha-do-tempo.jsonl'), { cache: 'no-store' })
         .then(function (r) { return r.ok ? r.text() : ''; })
         .then(function (texto) {
             marcas = lerLinha(texto);
+            partesCam = partes(marcas, 'camera');
+            partesTela = partes(marcas, 'tela');
+            var fim = marcas.filter(function (m) { return m.kind === 'stop'; }).pop();
+            total = fim ? fim.t : (marcas.length ? marcas[marcas.length - 1].t : 0);
             var lista = document.getElementById('trocas');
             var nomes = { camera_off: 'câmera desligada', camera_on: 'câmera ligada', screen_off: 'tela desligada', screen_on: 'tela ligada', start: 'começo', stop: 'fim' };
-            lista.textContent = marcas.map(function (m) { return relogio(m.t / 1000) + ' ' + (nomes[m.kind] || m.kind); }).join(' · ');
-            cam.src = url('camera.webm');
-            tela.src = url('tela.webm');
-            aplicar();
+            lista.textContent = marcas.filter(function (m) { return m.kind !== 'arquivo'; }).map(function (m) { return relogio(m.t / 1000) + ' ' + (nomes[m.kind] || m.kind); }).join(' · ');
+            irPara(0, false);
+            cam.addEventListener('loadedmetadata', function () { if (!total && isFinite(cam.duration)) { total = cam.duration * 1000; } }, { once: true });
             window.requestAnimationFrame(seguir);
         });
 })(typeof window !== 'undefined' ? window : globalThis);

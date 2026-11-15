@@ -1,14 +1,23 @@
 /*
- * Bunker707: as pecas da Live gravada em teste (docs/30 A62; docs/20 §8B.7). Pedido do produtor de 14/11/2026: "o
+ * Bunker707: as pecas da Live gravada em teste (docs/30 A62; docs/20 §8B.10). Pedido do produtor de 14/11/2026: "o
  * ideal e que o aluno pense realmente que esta em uma aula ao vivo". Em vez de um video so, o gravador guarda a camera
- * de quem apresenta com o audio e a tela compartilhada em pecas separadas, do mesmo tamanho (a tela fica preta quando
- * ninguem compartilha), mais a linha do tempo do palco, para a Live gravada remontar a live depois.
+ * de quem apresenta com o audio e a tela compartilhada em pecas separadas, mais a linha do tempo do palco, para a Live
+ * gravada remontar a live depois. Cada gravacao (cada vez que o gravador entra na sala) tem um id proprio e a sua pasta
+ * no receptor; cada peca vem em partes (camera-1.webm, tela-1.webm...) e a linha do tempo diz quando cada parte comeca
+ * (a marca `arquivo`).
+ *
+ * Dois jeitos de gravar, escolhidos por webinario na lista do receptor (o cabecalho X-Pecas-Modo do /pecas/ativo):
+ * - `direto` (o padrao): o MediaRecorder grava a faixa recebida de quem apresenta, sem redesenhar; a camera com o
+ *   audio numa parte, a tela noutra, que comeca no primeiro compartilhamento; uma parte nova quando a faixa muda. A
+ *   camera desligada e a tela parada ficam sem quadros, e a linha do tempo diz o que mostrar.
+ * - `canvas`: o jeito do primeiro teste, abaixo; no segundo teste em producao (15/11/2026) o canvas, sem placa de
+ *   video, deixou so uns 10 quadros por segundo (os quadros chegam inteiros), e fica para comparar.
  *
  * Roda so no gravador (o carregador do custom-config.js liga este arquivo so com config.iAmRecorder=true no hash, que o
  * Jibri manda) e so na sala de um webinario ligado no receptor (GET /pecas/ativo, a lista ativas.txt do servidor C).
  * Fora disso nao faz nada, e a gravacao de sempre (a tela do Jibri, finalize.sh) nao muda em nenhum caso.
  *
- * Como: as faixas de quem apresenta (o moderador visivel) vao para dois canvas (1280x720 e 1920x1080), redesenhados a
+ * No `canvas`: as faixas de quem apresenta (o moderador visivel) vao para dois canvas (1280x720 e 1920x1080), redesenhados a
  * cada quadro que chega (o leitor de quadros, MediaStreamTrackProcessor: o elemento de video escondido fora da tela so
  * avisa uns 5 quadros por segundo, o teste de 15/11/2026) e no minimo 1 vez por segundo (preto sem a faixa), e dois
  * MediaRecorder comecam no mesmo instante: camera.webm (o canvas da camera + o audio, por uma faixa de WebAudio que
@@ -83,12 +92,17 @@
         return null;
     }
 
+    // O id desta gravacao: o Jibri abre a pagina de novo a cada gravacao, e o Gravar de novo na mesma live nao pode
+    // cair na pasta (nem na ordem dos pedacos) da anterior.
+    var gravacao = (Date.now().toString(36) + Math.random().toString(36).slice(2, 8)).toLowerCase();
+    api.gravacao = gravacao;
+
     // Cada passo ao receptor, sem segredo: o estado e um detalhe curto (o receptor so anota as salas da lista).
     var salaNome = String(window.location.pathname.split('/').pop() || '').toLowerCase();
     function avisar(estado, detalhe) {
         api.estado = estado;
         try {
-            var url = '/pecas/estado?sala=' + encodeURIComponent(salaNome) + '&estado=' + encodeURIComponent(estado);
+            var url = '/pecas/estado?sala=' + encodeURIComponent(salaNome) + '&gravacao=' + gravacao + '&estado=' + encodeURIComponent(estado);
             if (detalhe) { url += '&detalhe=' + encodeURIComponent(String(detalhe).slice(0, 120)); }
             fetch(url, { cache: 'no-store', keepalive: true }).catch(function () {});
         } catch (e) { /* o aviso nunca atrapalha */ }
@@ -113,8 +127,11 @@
         var nome = achada.nome;
         var room = achada.room;
         salaNome = nome;
-        var ativo = await fetch('/pecas/ativo?sala=' + encodeURIComponent(nome), { cache: 'no-store' }).then(function (r) { return r.status === 204; }, function () { return false; });
-        if (!ativo) { api.estado = 'desligado'; return; }
+        var modo = await fetch('/pecas/ativo?sala=' + encodeURIComponent(nome), { cache: 'no-store' }).then(function (r) {
+            return r.status === 204 ? (r.headers && r.headers.get && r.headers.get('X-Pecas-Modo') === 'canvas' ? 'canvas' : 'direto') : null;
+        }, function () { return null; });
+        if (!modo) { api.estado = 'desligado'; return; }
+        api.modo = modo;
         avisar('na-sala');
         var achou = senhaDoGravador();
         if (!achou) {
@@ -122,7 +139,7 @@
             return;
         }
         var chave = await crypto.subtle.importKey('raw', enc.encode(achou.senha), { hash: 'SHA-256', name: 'HMAC' }, false, ['sign']);
-        avisar('base', 'senha do ' + achou.de);
+        avisar('base', 'senha do ' + achou.de + ', jeito ' + modo);
         var entrouEm = Date.now();
 
         // ---- o envio: uma fila por arquivo, em ordem; uma falha que nao passa em 4 tentativas para a peca
@@ -138,9 +155,9 @@
                 var resumo = hex(await crypto.subtle.digest('SHA-256', buf));
                 for (var tentativa = 0; tentativa < 4; tentativa++) {
                     var ts = Date.now();
-                    var assinatura = hex(await crypto.subtle.sign('HMAC', chave, enc.encode(nome + '\n' + arquivo + '\n' + n + '\n' + ts + '\n' + resumo)));
+                    var assinatura = hex(await crypto.subtle.sign('HMAC', chave, enc.encode(nome + '/' + gravacao + '\n' + arquivo + '\n' + n + '\n' + ts + '\n' + resumo)));
                     try {
-                        var r = await fetch('/pecas/' + encodeURIComponent(nome) + '/' + arquivo, {
+                        var r = await fetch('/pecas/' + encodeURIComponent(nome) + '/' + gravacao + '/' + arquivo, {
                             body: buf,
                             cache: 'no-store',
                             headers: { 'Content-Type': 'application/octet-stream', 'X-Pecas-Assinatura': assinatura, 'X-Pecas-Seq': String(n), 'X-Pecas-Ts': String(ts) },
@@ -226,6 +243,7 @@
             pedido = c;
             return setOriginal(inicio === null ? c : comNossas(c));
         };
+        var aoMudar = null;
         function atualizar() {
             var p = apresentador();
             var faixas = p ? p.getTracks() : [];
@@ -268,6 +286,7 @@
                     audioFonte.connect(audioDest);
                 }
             }
+            if (aoMudar) { aoMudar(); }
         }
         // ---- o leitor de quadros: cada quadro decodificado da faixa, sem depender do elemento de video (escondido fora
         // da tela, ele avisa poucos quadros). Fica so o ultimo quadro aberto; o anterior e fechado na hora.
@@ -399,6 +418,7 @@
                 desenhadosPorSegundo: { camera: +(conta.desenhoCam / (MEDIDA_MS / 1000)).toFixed(1), tela: +(conta.desenhoScr / (MEDIDA_MS / 1000)).toFixed(1) },
                 erros: api.erros || 0,
                 fase: inicio === null ? 'base' : 'pecas',
+                modo: modo,
                 memoriaMb: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null,
                 pressao: pressao,
                 conexao: conexao,
@@ -413,30 +433,61 @@
             mandarMedida(JSON.stringify(item) + '\n');
         }, MEDIDA_MS);
 
-        // ---- as pecas, depois da base
+        // ---- as pecas, depois da base: cada peca em partes, e a marca `arquivo` na linha do tempo quando uma comeca
         await esperar(Math.max(0, entrouEm + BASE_MS - Date.now()));
         audioCtx.resume().catch(function () {});
-        setInterval(desenhar, 1000 / FPS);
-        desenhar();
-        var camStream = new MediaStream([camCanvas.captureStream(FPS).getVideoTracks()[0], audioDest.stream.getAudioTracks()[0]]);
-        var scrStream = new MediaStream([scrCanvas.captureStream(FPS).getVideoTracks()[0]]);
-        var gravadores = [
-            [new MediaRecorder(camStream, { mimeType: 'video/webm;codecs=vp8,opus', videoBitsPerSecond: 2500000 }), fila('camera.webm')],
-            [new MediaRecorder(scrStream, { mimeType: 'video/webm;codecs=vp8', videoBitsPerSecond: 4000000 }), fila('tela.webm')]
-        ];
-        gravadores.forEach(function (par) {
-            par[0].ondataavailable = function (e) { if (e.data && e.data.size > 0) { par[1](e.data); } };
-        });
+        var audioFaixa = audioDest.stream.getAudioTracks()[0];
+        var OPCOES = {
+            camera: { mimeType: 'video/webm;codecs=vp8,opus', videoBitsPerSecond: 2500000 },
+            som: { mimeType: 'audio/webm;codecs=opus' },
+            tela: { mimeType: 'video/webm;codecs=vp8', videoBitsPerSecond: 4000000 }
+        };
+        var numero = { camera: 0, tela: 0 };
+        var atuais = { camera: null, tela: null };
+        var todos = [];
+        function novaParte(tipo, faixaVideo, faixas, opcoes) {
+            if (atuais[tipo]) { try { atuais[tipo].gravador.stop(); } catch (e) { /* ja parado */ } }
+            numero[tipo]++;
+            var arquivo = tipo + '-' + numero[tipo] + '.webm';
+            var mandar = fila(arquivo);
+            var gravador = new MediaRecorder(new MediaStream(faixas), opcoes);
+            gravador.ondataavailable = function (e) { if (e.data && e.data.size > 0) { mandar(e.data); } };
+            gravador.start(PEDACO_MS);
+            atuais[tipo] = { faixa: faixaVideo, gravador: gravador };
+            todos.push(gravador);
+            marcar('arquivo', { arquivo: arquivo });
+        }
+        // No `direto`: a parte da camera segue a faixa da camera (sem ela, so a voz); a da tela comeca no primeiro
+        // compartilhamento e segue a faixa da tela (parar de compartilhar so deixa a faixa sem quadros).
+        function conferirPartes() {
+            if (modo !== 'direto' || inicio === null || api.estado !== 'gravando') { return; }
+            var cam = estado.cam ? estado.cam.getTrack() : null;
+            if (!atuais.camera || atuais.camera.faixa !== cam) {
+                novaParte('camera', cam, cam ? [cam, audioFaixa] : [audioFaixa], cam ? OPCOES.camera : OPCOES.som);
+            }
+            var scr = estado.scr ? estado.scr.getTrack() : null;
+            if (scr && (!atuais.tela || atuais.tela.faixa !== scr)) {
+                novaParte('tela', scr, [scr], OPCOES.tela);
+            }
+        }
         inicio = performance.now();
-        gravadores.forEach(function (par) { par[0].start(PEDACO_MS); });
         avisar('gravando', 'camera ' + (estado.camMuda ? 'desligada' : 'ligada') + ', tela ' + (estado.scr ? 'ligada' : 'desligada'));
-        marcar('start', { camera: !estado.camMuda, screen: Boolean(estado.scr) });
+        marcar('start', { camera: !estado.camMuda, modo: modo, screen: Boolean(estado.scr) });
+        if (modo === 'canvas') {
+            setInterval(desenhar, 1000 / FPS);
+            desenhar();
+            novaParte('camera', null, [camCanvas.captureStream(FPS).getVideoTracks()[0], audioFaixa], OPCOES.camera);
+            novaParte('tela', null, [scrCanvas.captureStream(FPS).getVideoTracks()[0]], OPCOES.tela);
+        } else {
+            aoMudar = conferirPartes;
+            conferirPartes();
+        }
         pedirQualidade();
         function parar() {
             if (api.estado !== 'gravando') { return; }
-            avisar('parado', 'erros de envio: ' + (api.erros || 0));
+            avisar('parado', 'erros de envio: ' + (api.erros || 0) + ', partes: camera ' + numero.camera + ', tela ' + numero.tela);
             marcar('stop');
-            gravadores.forEach(function (par) { try { par[0].stop(); } catch (e) { /* ja parado */ } });
+            todos.forEach(function (g) { try { g.stop(); } catch (e) { /* ja parado */ } });
         }
         window.addEventListener('pagehide', parar);
         setTimeout(parar, MAX_MS);
