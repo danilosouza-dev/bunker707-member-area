@@ -46,7 +46,7 @@ test("montagem e smoke: o arquivo no nginx do web (somente leitura), servido em 
   assert.match(smoke, /plateia_sha=\$\(sha256sum "\$plateia_file" \| cut -c1-64\); plateia_v=\$\{plateia_sha:0:8\}/, "o smoke calcula o v pelo arquivo do commit");
   assert.match(smoke, /check "libs\/bunker707-plateia\.js[^"]*" 200 "\$public_url\/libs\/bunker707-plateia\.js"/, "o smoke confere que o arquivo e servido");
   assert.match(smoke, /served_sha=\$\(curl [^\n]*"\$public_url\/libs\/bunker707-plateia\.js\?v=\$plateia_v"[^\n]*\| sha256sum/, "e que o servido e o do commit");
-  assert.match(smoke, /"libs\/bunker707-plateia\.js\?v=\$plateia_v"; do/, "e que o config.js servido traz o carregador com o v atual");
+  assert.match(smoke, /"libs\/bunker707-plateia\.js\?v=\$plateia_v"[^\n]*; do/, "e que o config.js servido traz o carregador com o v atual");
 });
 
 test("o ?v= do carregador e o comeco do sha256 do arquivo: mudou o arquivo, muda o endereco (o nginx guarda /libs/* por um ano com ?v=)", () => {

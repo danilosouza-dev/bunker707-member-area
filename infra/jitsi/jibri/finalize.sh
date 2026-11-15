@@ -119,9 +119,36 @@ else
 fi
 
 # ---- 4. avisar o app (docs/30 §5.3) --------------------------------------------------------------------
+# A CPU da maquina durante a live (cpu-amostras.sh, docs/30 A62): {"nucleos":N,"amostras":[[unix,pct],...]}, a media de
+# cada 30 s das ultimas 6 h. O app guarda o corpo cru e o schema ignora o campo. Sem o arquivo ou sem amostras, nada.
+cpu_json() {
+    [ -f "$1" ] || return 0
+    awk '
+        /^# nucleos/ { n = $3; next }
+        $2 == "cpu" {
+            tot = 0; for (i = 3; i <= 10; i++) tot += $i; idle = $6 + $7
+            if (seen_prev) {
+                dt = tot - ptot; di = idle - pidle
+                if (dt > 0) {
+                    b = int($1 / 30) * 30; s[b] += (1 - di / dt) * 100; c[b]++
+                    if (!(b in got)) { got[b] = 1; ord[++k] = b }
+                }
+            }
+            seen_prev = 1; ptot = tot; pidle = idle
+        }
+        END {
+            if (k == 0) exit
+            first = (k > 720) ? k - 719 : 1
+            printf "{\"nucleos\":%d,\"amostras\":[", n + 0
+            for (j = first; j <= k; j++) { b = ord[j]; printf "%s[%d,%d]", (j > first ? "," : ""), b, int(s[b] / c[b] + 0.5) }
+            printf "]}"
+        }' "$1" 2>/dev/null
+}
 sign() { printf '%s.%s' "$1" "$2" | openssl dgst -sha256 -hmac "$WEBINAR_RECORDER_WEBHOOK_SECRET" -r | cut -d' ' -f1; }
 body="{\"sessionId\":\"$(json_str "${SESSAO:-}")\",\"state\":\"$state\",\"room\":\"$(json_str "$room")\",\"fileName\":\"$(json_str "$name")\",\"startedAt\":$(json_opt "$started_at"),\"durationSeconds\":$duration,\"sizeBytes\":$size,\"sha256\":\"$sha\",\"bunnyLibraryId\":$(json_opt "${BUNNY_LIBRARY_ID:-}"),\"bunnyVideoId\":$(json_opt "$guid")"
 [ -n "$error" ] && body="$body,\"error\":\"$(json_str "$error")\""
+cpu=$(cpu_json "${CPU_LOG:-/storage/cpu.log}")
+[ -n "$cpu" ] && body="$body,\"cpu\":$cpu"
 body="$body}"
 
 notified=0

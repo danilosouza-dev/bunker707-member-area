@@ -57,6 +57,7 @@ import { useRoomQuestionNews } from "./use-room-question-news";
 import { RoomReactionBubbles } from "./room-reactions";
 import { RoomSimulationJoins, RoomSimulationSales } from "./room-simulation";
 import { RoomSnackbarHost, RoomSnackbarProvider, useRoomSnackbarController } from "./room-snackbar";
+import { RECORDED_AUDIENCE_COLUMN, RoomAudienceColumn } from "./room-audience-column";
 import { RoomStage } from "./room-stage";
 import { RoomStageBadges, type RoomStageTopLeft } from "./room-stage-badges";
 import { useRoomChat, useRoomClock, useRoomHeartbeat, useRoomReactions } from "./use-room-data";
@@ -72,6 +73,8 @@ import { RoomScreenDock, RoomScreenStrip } from "./screen/room-screen-strip";
 import { RoomWideHidden } from "./screen/room-wide-hidden";
 import { useRoomScreen, useRoomScreenEvents } from "./screen/use-room-screen";
 import { useDeferredPolls, useRoomHydrated, useRoomPanelOpen, useRoomTheme } from "./use-room-prefs";
+import { useRoomAudience } from "./use-room-audience";
+import { useRoomDesktop } from "./use-room-desktop";
 import { useRoomSimulation } from "./use-room-simulation";
 import { useRoomTranslation } from "./use-room-translation";
 import { RoomDock } from "./vertical/room-dock";
@@ -79,6 +82,7 @@ import { VerticalChat } from "./vertical/vertical-chat";
 import { VerticalComposer } from "./vertical/vertical-composer";
 import { VerticalDrawer, type VerticalDrawerTab } from "./vertical/vertical-drawer";
 import { usePanelMotion } from "./use-panel-motion";
+import { audienceTilesNow } from "@/server/webinars/audience-tiles-model";
 import { screenCommentPlace } from "@/server/webinars/screen-comment-model";
 import { drawerTabFor, roomSkeleton, themeForDesign, verticalBadge, type RoomDesign } from "./vertical/vertical-model";
 import { VerticalTopBar } from "./vertical/vertical-top-bar";
@@ -602,6 +606,17 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const countdown = kind === "simulated" ? formatCountdown(zeroMs, nowMs + clock.skewMs) : "";
   /** O numero do contador: o real mais a parte simulada daquele instante (sem Simulacao, o real). */
   const shownCount = simulation.displayCount(presentNow, currentOffsetMs);
+  // A coluna de miniaturas da Live gravada (docs/30 D124; pronta e desligada ate a entrega 2 do plano A, A62, pela
+  // RECORDED_AUDIENCE_COLUMN): a pagina desenha ao lado do video (gravado sem miniaturas) a
+  // miniatura do proprio aluno e os participantes simulados daquele segundo, como o motor desenha na Live ao vivo
+  // (D120). So com a Simulacao ligada e o video no ar, no computador e no desenho normal; nunca no Replay, no "ver
+  // como" nem fora do acesso. A lista vem da mesma rota da live (GET .../audience), pedida ao entrar, quando a decisao
+  // da Simulacao muda e a cada 2 min.
+  const desktop = useRoomDesktop();
+  const audienceOn = RECORDED_AUDIENCE_COLUMN && !readOnly && !unavailable && kind === "simulated" && phase === "live" && !vertical && desktop && simulation.enabled === true;
+  const audienceRoster = useRoomAudience({ enabled: audienceOn, sessionId, simulationKey: naTela.simulationKey, webinarId });
+  const audienceColumn = audienceOn && audienceRoster.length > 0;
+  const audienceNow = audienceColumn ? audienceTilesNow(audienceRoster, simulation.displayCount(0, currentOffsetMs)) : audienceRoster;
   const drawerVisible = vertical && drawerOpen && !unavailable;
   // A barra do desenho normal (V2-6) so com a sala de pe, como na live: a sessao encerrada e fora do acesso a tiram, e
   // sem ela o painel fica na tela (o balao saiu junto).
@@ -975,10 +990,11 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   // O numero que a sala mostra (o selo do palco, a aba Participantes e o titulo dela): nulo quando nao ha o que mostrar.
   const presentShown = momentBadge.showCount && !presentHidden ? shownCount : null;
   const presentBadge = roomPresentBadge(presentShown);
-  // A gravada nao tem a coluna de miniaturas do iframe: os selos de baixo vao ate a borda do video.
+  // A coluna de miniaturas da gravada (D124) ocupa a direita do palco como a do motor na live: o video, os selos e as
+  // pilulas do chat param antes dela. Sem a coluna, vao ate a borda do video.
   // Com o aviso no palco, as pilulas do chat sobem a altura dele (room-chat-pills.tsx).
   const stageVars = {
-    "--room-video-right": `${stageVideoRightPx({ columnShown: false })}px`,
+    "--room-video-right": `${stageVideoRightPx({ columnShown: audienceColumn })}px`,
     ...(snackbar.stageOffsetPx > 0 ? { "--room-snackbar-offset": `${snackbar.stageOffsetPx}px` } : {})
   } as CSSProperties;
   // Fora do "Quem pode" (unavailable) nada mais e gravado: sem reacao nem Oferta.
@@ -1146,6 +1162,7 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
         <div className={skeleton.stageColumn} data-room-slot="stage-column">
           <div className={skeleton.stageBox} data-room-slot="stage-box" ref={stageBoxRef} style={stageVars}>
             {stage}
+            {audienceColumn ? <RoomAudienceColumn people={audienceNow} self={{ name: session.me.displayName, photoUrl: session.me.avatarUrl ?? null }} /> : null}
             {vertical || unavailable ? null : (
               <RoomStageBadges
                 assistantOn={stageAssistantShown({ assistantEnabled: assistant.state.enabled, bottomBadges, offerShown })}

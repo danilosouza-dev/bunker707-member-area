@@ -19,7 +19,14 @@
 	header Content-Security-Policy "frame-ancestors {$MEET_FRAME_ANCESTORS}"
 	encode zstd gzip
 
-	reverse_proxy web:8000 {
-		header_up X-Forwarded-For {client_ip}
+	# As pecas da Live gravada em teste (docs/30 A62): so o caminho /pecas/ vai ao receptor (servico pecas).
+	handle /pecas/* {
+		reverse_proxy pecas:8099
+	}
+
+	handle {
+		reverse_proxy web:8000 {
+			header_up X-Forwarded-For {client_ip}
+		}
 	}
 }

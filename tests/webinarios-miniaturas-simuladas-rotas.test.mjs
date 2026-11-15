@@ -147,7 +147,7 @@ test("a live com participantes simulados e a decisao: a lista ordenada, igual ao
   assert.equal(db.calls.writes.length, 0, "a rota so le");
 });
 
-test("so a Live ao vivo no ar com participantes simulados e a decisao registrada; o resto devolve enabled false com a lista vazia", async () => {
+test("so a Live ao vivo e a Live gravada no ar com participantes simulados e a decisao registrada; o resto devolve enabled false com a lista vazia", async () => {
   const off = { base: 0, jitter: 0, mode: "off", peak: 0 };
   const casos = [
     ["sem participantes simulados (o contador so com o real)", { ...DECISAO, simulated_count_rule: null }],
@@ -163,17 +163,31 @@ test("so a Live ao vivo no ar com participantes simulados e a decisao registrada
     assert.deepEqual(answer.body.data, DESLIGADO, nome);
   }
 
-  // A Live gravada e o replay nao tem o motor de video: nunca a lista, mesmo com regra e decisao.
-  for (const sessionId of [SESSION, REPLAY]) {
+  // A Live gravada (desde 14/11/2026, D124: a pagina desenha a coluna ao lado do video) recebe a lista como a live; o
+  // Replay nunca, mesmo com regra e decisao.
+  const montarGravada = (sessionId) => {
     const tables = escolaDaSimulacao({ sessao: regras });
     tables.webinar_personas = PESSOAS.map((row) => ({ ...row }));
+    tables.webinar_chat_script_items = ROTEIRO.map((row) => ({ ...row }));
     actionStubs.db = bancoDaSimulacao({ tables });
     Object.assign(actionStubs.db.tables.webinar_sessions.find((item) => item.id === sessionId), regras);
     resetRoomAccessCache();
     resetAudienceTilesCache();
     novoAluno();
-    assert.deepEqual((await ler({ sessionId })).body.data, DESLIGADO, sessionId);
-  }
+  };
+  montarGravada(SESSION);
+  const gravada = (await ler({ sessionId: SESSION })).body.data;
+  assert.equal(gravada.enabled, true, "a Live gravada com participantes simulados e a decisao");
+  assert.equal(gravada.people.length, 300);
+  assert.deepEqual(
+    gravada.people.slice(0, 3).map((person) => person.name),
+    ["Marcos Lima", "De Outro Webinario", "Zélia Prado"],
+    "a mesma ordem da live: com foto (quem comenta neste roteiro primeiro), depois sem foto"
+  );
+  assert.ok(gravada.people.slice(3).every((person) => person.id.startsWith("simg") && person.photoUrl === null));
+  assert.equal(actionStubs.db.calls.writes.length, 0, "a rota so le");
+  montarGravada(REPLAY);
+  assert.deepEqual((await ler({ sessionId: REPLAY })).body.data, DESLIGADO, "o Replay nunca tem a coluna");
 
   montar(regras, { semColunas: true });
   const semColunas = await ler();
@@ -209,5 +223,7 @@ test("a lista de cada sessao fica 30 s na memoria do processo: a turma que entra
     ["Marcos Lima", "Alba Nova", "De Outro Webinario", "Zélia Prado"],
     "passado o prazo, a pessoa nova com foto entra entre as com foto, depois de quem comenta neste roteiro"
   );
-  assert.deepEqual(await loadAudienceTiles(db, { session: { id: SESSION, kind: "simulated" }, webinarId: WEBINAR }, now), DESLIGADO, "a sessao gravada nem le o banco");
+  const antesDoReplay = leituras();
+  assert.deepEqual(await loadAudienceTiles(db, { session: { id: REPLAY, kind: "replay" }, webinarId: WEBINAR }, now), DESLIGADO, "o Replay");
+  if (antesDoReplay !== null) assert.equal(leituras(), antesDoReplay, "o Replay nem le o banco");
 });

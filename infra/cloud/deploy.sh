@@ -140,6 +140,9 @@ elif [ "$role" = "meet" ]; then
         # para a configuracao nova (o carregador do CSS e o ?v= dele) chegar ao config.js servido (docs/31 §3).
         remote "$jitsi_compose up -d --force-recreate --no-deps web"
         remote "$jitsi_compose up -d && bash -c '. infra/jitsi/scripts/_env.sh; reconnect_focus'"
+        # O Caddy le o Caddyfile so na partida, e o `up -d` nao o recria quando so o arquivo mudou (a rota /pecas/ do
+        # receptor, docs/30 A62): recarrega a configuracao, sem derrubar conexao nenhuma.
+        remote "$jitsi_compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile"
     else
         log "Primeira subida do stack do Jitsi (imagens, compose up)"
         remote "$jitsi_compose pull --quiet && $jitsi_compose up -d"

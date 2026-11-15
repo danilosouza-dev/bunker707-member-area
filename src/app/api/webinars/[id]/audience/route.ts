@@ -5,13 +5,15 @@ import { guardRoomRequest, loadCachedRoomContext, ok, roomErrorResponse, session
 import { WEBINARS_FEATURE } from "@/server/licensing/features";
 import { licenseRouteRefusal } from "@/server/licensing/guards";
 
-// Os participantes simulados nas miniaturas da Live ao vivo (docs/30 D120; pedido do produtor de 13/11/2026): GET
+// Os participantes simulados nas miniaturas da Live ao vivo (docs/30 D120; pedido do produtor de 13/11/2026) e da Live
+// gravada (D124, 14/11/2026): GET
 // ?sessao= devolve { data: { enabled, people } }, a lista ordenada de quem pode aparecer como miniatura simulada (as
 // pessoas que comentam com foto, as sem foto e nomes genericos, ate 300), cada uma com o id no nosso formato, o nome e
 // a foto do nosso bucket ou nula. Quantas aparecem em cada instante a sala decide pelo numero de participantes
-// simulados daquele segundo (a janela de GET .../simulation), e manda a lista ao iframe: quem desenha e o proprio
-// motor, sem conexao nenhuma por simulado. A sala pede ao entrar e quando a decisao da Simulacao muda (a chave que a
-// consulta de 5 s do chat ja traz). Nunca a semente nem as regras. Sessao gravada, replay, cancelada, encerrada, sem a
+// simulados daquele segundo (a janela de GET .../simulation). Na Live ao vivo a sala manda a lista ao iframe e quem
+// desenha e o proprio motor, sem conexao nenhuma por simulado; na Live gravada a propria pagina desenha a coluna ao lado
+// do video. A sala pede ao entrar e quando a decisao da Simulacao muda (a chave que a consulta de 5 s do chat ja
+// traz). Nunca a semente nem as regras. Replay, sessao cancelada, encerrada, sem a
 // decisao registrada (§8.6), sem participantes simulados ou banco sem as colunas: { enabled: false, people: [] }.
 // Sessao obrigatoria (401), id do webinario (400), ?sessao= invalida (400), fora do acesso ou sessao de outro
 // webinario (404), sem a vaga obrigatoria (403). Leitura: o acesso conferido fica guardado (loadCachedRoomContext),
