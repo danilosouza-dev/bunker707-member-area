@@ -198,7 +198,8 @@ test("compose do Jitsi: web, prosody, jicofo e jvb na tag stable fixada, saude e
   assert.match(caddy, /^\s+profiles:\s*\[\s*"borda"\s*\]\s*$/m);
   const mauticCaddyImage = /image:\s*(caddy:\S+)/.exec(mauticCompose)?.[1];
   assert.equal(/image:\s*(caddy:\S+)/.exec(caddy)?.[1], mauticCaddyImage, "a mesma imagem do Caddy dos outros servidores (um jeito so de operar TLS)");
-  assert.match(caddy, /- \.\/caddy\/Caddyfile:\/etc\/caddy\/Caddyfile:ro/);
+  // A pasta, e nao o arquivo: o reload do deploy-meet precisa ver o Caddyfile novo (tests/infra-jitsi-pecas.test.mjs).
+  assert.match(caddy, /- \.\/caddy:\/etc\/caddy:ro/);
   assert.equal((caddy.match(/\$\{CADDY_BIND:-0\.0\.0\.0\}/g) ?? []).length, 3, "80, 443 e 443/udp presos a CADDY_BIND");
 });
 

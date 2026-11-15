@@ -216,6 +216,11 @@ test("a ligacao na instancia: so o gravador carrega o arquivo, o receptor atras 
   assert.match(read("infra/jitsi/scripts/volumes.sh"), /dirs=\([^)]*\bpecas\b[^)]*\)/, "a pasta do receptor nasce do uid 1000");
   const deploy = read("infra/cloud/deploy.sh");
   assert.ok(deploy.indexOf("caddy reload --config /etc/caddy/Caddyfile") > deploy.indexOf("reconnect_focus'\""), "o deploy recarrega o Caddy depois do up -d (o up nao o recria quando so o Caddyfile muda)");
+  // O deploy troca o Caddyfile por um arquivo novo (git archive | tar): montado como arquivo, o container continua com
+  // o de antes e o reload le a configuracao velha (o deploy-meet de 15/11/2026). Montada a pasta, o reload ve o novo.
+  const borda = compose.slice(compose.indexOf("\n  caddy:"), compose.indexOf("\nnetworks:"));
+  assert.match(borda, /- \.\/caddy:\/etc\/caddy:ro/, "o Caddy monta a pasta, para o reload ler o Caddyfile novo");
+  assert.doesNotMatch(borda, /\.\/caddy\/Caddyfile:/, "nada de montar o arquivo sozinho");
   const smoke = read("infra/jitsi/scripts/smoke.sh");
   assert.match(smoke, /check "pecas\/ativo \(o receptor das pecas\)" "204\|404"/);
   assert.match(smoke, /"libs\/bunker707-pecas\.js\?v=\$pecas_v"/, "o config.js servido liga a versao do commit");

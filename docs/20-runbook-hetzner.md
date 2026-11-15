@@ -813,6 +813,15 @@ ficam no disco do C, 40 GB, ate isso; o receptor recusa acima de 8 GB por sala e
 `deploy-meet` recarrega o Caddy depois do `up -d` (a rota `/pecas/` so existe com o Caddyfile novo) e o `smoke.sh`
 confere o arquivo servido e o receptor (`/pecas/ativo` responde 204 ou 404; 502 seria o servico fora do ar).
 
+O primeiro `deploy-meet` com as pecas (15/11/2026) falhou so no smoke: `/pecas/ativo` respondeu 200, a pagina da sala.
+O deploy troca os arquivos por novos (`git archive | tar -x`), e o Caddy montava o `Caddyfile` sozinho: a montagem de um
+arquivo continua presa ao arquivo de antes, entao o reload leu a configuracao velha, sem a rota `/pecas/`. Na hora,
+`exec-meet` com `docker compose -f infra/jitsi/docker-compose.yml --profile borda up -d --force-recreate --no-deps caddy`
+resolveu (a recriacao monta o arquivo novo). De vez: o compose monta a pasta `infra/jitsi/caddy` em `/etc/caddy`, e o
+reload passa a ver o arquivo novo (provado num Caddy local: com o arquivo montado, o reload continua na versao 1; com a
+pasta, vai para a 2). O primeiro `deploy-meet` depois dessa troca recria o Caddy (cerca de 1 s sem a borda; o
+`deploy-meet` ja pede `SEM_LIVE_2H=sim`).
+
 ## 8C. Emissor de licencas: o servidor `bunker707-licencas` (10/11/2026)
 
 O desenho esta no `docs/32` (§10, §11.2 e D39; o codigo, no repositorio privado `bunker-licensing`); aqui fica so a

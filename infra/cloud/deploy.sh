@@ -141,7 +141,9 @@ elif [ "$role" = "meet" ]; then
         remote "$jitsi_compose up -d --force-recreate --no-deps web"
         remote "$jitsi_compose up -d && bash -c '. infra/jitsi/scripts/_env.sh; reconnect_focus'"
         # O Caddy le o Caddyfile so na partida, e o `up -d` nao o recria quando so o arquivo mudou (a rota /pecas/ do
-        # receptor, docs/30 A62): recarrega a configuracao, sem derrubar conexao nenhuma.
+        # receptor, docs/30 A62): recarrega a configuracao, sem derrubar conexao nenhuma. O reload so ve o arquivo
+        # novo porque o compose monta a pasta infra/jitsi/caddy (o deploy de 15/11/2026, com o arquivo montado, leu o
+        # de antes; docs/20 §8B.10).
         remote "$jitsi_compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile"
     else
         log "Primeira subida do stack do Jitsi (imagens, compose up)"
