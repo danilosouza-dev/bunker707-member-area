@@ -8,11 +8,13 @@
  * Jibri manda) e so na sala de um webinario ligado no receptor (GET /pecas/ativo, a lista ativas.txt do servidor C).
  * Fora disso nao faz nada, e a gravacao de sempre (a tela do Jibri, finalize.sh) nao muda em nenhum caso.
  *
- * Como: as faixas de quem apresenta (o moderador visivel) vao para dois canvas (1280x720 e 1920x1080), redesenhados
- * quando chega quadro novo e no minimo 5 vezes por segundo (preto sem a faixa), e dois MediaRecorder comecam no mesmo
- * instante: camera.webm (o canvas da camera + o audio, por uma faixa de WebAudio que existe o tempo todo) e tela.webm.
- * A qualidade recebida e pedida por cima da que a tela do gravador pede (a camera em 720p e a tela em 1080p; sem isso,
- * com a tela no palco, a camera chega em 180p). Os pedacos de 2 s vao em ordem ao receptor (infra/jitsi/pecas), no
+ * Como: as faixas de quem apresenta (o moderador visivel) vao para dois canvas (1280x720 e 1920x1080), redesenhados a
+ * cada quadro que chega (o leitor de quadros, MediaStreamTrackProcessor: o elemento de video escondido fora da tela so
+ * avisa uns 5 quadros por segundo, o teste de 15/11/2026) e no minimo 1 vez por segundo (preto sem a faixa), e dois
+ * MediaRecorder comecam no mesmo instante: camera.webm (o canvas da camera + o audio, por uma faixa de WebAudio que
+ * existe o tempo todo) e tela.webm. A qualidade recebida e pedida por cima da que a tela do gravador pede, sem nunca
+ * baixar a dela (a camera em pelo menos 720p e a tela em 1080p; sem isso, com a tela no palco, a camera chega em
+ * 180p). Os pedacos de 1 s vao em ordem ao receptor (infra/jitsi/pecas), no
  * mesmo endereco da sala, assinados com HMAC-SHA256 pela senha do usuario do gravador. O Jibri da tag fixada manda essa
  * senha no endereco da sala (config.useHostPageLocalStorage=true e appData.localStorageContent, com o JSON codificado
  * duas vezes), e o Jitsi a guarda so na memoria: o localStorage de verdade fica vazio (o teste de 15/11/2026 parou ai,
@@ -23,8 +25,9 @@
  * cada envio recusado com o codigo. Uma falha no gravador de verdade deixa o motivo no log do receptor.
  *
  * O teste: os 2 primeiros minutos na sala sao a base (sem as pecas); depois as pecas e as medidas a cada 5 s
- * (quadros que chegam e que sao desenhados, a altura recebida, o atraso do caminho ate o canvas, a pressao de CPU e a
- * memoria), com o relogio de parede para casar com a CPU que o gravador anota (infra/cloud/jibri.sh).
+ * (quadros que chegam por tres medidas: o elemento de video, o leitor de quadros e as estatisticas da conexao
+ * (getStats, os quadros recebidos, decodificados e descartados e a altura); os desenhados, o atraso do caminho ate o
+ * canvas, a pressao de CPU e a memoria), com o relogio de parede para casar com a CPU que o gravador anota.
  */
 (function () {
     'use strict';
@@ -33,7 +36,7 @@
 
     // A base dura 2 min; o ensaio local encurta pela variavel da pagina (o Jibri nunca a define).
     var BASE_MS = typeof window.__bunker707PecasBaseMs === 'number' ? window.__bunker707PecasBaseMs : 120000;
-    var PEDACO_MS = 2000;
+    var PEDACO_MS = 1000;
     var MEDIDA_MS = 5000;
     var MAX_MS = 4 * 60 * 60 * 1000;
     var CAM = { h: 720, w: 1280 };
@@ -202,8 +205,16 @@
         function comNossas(c) {
             var out = Object.assign({}, c || {}, { constraints: Object.assign({}, (c && c.constraints) || {}) });
             var palco = new Set((c && c.onStageSources) || []);
-            if (fontes.cam) { out.constraints[fontes.cam] = { maxHeight: CAM.h }; palco.add(fontes.cam); }
-            if (fontes.scr) { out.constraints[fontes.scr] = { maxHeight: SCR.h }; palco.add(fontes.scr); }
+            // Nunca abaixo do que a tela do gravador pede: sem a tela no palco, a camera vem em 1080p para a gravacao de
+            // sempre, e o 720p das pecas nao pode baixar a dela (o teste de 15/11/2026 baixou).
+            function pelo(fonte, altura) {
+                var dela = out.constraints[fonte];
+                var h = dela && typeof dela.maxHeight === 'number' ? dela.maxHeight : 0;
+                out.constraints[fonte] = Object.assign({}, dela || {}, { maxHeight: Math.max(h, altura) });
+                palco.add(fonte);
+            }
+            if (fontes.cam) { pelo(fontes.cam, CAM.h); }
+            if (fontes.scr) { pelo(fontes.scr, SCR.h); }
             out.onStageSources = Array.from(palco);
             return out;
         }
@@ -228,6 +239,7 @@
                 estado.cam = cam;
                 camVideo.srcObject = cam ? new MediaStream([cam.getTrack()]) : null;
                 if (cam) { camVideo.play().catch(function () {}); }
+                ler('cam', cam ? cam.getTrack() : null);
                 sujo = true;
             }
             var muda = !cam || cam.isMuted();
@@ -238,6 +250,7 @@
                 estado.scr = viva;
                 scrVideo.srcObject = viva ? new MediaStream([viva.getTrack()]) : null;
                 if (viva) { scrVideo.play().catch(function () {}); }
+                ler('scr', viva ? viva.getTrack() : null);
                 sujo = true;
                 if (Boolean(viva) !== antes) { marcar(viva ? 'screen_on' : 'screen_off'); }
             }
@@ -256,6 +269,69 @@
                 }
             }
         }
+        // ---- o leitor de quadros: cada quadro decodificado da faixa, sem depender do elemento de video (escondido fora
+        // da tela, ele avisa poucos quadros). Fica so o ultimo quadro aberto; o anterior e fechado na hora.
+        var ultimo = { cam: null, scr: null };
+        var leitores = { cam: null, scr: null };
+        var contaLeitor = { cam: 0, scr: 0 };
+        var conta = { cam: 0, desenhoCam: 0, desenhoScr: 0, scr: 0 };
+        var atrasos = { cam: [], scr: [] };
+        var chegou = { cam: null, scr: null };
+        function ler(k, faixa) {
+            if (leitores[k] && leitores[k].faixa === faixa) { return; }
+            if (leitores[k]) { try { leitores[k].leitor.cancel(); } catch (e) { /* ja fechado */ } leitores[k] = null; }
+            if (ultimo[k]) { ultimo[k].close(); ultimo[k] = null; }
+            if (!faixa || typeof window.MediaStreamTrackProcessor !== 'function') { return; }
+            var leitor;
+            try { leitor = new window.MediaStreamTrackProcessor({ track: faixa }).readable.getReader(); } catch (e) { return; }
+            var meu = { faixa: faixa, leitor: leitor };
+            leitores[k] = meu;
+            (async function () {
+                for (;;) {
+                    var r;
+                    try { r = await leitor.read(); } catch (e) { return; }
+                    if (r.done) { return; }
+                    if (leitores[k] !== meu) { r.value.close(); return; }
+                    if (ultimo[k]) { ultimo[k].close(); }
+                    ultimo[k] = r.value;
+                    contaLeitor[k]++;
+                    chegou[k] = performance.now();
+                    sujo = true;
+                }
+            })();
+        }
+
+        // ---- as estatisticas da conexao com o motor (getStats): o que de fato chega de quem apresenta, por faixa
+        var anteriores = {};
+        async function estatisticas() {
+            var sessao = room.jvbJingleSession;
+            var pc = sessao && sessao.peerconnection && sessao.peerconnection.peerconnection;
+            if (!pc || typeof pc.getStats !== 'function') { return null; }
+            var ids = {
+                camera: estado.cam && estado.cam.getTrack() ? estado.cam.getTrack().id : null,
+                tela: estado.scr && estado.scr.getTrack() ? estado.scr.getTrack().id : null
+            };
+            var relatorio = await pc.getStats();
+            var saida = {};
+            var segundos = MEDIDA_MS / 1000;
+            relatorio.forEach(function (r) {
+                if (r.type !== 'inbound-rtp' || r.kind !== 'video') { return; }
+                var k = r.trackIdentifier && r.trackIdentifier === ids.camera ? 'camera' : (r.trackIdentifier && r.trackIdentifier === ids.tela ? 'tela' : null);
+                var a = anteriores[r.id] || {};
+                anteriores[r.id] = { d: r.framesDecoded || 0, p: r.packetsLost || 0, q: r.framesDropped || 0, r: r.framesReceived || 0 };
+                if (!k) { return; }
+                saida[k] = {
+                    altura: r.frameHeight || 0,
+                    decodificadosPorSegundo: +(((r.framesDecoded || 0) - (a.d || 0)) / segundos).toFixed(1),
+                    descartados: (r.framesDropped || 0) - (a.q || 0),
+                    fps: r.framesPerSecond || 0,
+                    pacotesPerdidos: (r.packetsLost || 0) - (a.p || 0),
+                    recebidosPorSegundo: +(((r.framesReceived || 0) - (a.r || 0)) / segundos).toFixed(1)
+                };
+            });
+            return saida;
+        }
+
         var ev = window.JitsiMeetJS.events.conference;
         [ev.TRACK_ADDED, ev.TRACK_REMOVED, ev.TRACK_MUTE_CHANGED, ev.USER_JOINED, ev.USER_LEFT, ev.USER_ROLE_CHANGED].forEach(function (nomeEvento) {
             if (nomeEvento) { room.on(nomeEvento, atualizar); }
@@ -263,9 +339,6 @@
         atualizar();
 
         // ---- as medidas: quadros que chegam, desenhados, altura, atraso ate o canvas, pressao e memoria
-        var conta = { cam: 0, desenhoCam: 0, desenhoScr: 0, scr: 0 };
-        var atrasos = { cam: [], scr: [] };
-        var chegou = { cam: null, scr: null };
         function vigiar(video, k) {
             function quadro(agora) {
                 conta[k]++;
@@ -294,27 +367,33 @@
             var agora = performance.now();
             camCtx.fillStyle = '#000';
             camCtx.fillRect(0, 0, CAM.w, CAM.h);
-            if (estado.cam && !estado.camMuda && camVideo.videoWidth > 0) {
-                camCtx.drawImage(camVideo, 0, 0, CAM.w, CAM.h);
+            var fonteCam = ultimo.cam || (camVideo.videoWidth > 0 ? camVideo : null);
+            if (estado.cam && !estado.camMuda && fonteCam) {
+                camCtx.drawImage(fonteCam, 0, 0, CAM.w, CAM.h);
                 conta.desenhoCam++;
                 if (chegou.cam !== null) { atrasos.cam.push(agora - chegou.cam); chegou.cam = null; }
             }
             scrCtx.fillStyle = '#000';
             scrCtx.fillRect(0, 0, SCR.w, SCR.h);
-            if (estado.scr && scrVideo.videoWidth > 0) {
-                var s = Math.min(SCR.w / scrVideo.videoWidth, SCR.h / scrVideo.videoHeight);
-                var w = scrVideo.videoWidth * s;
-                var h = scrVideo.videoHeight * s;
-                scrCtx.drawImage(scrVideo, (SCR.w - w) / 2, (SCR.h - h) / 2, w, h);
+            var fonteScr = ultimo.scr || (scrVideo.videoWidth > 0 ? scrVideo : null);
+            if (estado.scr && fonteScr) {
+                var largura = fonteScr.displayWidth || fonteScr.videoWidth;
+                var altura = fonteScr.displayHeight || fonteScr.videoHeight;
+                var s = Math.min(SCR.w / largura, SCR.h / altura);
+                var w = largura * s;
+                var h = altura * s;
+                scrCtx.drawImage(fonteScr, (SCR.w - w) / 2, (SCR.h - h) / 2, w, h);
                 conta.desenhoScr++;
                 if (chegou.scr !== null) { atrasos.scr.push(agora - chegou.scr); chegou.scr = null; }
             }
         }
-        setInterval(function () { sujo = true; }, 200);
+        setInterval(function () { sujo = true; }, 1000);
 
-        setInterval(function () {
+        setInterval(async function () {
+            var conexao = null;
+            try { conexao = await estatisticas(); } catch (e) { conexao = null; }
             var item = {
-                altura: { camera: camVideo.videoHeight || 0, tela: scrVideo.videoHeight || 0 },
+                altura: { camera: (ultimo.cam && ultimo.cam.displayHeight) || camVideo.videoHeight || 0, tela: (ultimo.scr && ultimo.scr.displayHeight) || scrVideo.videoHeight || 0 },
                 atrasoMs: { camera: [percentil(atrasos.cam, 0.5), percentil(atrasos.cam, 0.95)], tela: [percentil(atrasos.scr, 0.5), percentil(atrasos.scr, 0.95)] },
                 bytes: Object.assign({}, enviados),
                 desenhadosPorSegundo: { camera: +(conta.desenhoCam / (MEDIDA_MS / 1000)).toFixed(1), tela: +(conta.desenhoScr / (MEDIDA_MS / 1000)).toFixed(1) },
@@ -322,11 +401,14 @@
                 fase: inicio === null ? 'base' : 'pecas',
                 memoriaMb: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null,
                 pressao: pressao,
+                conexao: conexao,
+                leitorPorSegundo: { camera: +(contaLeitor.cam / (MEDIDA_MS / 1000)).toFixed(1), tela: +(contaLeitor.scr / (MEDIDA_MS / 1000)).toFixed(1) },
                 quadrosPorSegundo: { camera: +(conta.cam / (MEDIDA_MS / 1000)).toFixed(1), tela: +(conta.scr / (MEDIDA_MS / 1000)).toFixed(1) },
                 relogio: Date.now(),
                 tela: Boolean(estado.scr)
             };
             conta = { cam: 0, desenhoCam: 0, desenhoScr: 0, scr: 0 };
+            contaLeitor = { cam: 0, scr: 0 };
             atrasos = { cam: [], scr: [] };
             mandarMedida(JSON.stringify(item) + '\n');
         }, MEDIDA_MS);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, createHmac, webcrypto } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, existsSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after, before } from "node:test";
@@ -119,6 +119,104 @@ test("o receptor nao aceita nada sem a senha configurada", { skip: !python && "s
   }
 });
 
+const assinarPrevia = (sala, ate, segredo = SENHA) => createHmac("sha256", segredo).update(`previa\n${sala}\n${ate}`).digest("hex");
+const linkPrevia = (sala = SALA, ate = Math.floor(Date.now() / 1000) + 3600) => `?ate=${ate}&assinatura=${assinarPrevia(sala, ate)}`;
+
+test("a previa da equipe: so com o link assinado e no prazo, a pagina com o proprio link, e o video por pedacos (206)", { skip: !python && "sem python3" }, async () => {
+  const SALA3 = "w-00000000-0000-4000-8000-000000000001-previapreviaprev";
+  mkdirSync(join(dados, SALA3), { recursive: true });
+  const video = Buffer.from(Array.from({ length: 1000 }, (_, i) => i % 256));
+  writeFileSync(join(dados, SALA3, "camera.webm"), video);
+  writeFileSync(join(dados, SALA3, "tela.webm"), Buffer.from("TELA-CRUA"));
+  writeFileSync(join(dados, SALA3, "tela-previa.webm"), Buffer.from("TELA-COM-INDICE"));
+  writeFileSync(join(dados, SALA3, "linha-do-tempo.jsonl"), '{"kind":"start","t":0}\n');
+  const link = linkPrevia(SALA3);
+
+  const pagina = await fetch(url(`/pecas/previa/${SALA3}${link}`));
+  assert.equal(pagina.status, 200);
+  assert.match(pagina.headers.get("content-type"), /text\/html/);
+  assert.equal(pagina.headers.get("cache-control"), "private, no-store");
+  const html = await pagina.text();
+  assert.ok(html.includes(`<script src="/pecas/previa/${SALA3}/previa.js${link.replace("?", "?")}"></script>`), "a pagina leva o proprio link no endereco do previa.js");
+  assert.doesNotMatch(html, /\{\{/, "nenhum marcador sobra");
+  assert.equal((await fetch(url(`/pecas/previa/${SALA3}/previa.js${link}`))).status, 200);
+
+  const inteiro = await fetch(url(`/pecas/previa/${SALA3}/camera.webm${link}`));
+  assert.equal(inteiro.status, 200);
+  assert.equal(inteiro.headers.get("accept-ranges"), "bytes");
+  assert.deepEqual(Buffer.from(await inteiro.arrayBuffer()), video);
+  const pedaco = await fetch(url(`/pecas/previa/${SALA3}/camera.webm${link}`), { headers: { Range: "bytes=100-199" } });
+  assert.equal(pedaco.status, 206, "o video anda: o pedaco pedido");
+  assert.equal(pedaco.headers.get("content-range"), "bytes 100-199/1000");
+  assert.deepEqual(Buffer.from(await pedaco.arrayBuffer()), video.subarray(100, 200));
+  const fim = await fetch(url(`/pecas/previa/${SALA3}/camera.webm${link}`), { headers: { Range: "bytes=-10" } });
+  assert.equal(fim.status, 206);
+  assert.deepEqual(Buffer.from(await fim.arrayBuffer()), video.subarray(990));
+  assert.equal((await fetch(url(`/pecas/previa/${SALA3}/camera.webm${link}`), { headers: { Range: "bytes=5000-" } })).status, 416);
+  assert.equal(await (await fetch(url(`/pecas/previa/${SALA3}/tela.webm${link}`))).text(), "TELA-COM-INDICE", "a peca com o indice vale no lugar da crua");
+
+  // Sem o link certo, nada existe.
+  const agora = Math.floor(Date.now() / 1000);
+  for (const [caminho, motivo] of [
+    [`/pecas/previa/${SALA3}`, "sem assinatura"],
+    [`/pecas/previa/${SALA3}?ate=${agora + 3600}&assinatura=${"0".repeat(64)}`, "assinatura errada"],
+    [`/pecas/previa/${SALA3}?ate=${agora - 5}&assinatura=${assinarPrevia(SALA3, agora - 5)}`, "vencido"],
+    [`/pecas/previa/${SALA3}?ate=${agora + 8 * 86400}&assinatura=${assinarPrevia(SALA3, agora + 8 * 86400)}`, "mais de 7 dias"],
+    [`/pecas/previa/${SALA3}/camera.webm?ate=${agora + 3600}&assinatura=${assinarPrevia(SALA, agora + 3600)}`, "o link de outra sala"],
+    [`/pecas/previa/${SALA3}/camera.webm.seq${link}`, "so os arquivos da previa"],
+    [`/pecas/previa/${SALA3}/..%2F..%2Fativas.txt${link}`, "nada fora da pasta"],
+    [`/pecas/previa/w-11111111-0000-4000-8000-000000000001-abcdefghijkmnpqr${linkPrevia("w-11111111-0000-4000-8000-000000000001-abcdefghijkmnpqr")}`, "sala fora da lista"]
+  ]) {
+    assert.equal((await fetch(url(caminho))).status, 404, motivo);
+  }
+});
+
+test("o link da previa sai do proprio receptor (python3 receptor.py link <sala> [horas])", { skip: !python && "sem python3" }, () => {
+  const r = spawnSync("python3", [join(root, "infra/jitsi/pecas/receptor.py"), "link", SALA, "2"], { encoding: "utf8", env: { ...process.env, PECAS_SEGREDO: SENHA } });
+  assert.equal(r.status, 0, r.stderr);
+  const m = /^\/pecas\/previa\/(w-[^?]+)\?ate=(\d+)&assinatura=([0-9a-f]{64})\n$/.exec(r.stdout);
+  assert.ok(m, r.stdout);
+  assert.equal(m[1], SALA);
+  const ate = Number(m[2]);
+  assert.ok(Math.abs(ate - (Date.now() / 1000 + 7200)) < 60, "vence em 2 h");
+  assert.equal(m[3], assinarPrevia(SALA, ate));
+  assert.notEqual(spawnSync("python3", [join(root, "infra/jitsi/pecas/receptor.py"), "link", "../etc"], { encoding: "utf8", env: { ...process.env, PECAS_SEGREDO: SENHA } }).status, 0, "so salas de webinario");
+});
+
+test("a remontagem da previa: o palco pela linha do tempo do teste de 15/11/2026 e a tela seguindo a camera", () => {
+  const contexto = {};
+  vm.runInNewContext(read("infra/jitsi/pecas/previa.js"), contexto);
+  const { correcao, estadoEm, lerLinha, relogio } = contexto.__previa;
+  // A linha do tempo de verdade do segundo teste em producao (o clique duplo na camera incluido).
+  const marcas = lerLinha([
+    '{"kind":"start","relogio":1794757577407,"t":0,"camera":true,"screen":false}',
+    '{"kind":"screen_on","relogio":1794757635987,"t":58580}',
+    "linha quebrada",
+    '{"kind":"screen_off","relogio":1794757694189,"t":116782}',
+    '{"kind":"camera_off","relogio":1794757724868,"t":147461}',
+    '{"kind":"camera_on","relogio":1794757725077,"t":147670}',
+    '{"kind":"camera_off","relogio":1794757726164,"t":148757}',
+    '{"kind":"camera_on","relogio":1794757736106,"t":158699}'
+  ].join("\n"));
+  assert.equal(marcas.length, 7, "a linha quebrada fica de fora");
+  const em = (ms) => JSON.parse(JSON.stringify(estadoEm(marcas, ms)));
+  assert.deepEqual(em(0), { camera: true, tela: false }, "o comeco: a camera no palco");
+  assert.deepEqual(em(60_000), { camera: true, tela: true }, "1:00: a tela no palco e a camera ao lado");
+  assert.deepEqual(em(120_000), { camera: true, tela: false }, "2:00: a tela saiu");
+  assert.deepEqual(em(150_000), { camera: false, tela: false }, "2:30: a camera desligada");
+  assert.deepEqual(em(160_000), { camera: true, tela: false }, "2:40: de volta");
+  assert.deepEqual(JSON.parse(JSON.stringify(correcao(0.01))), { pular: false, taxa: 1 }, "menos de 40 ms: nada");
+  assert.equal(correcao(0.2).taxa, 0.8, "a tela 200 ms na frente anda mais devagar");
+  assert.equal(correcao(-0.1).taxa, 1.1, "a tela 100 ms atras anda mais depressa");
+  assert.equal(correcao(-0.3).taxa, 1.2, "no maximo 1,2");
+  assert.equal(correcao(0.8).pular, true, "acima de 0,5 s, pula");
+  assert.equal(relogio(125.7), "2:05");
+  const html = read("infra/jitsi/pecas/previa.html");
+  assert.match(html, /<meta name="robots" content="noindex, nofollow">/);
+  assert.match(html, /<video id="tela" muted/, "a tela sem som: a voz vem da camera");
+  assert.match(html, /<script src="\/pecas\/previa\/\{\{sala\}\}\/previa\.js\?\{\{busca\}\}"><\/script>/);
+});
+
 /**
  * O endereco que o Jibri da tag fixada abre: as contas no appData.localStorageContent, o JSON codificado duas vezes
  * (o formato que o Jitsi aceita; o ensaio local de 15/11/2026 entrou na sala com ele, sem nada no localStorage).
@@ -226,7 +324,7 @@ test("o arquivo do gravador: duas pecas que comecam juntas, em pedacos de 2 s, e
   const g = gravador();
   await esperarAte(() => g.window.__bunker707Pecas.estado === "gravando" && g.pedidos.length > 0);
   assert.equal(g.window.__bunker707Pecas.estado, "gravando");
-  assert.deepEqual(g.gravadores.map((r) => [r.opts.mimeType, r.ms]), [["video/webm;codecs=vp8,opus", 2000], ["video/webm;codecs=vp8", 2000]], "a camera com o audio e a tela, os dois com o mesmo pedaco");
+  assert.deepEqual(g.gravadores.map((r) => [r.opts.mimeType, r.ms]), [["video/webm;codecs=vp8,opus", 1000], ["video/webm;codecs=vp8", 1000]], "a camera com o audio e a tela, os dois com o mesmo pedaco de 1 s (perde no maximo 1 s quando o gravador sai)");
   const inicio = g.pedidos.find((p) => p.url.endsWith("/linha-do-tempo.jsonl"));
   assert.ok(inicio, "a marca de comeco da linha do tempo");
   assert.equal(inicio.url, `/pecas/${SALA}/linha-do-tempo.jsonl`, "no mesmo endereco da sala: nada de rede para a propria maquina");
@@ -246,6 +344,10 @@ test("o arquivo do gravador: duas pecas que comecam juntas, em pedacos de 2 s, e
   assert.deepEqual([...ultima.onStageSources].sort(), ["p1-v0", "p1-v1"]);
   g.room.setReceiverConstraints({ constraints: { "p2-v0": { maxHeight: 180 } }, lastN: 9, onStageSources: ["p1-v1"] });
   assert.deepEqual(plain(g.qualidade.at(-1)), { constraints: { "p1-v0": { maxHeight: 720 }, "p1-v1": { maxHeight: 1080 }, "p2-v0": { maxHeight: 180 } }, lastN: 9, onStageSources: ["p1-v1", "p1-v0"] }, "o pedido do motor continua, com o nosso por cima");
+  // Sem a tela no palco, a tela do gravador pede a camera em 1080p para a gravacao de sempre: as pecas nunca baixam
+  // (o teste de 15/11/2026 baixou para 720p).
+  g.room.setReceiverConstraints({ constraints: { "p1-v0": { maxHeight: 1080 } }, lastN: -1, onStageSources: ["p1-v0"] });
+  assert.equal(plain(g.qualidade.at(-1)).constraints["p1-v0"].maxHeight, 1080, "a camera da gravacao de sempre fica em 1080p");
 });
 
 test("a ligacao na instancia: so o gravador carrega o arquivo, o receptor atras do Caddy, a conferencia do deploy", () => {
@@ -277,7 +379,7 @@ test("a ligacao na instancia: so o gravador carrega o arquivo, o receptor atras 
   assert.match(servico, /read_only: true/);
   assert.match(servico, /user: "1000:1000"/);
   assert.match(servico, /PECAS_SEGREDO: "\$\{JIBRI_RECORDER_PASSWORD\}"/, "a mesma senha com que o Jibri entra na sala");
-  assert.match(servico, /- \.\/pecas\/receptor\.py:\/app\/receptor\.py:ro/);
+  assert.match(servico, /- \.\/pecas:\/app:ro/, "a pasta do receptor, com a previa da equipe");
   assert.match(servico, /- \.\/volumes\/pecas:\/dados/);
   assert.doesNotMatch(servico, /ports:/, "nenhuma porta publicada: so o Caddy chega nele");
   const caddy = read("infra/jitsi/caddy/Caddyfile");

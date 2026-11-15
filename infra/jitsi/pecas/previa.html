@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Prévia da Live gravada</title>
+<style>
+  :root { color-scheme: dark; --fundo: #0b0b0c; --texto: #f4f4f5; --apagado: #a1a1aa; --linha: #27272a; --cartao: #18181b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fundo); color: var(--texto); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1280px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p { margin: 0 0 12px; color: var(--apagado); }
+  #previa { position: relative; display: flex; gap: 8px; aspect-ratio: 16 / 9; width: 100%; background: #000; border-radius: 12px; overflow: hidden; }
+  .lugar { position: relative; flex: 1 1 auto; min-width: 0; background: #000; }
+  video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+  .desligada { position: absolute; inset: 0; display: none; place-items: center; background: var(--cartao); color: var(--apagado); font-weight: 600; }
+  /* sem a tela: a camera no palco */
+  #previa[data-tela="desligada"] #lugar-tela { display: none; }
+  #previa[data-tela="desligada"] #lugar-camera { flex: 1 1 auto; }
+  /* com a tela: a tela no palco e a camera na coluna de 213 px */
+  #previa[data-tela="ligada"] #lugar-camera { flex: 0 0 213px; align-self: flex-start; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; margin: 8px 8px 0 0; order: 2; }
+  #previa[data-camera="desligada"] #lugar-camera video { visibility: hidden; }
+  #previa[data-camera="desligada"] #lugar-camera .desligada { display: grid; }
+  .controles { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
+  button { min-height: 44px; min-width: 96px; border: 0; border-radius: 999px; background: var(--texto); color: var(--fundo); font: inherit; font-weight: 600; cursor: pointer; }
+  input[type="range"] { flex: 1; min-width: 0; }
+  #tempo { font-variant-numeric: tabular-nums; color: var(--apagado); white-space: nowrap; }
+  .info { padding: 12px; border: 1px solid var(--linha); border-radius: 8px; color: var(--apagado); font-size: 13px; }
+  @media (max-width: 640px) { #previa[data-tela="ligada"] #lugar-camera { flex-basis: 96px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Prévia da Live gravada remontada</h1>
+  <p>Só para a equipe. As peças do teste remontadas como ao vivo: sem a tela, a câmera no palco; com a tela, a tela no palco e a câmera ao lado.</p>
+  <div id="previa" data-tela="desligada" data-camera="ligada">
+    <div class="lugar" id="lugar-tela"><video id="tela" muted playsinline preload="auto"></video></div>
+    <div class="lugar" id="lugar-camera"><video id="camera" playsinline preload="auto"></video><div class="desligada">Câmera desligada</div></div>
+  </div>
+  <div class="controles">
+    <button id="tocar" type="button">Tocar</button>
+    <input id="barra" type="range" min="0" max="0" step="0.1" value="0" aria-label="Posição">
+    <span id="tempo">0:00 / 0:00</span>
+  </div>
+  <div class="info">
+    <div id="trocas">Carregando a linha do tempo…</div>
+    <div id="medidas"></div>
+  </div>
+</main>
+<script src="/pecas/previa/{{sala}}/previa.js?{{busca}}"></script>
+</body>
+</html>

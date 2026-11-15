@@ -820,6 +820,24 @@ gravador (cpx42, 8 nucleos) na live de teste, sem as pecas: 9% (0,7 nucleo) so c
 tela compartilhada. O mesmo teste achou dois defeitos de infra, corrigidos: o `jibri-up` parava no comando das amostras
 de CPU (o `&` fora das chaves segurava a saida do SSH) e o Caddy lia o Caddyfile antigo (a montagem do arquivo sozinho).
 
+O segundo teste (15/11/2026, "Teste pecas 2", cpx42): as quatro saidas chegaram (camera 720p com a voz, tela 1080p,
+237,7 s e 236,7 s, nenhum erro de envio, a linha do tempo com cada troca, ate o clique duplo na camera), mas a CPU do
+gravador subiu de 9% para 35 a 57% so com a camera e de 16% para 66 a 90% com a tela (o Chrome marcou a pressao como
+critica), e as pecas ficaram com uns 10 quadros por segundo. O ensaio local com as tres medidas novas (o elemento de
+video, o leitor de quadros e as estatisticas da conexao, no `metricas.jsonl`) mostrou a causa: os quadros chegam
+inteiros (25 a 30 por segundo nas estatisticas da conexao), mas redesenhar cada um num canvas, sem placa de video,
+prende a linha principal da pagina, e so uns 10 vao para o arquivo. Uma maquina maior nao resolve; a captura muda na
+proxima rodada. As pecas agora nunca baixam a qualidade que a gravacao de sempre pede e vao em pedacos de 1 s.
+
+A previa da equipe (a Live gravada remontada a partir das pecas de um teste, so com link assinado):
+
+1. os arquivos com indice, para o video andar: `exec-meet` com `cd infra/jitsi/volumes/pecas/<sala> && docker run --rm --user 0 --entrypoint sh -v "$PWD:/d" alpine:3.22 -c 'apk add -q ffmpeg >/dev/null && for n in camera tela; do ffmpeg -v error -y -i /d/$n.webm -c copy /d/$n-previa.webm; done && chown 1000:1000 /d/*-previa.webm'` (so copia, sem recodificar);
+2. o link: `exec-meet` com `docker exec bunker707-meet-pecas python3 /app/receptor.py link <sala> 24` (horas, no maximo 7 dias), e o endereco e `https://meet.<dominio>` mais o caminho que ele imprime.
+
+O link so vale com o webinario em `ativas.txt` e ate vencer; sem ele, o receptor responde 404. A pagina toca a camera
+com a voz e a tela, a camera mandando e a tela seguindo, o palco pela linha do tempo, e mostra a diferenca entre as
+duas com a tela no palco (no ensaio local, 37 a 43 ms).
+
 Desligar e limpar: tirar o id de `ativas.txt` e `exec-meet` com `rm -rf infra/jitsi/volumes/pecas/w-*` (os arquivos
 ficam no disco do C, 40 GB, ate isso; o receptor recusa acima de 8 GB por sala e com menos de 4 GB livres). O
 `deploy-meet` recarrega o Caddy depois do `up -d` (a rota `/pecas/` so existe com o Caddyfile novo) e o `smoke.sh`

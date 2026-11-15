@@ -10,6 +10,13 @@
 #   GET  /pecas/ativo?sala=<sala>   204 quando o webinario da sala esta em ativas.txt (um id por linha); senao 404.
 #   GET  /pecas/estado?sala=&estado=&detalhe=   o passo em que o gravador esta (na-sala, sem-senha, base, gravando,
 #                                   parado, erro-envio, erro), anotado no log so para as salas da lista; sempre 204.
+#   GET  /pecas/previa/<sala>?ate=&assinatura=            a previa da Live gravada remontada, so para a equipe (A62):
+#   GET  /pecas/previa/<sala>/<arquivo>?ate=&assinatura=  a pagina, o previa.js e as pecas, com pedidos por pedaco (206)
+#                                   para o video andar. A assinatura e o HMAC-SHA256 de "previa\n<sala>\n<ate>" com a
+#                                   mesma senha; `ate` (segundos unix) vence em ate 7 dias. Sem ela, 404, como se nada
+#                                   existisse. O link sai do proprio servidor: `python3 receptor.py link <sala> [horas]`.
+#                                   A peca com o indice para andar no video (camera-previa.webm, do ffmpeg -c copy, docs/20
+#                                   §8B.10) vale no lugar da crua, quando existe.
 #   POST /pecas/<sala>/<arquivo>    um pedaco, na ordem: X-Pecas-Seq (0, 1, 2...), X-Pecas-Ts (ms) e X-Pecas-Assinatura,
 #                                   o HMAC-SHA256 de "<sala>\n<arquivo>\n<seq>\n<ts>\n<sha256 do corpo>" com a senha do
 #                                   usuario do gravador (JIBRI_RECORDER_PASSWORD: so o Jibri a tem, pelo localStorage que
@@ -42,6 +49,11 @@ JANELA_MS = 10 * 60 * 1000
 
 SALA = re.compile(r"^w-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-[a-z0-9]{4,40}$")
 ARQUIVOS = {"camera.webm", "tela.webm", "linha-do-tempo.jsonl", "metricas.jsonl"}
+PREVIA_DIR = os.environ.get("PECAS_PREVIA_DIR", os.path.dirname(os.path.abspath(__file__)))
+PREVIA_ARQUIVOS = {"camera.webm": "video/webm", "tela.webm": "video/webm", "linha-do-tempo.jsonl": "application/x-ndjson", "metricas.jsonl": "application/x-ndjson"}
+PREVIA_PAGINA = {"previa.js": ("previa.js", "text/javascript; charset=utf-8")}
+PREVIA_MAX_S = 7 * 24 * 3600
+FAIXA = re.compile(r"^bytes=(\d*)-(\d*)$")
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 trava = threading.Lock()
@@ -98,6 +110,24 @@ def limpo(texto, limite=120):
     return TEXTO_LIVRE.sub("?", str(texto or ""))[:limite]
 
 
+def assinar_previa(sala, ate):
+    return hmac.new(SEGREDO, f"previa\n{sala}\n{ate}".encode(), hashlib.sha256).hexdigest()
+
+
+def previa_valida(sala, ate, assinatura, agora=None):
+    """O link da previa: a sala da lista, ainda no prazo (no maximo 7 dias) e assinado com a senha do receptor."""
+    if not SEGREDO or not sala_ativa(sala):
+        return False
+    try:
+        ate = int(ate)
+    except (TypeError, ValueError):
+        return False
+    agora = int(time.time()) if agora is None else agora
+    if ate <= agora or ate > agora + PREVIA_MAX_S:
+        return False
+    return hmac.compare_digest(assinar_previa(sala, ate), (assinatura or "").lower())
+
+
 def tamanho_sala(pasta):
     total = 0
     for nome in os.listdir(pasta):
@@ -138,7 +168,86 @@ class Receptor(BaseHTTPRequestHandler):
                 detalhe = limpo((consulta.get("detalhe") or [""])[0])
                 anotar(sala, f"{sala}: estado {estado}" + (f" ({detalhe})" if detalhe else ""))
             return self.responder(204)
+        partes = url.path.split("/")
+        if len(partes) in (4, 5) and partes[1] == "pecas" and partes[2] == "previa":
+            return self.previa(partes[3].lower(), partes[4] if len(partes) == 5 else "", consulta)
         return self.responder(404)
+
+    def previa(self, sala, arquivo, consulta):
+        """A previa da equipe: a pagina, o previa.js e as pecas da sala, so com o link assinado e no prazo."""
+        if not SALA.match(sala) or not previa_valida(sala, (consulta.get("ate") or [""])[0], (consulta.get("assinatura") or [""])[0]):
+            return self.responder(404)
+        if arquivo == "":
+            # A pagina leva o proprio link (a sala e a assinatura ja conferidas) no endereco do previa.js.
+            try:
+                with open(os.path.join(PREVIA_DIR, "previa.html"), encoding="utf-8") as f:
+                    pagina = f.read()
+            except OSError:
+                return self.responder(404)
+            busca = f"ate={int((consulta.get('ate') or ['0'])[0])}&assinatura={(consulta.get('assinatura') or [''])[0].lower()}"
+            dados = pagina.replace("{{sala}}", sala).replace("{{busca}}", busca).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "private, no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Length", str(len(dados)))
+            self.end_headers()
+            self.wfile.write(dados)
+            return
+        if arquivo in PREVIA_PAGINA:
+            nome, tipo = PREVIA_PAGINA[arquivo]
+            return self.enviar_arquivo(os.path.join(PREVIA_DIR, nome), tipo)
+        if arquivo not in PREVIA_ARQUIVOS:
+            return self.responder(404)
+        pasta = os.path.join(DADOS, sala)
+        indexada = os.path.join(pasta, arquivo.replace(".webm", "-previa.webm")) if arquivo.endswith(".webm") else None
+        caminho = indexada if indexada and os.path.isfile(indexada) else os.path.join(pasta, arquivo)
+        return self.enviar_arquivo(caminho, PREVIA_ARQUIVOS[arquivo])
+
+    def enviar_arquivo(self, caminho, tipo):
+        """O arquivo inteiro (200) ou o pedaco pedido (206, o video que anda); 416 fora do arquivo."""
+        try:
+            total = os.path.getsize(caminho)
+            f = open(caminho, "rb")
+        except OSError:
+            return self.responder(404)
+        with f:
+            inicio, fim = 0, total - 1
+            faixa = FAIXA.match((self.headers.get("Range") or "").strip())
+            parcial = bool(faixa) and (faixa.group(1) or faixa.group(2))
+            if parcial:
+                if faixa.group(1):
+                    inicio = int(faixa.group(1))
+                    fim = min(int(faixa.group(2)), total - 1) if faixa.group(2) else total - 1
+                else:
+                    inicio = max(0, total - int(faixa.group(2)))
+                if inicio > fim or inicio >= total:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{total}")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+            self.send_response(206 if parcial else 200)
+            self.send_header("Content-Type", tipo)
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Cache-Control", "private, no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            if parcial:
+                self.send_header("Content-Range", f"bytes {inicio}-{fim}/{total}")
+            self.send_header("Content-Length", str(fim - inicio + 1))
+            self.end_headers()
+            f.seek(inicio)
+            falta = fim - inicio + 1
+            while falta > 0:
+                bloco = f.read(min(falta, 256 * 1024))
+                if not bloco:
+                    break
+                try:
+                    self.wfile.write(bloco)
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+                falta -= len(bloco)
 
     def ler_corpo(self):
         """O corpo do pedido: pelo Content-Length ou em pedacos (chunked). None se passa do teto; ValueError se mal formado."""
@@ -222,7 +331,21 @@ class Receptor(BaseHTTPRequestHandler):
         return self.responder(204)
 
 
+def link(argv):
+    """`python3 receptor.py link <sala> [horas]`: o caminho da previa assinado (o dominio vem de quem chama)."""
+    if not SEGREDO:
+        sys.exit("PECAS_SEGREDO vazio")
+    sala = (argv[0] if argv else "").lower()
+    if not SALA.match(sala):
+        sys.exit("sala invalida")
+    horas = min(float(argv[1]) if len(argv) > 1 else 24.0, PREVIA_MAX_S / 3600)
+    ate = int(time.time() + horas * 3600)
+    print(f"/pecas/previa/{sala}?ate={ate}&assinatura={assinar_previa(sala, ate)}")
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "link":
+        return link(sys.argv[2:])
     os.makedirs(DADOS, exist_ok=True)
     if not SEGREDO:
         log("aviso: PECAS_SEGREDO vazio (a senha do usuario do gravador); nenhum pedaco sera aceito")
