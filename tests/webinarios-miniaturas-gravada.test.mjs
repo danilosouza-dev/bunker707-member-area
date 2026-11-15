@@ -76,7 +76,7 @@ test("o video da gravada desconta a coluna: a mesma folga da coluna do motor na 
   assert.match(palco, /className="absolute inset-y-0 left-0 h-full w-\[calc\(100%-var\(--room-video-right,0px\)\)\] border-0"/, "o iframe com a largura descontada (um iframe nao estica entre left e right)");
 });
 
-test("a coluna esta pronta e desligada ate a entrega 2 do plano A (A62): ligada antes, uma gravacao com as miniaturas no video mostraria duas plateias", () => {
+test("a coluna esta pronta e desligada ate a Live gravada de um video so (A63): ligada antes, uma gravacao com as miniaturas no video mostraria duas plateias", () => {
   const coluna = semComentarios(ler("src/components/member/webinars/room/room-audience-column.tsx"));
   assert.match(coluna, /export const RECORDED_AUDIENCE_COLUMN = false;/);
 });

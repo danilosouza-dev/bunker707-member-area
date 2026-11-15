@@ -119,7 +119,7 @@ else
 fi
 
 # ---- 4. avisar o app (docs/30 §5.3) --------------------------------------------------------------------
-# A CPU da maquina durante a live (cpu-amostras.sh, docs/30 A62): {"nucleos":N,"amostras":[[unix,pct],...]}, a media de
+# A CPU da maquina durante a live (cpu-amostras.sh, docs/30 §6.7 e A26): {"nucleos":N,"amostras":[[unix,pct],...]}, a media de
 # cada 30 s das ultimas 6 h. O app guarda o corpo cru e o schema ignora o campo. Sem o arquivo ou sem amostras, nada.
 cpu_json() {
     [ -f "$1" ] || return 0

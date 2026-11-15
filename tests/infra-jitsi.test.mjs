@@ -117,7 +117,7 @@ const jitsiServices = ["web", "prosody", "jicofo", "jvb"];
 
 test("compose do Jitsi: web, prosody, jicofo e jvb na tag stable fixada, saude em todos, portas so as do desenho, caddy no perfil borda", () => {
   const services = composeServices(composeSource);
-  assert.deepEqual([...services.keys()].sort(), ["caddy", "jicofo", "jvb", "pecas", "prosody", "web"], "o receptor das pecas em teste (docs/30 A62) tem teste proprio em infra-jitsi-pecas.test.mjs");
+  assert.deepEqual([...services.keys()].sort(), ["caddy", "jicofo", "jvb", "prosody", "web"]);
   for (const name of jitsiServices) {
     const block = services.get(name);
     assert.equal(/^\s+image:\s*(\S+)\s*$/m.exec(block)?.[1], `\${JITSI_IMAGE_REPO:-ghcr.io/jitsi}/${name}:\${JITSI_IMAGE_VERSION}`, `${name}: imagem oficial na tag fixada`);
@@ -198,7 +198,7 @@ test("compose do Jitsi: web, prosody, jicofo e jvb na tag stable fixada, saude e
   assert.match(caddy, /^\s+profiles:\s*\[\s*"borda"\s*\]\s*$/m);
   const mauticCaddyImage = /image:\s*(caddy:\S+)/.exec(mauticCompose)?.[1];
   assert.equal(/image:\s*(caddy:\S+)/.exec(caddy)?.[1], mauticCaddyImage, "a mesma imagem do Caddy dos outros servidores (um jeito so de operar TLS)");
-  // A pasta, e nao o arquivo: o reload do deploy-meet precisa ver o Caddyfile novo (tests/infra-jitsi-pecas.test.mjs).
+  // A pasta, e nao o arquivo: o reload do deploy-meet precisa ver o Caddyfile novo (tests/infra-jibri-cpu.test.mjs).
   assert.match(caddy, /- \.\/caddy:\/etc\/caddy:ro/);
   assert.equal((caddy.match(/\$\{CADDY_BIND:-0\.0\.0\.0\}/g) ?? []).length, 3, "80, 443 e 443/udp presos a CADDY_BIND");
 });
@@ -308,25 +308,17 @@ test("custom-config.js e custom-interface_config.js, avaliados como o navegador 
   const generated = "config.toolbarButtons = ['microphone', 'desktop', 'recording'];\n";
   assert.match(toolbarCheck(`${generated}${customConfig}`), /cfg_ok=1/, "a nossa barra minima no fim passa");
   assert.match(toolbarCheck(generated), /FALHA config\.js barra padrao com 'desktop'/, "a barra do host no config.js servido falha");
-  // Os dois arquivos so atribuem: nada de fetch, script ou acesso a window. As unicas excecoes sao os tres carregadores
+  // Os dois arquivos so atribuem: nada de fetch, script ou acesso a window. As unicas excecoes sao os dois carregadores
   // nossos, cada um entre as suas marcas (uma vez so): o do CSS (docs/31 §3), que so le o hash e cria um <link> para um
-  // caminho desta origem, o dos participantes simulados (docs/30 D120) e o das pecas em teste (docs/30 A62, so no
-  // gravador), que so leem o hash e criam a tag de script para um caminho desta origem.
+  // caminho desta origem, e o dos participantes simulados (docs/30 D120), que so le o hash e cria a tag de script para
+  // um caminho desta origem.
   assert.equal(customConfig.split("bunker707:css-loader:inicio").length, 2, "uma marca de inicio so: nada se esconde num segundo bloco");
   const loader = /\/\/ bunker707:css-loader:inicio\n([\s\S]*?)\/\/ bunker707:css-loader:fim\n/.exec(customConfig);
   assert.ok(loader, "o carregador do CSS fica entre as marcas bunker707:css-loader");
   assert.equal(customConfig.split("bunker707:plateia-loader:inicio").length, 2, "uma marca de inicio so no carregador dos simulados");
   const audienceLoader = /\/\/ bunker707:plateia-loader:inicio\n([\s\S]*?)\/\/ bunker707:plateia-loader:fim\n/.exec(customConfig);
   assert.ok(audienceLoader, "o carregador dos simulados fica entre as marcas bunker707:plateia-loader");
-  assert.equal(customConfig.split("bunker707:pecas-loader:inicio").length, 2, "uma marca de inicio so no carregador das pecas");
-  const piecesLoader = /\/\/ bunker707:pecas-loader:inicio\n([\s\S]*?)\/\/ bunker707:pecas-loader:fim\n/.exec(customConfig);
-  assert.ok(piecesLoader, "o carregador das pecas fica entre as marcas bunker707:pecas-loader");
-  for (const source of [customConfig.replace(loader[0], "").replace(audienceLoader[0], "").replace(piecesLoader[0], ""), customInterface]) assert.doesNotMatch(source, /\b(fetch|XMLHttpRequest|document|window|import|require)\b/);
-  assert.doesNotMatch(
-    piecesLoader[1],
-    /\b(fetch|XMLHttpRequest|import|require|eval|innerHTML|WebSocket|EventSource|sendBeacon|navigator|Function|setTimeout|setInterval|postMessage|localStorage)\b|location\.(href|replace|assign)/,
-    "o carregador das pecas nao busca nada, nao le senha nenhuma e nao navega: so liga o arquivo"
-  );
+  for (const source of [customConfig.replace(loader[0], "").replace(audienceLoader[0], ""), customInterface]) assert.doesNotMatch(source, /\b(fetch|XMLHttpRequest|document|window|import|require)\b/);
   assert.doesNotMatch(
     audienceLoader[1],
     /\b(fetch|XMLHttpRequest|import|require|eval|innerHTML|WebSocket|EventSource|sendBeacon|navigator|Function|setTimeout|setInterval|postMessage)\b|location\.(href|replace|assign)/,
