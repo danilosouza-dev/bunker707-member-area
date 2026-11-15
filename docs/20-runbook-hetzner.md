@@ -647,6 +647,13 @@ pela Cloudflare). O IP do C fica visivel; a protecao e o firewall da Hetzner, o 
   e o `smoke.sh` confere o arquivo servido pelo sha256 e o `?v=` no `config.js`. Conferir depois, numa sala de teste
   com duas contas e participantes simulados ligados: a lista de miniaturas do aluno na ordem do `docs/30` §10.3 (item
   13), o console sem simulado nenhum no video e, com a gravacao ligada, as miniaturas simuladas no video gravado.
+- **O Gravar para Live gravada (15/11/2026, `docs/30` D125)**: o `web` do C serve tambem `/libs/bunker707-gravacao.js`
+  (montado pelo compose, somente leitura), ligado pelo `custom-config.js` so no iframe do nosso app e no gravador.
+  Vale como qualquer `deploy-meet` (da `main`, `SEM_LIVE_2H=sim`); o `smoke.sh` confere o arquivo servido pelo sha256
+  e o `?v=` no `config.js`. O app (`deploy-membros`) e o motor sobem em qualquer ordem: sem o arquivo, o gravador
+  grava a sala como sempre. Conferir depois, numa live de teste com o gravador: o circulo **Live gravada** ao lado do
+  **Gravar**, o cartao **Gravação** com "O gravador está gravando só a tela compartilhada e a voz de quem apresenta.",
+  e o video na Bunny so com a tela (preto antes do compartilhamento), sem a voz de aluno.
 - O `.env` do C leva `XMPP_MUC_MODULES=token_affiliation,bunker_room_guard,bunker_presence_guard,bunker_ghost_guard` e `ROOM_GUARD_URL=<origem da area de
   membros>/api/webhooks/room-guard` (o `generate-secrets.sh` deriva os dois; num `.env` gerado antes de 29/10/2026,
   acrescentar as duas linhas a mao antes do proximo `deploy-meet`): o Prosody busca ali, a cada 5 s, quem a equipe

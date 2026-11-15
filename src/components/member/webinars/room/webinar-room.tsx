@@ -606,8 +606,8 @@ export function WebinarRoom({ coverUrl, design: forcedDesign, payload, presenter
   const countdown = kind === "simulated" ? formatCountdown(zeroMs, nowMs + clock.skewMs) : "";
   /** O numero do contador: o real mais a parte simulada daquele instante (sem Simulacao, o real). */
   const shownCount = simulation.displayCount(presentNow, currentOffsetMs);
-  // A coluna de miniaturas da Live gravada (docs/30 D124; pronta e desligada ate a Live gravada de um video so, A63,
-  // pela RECORDED_AUDIENCE_COLUMN): a pagina desenha ao lado do video (gravado sem miniaturas) a
+  // A coluna de miniaturas da Live gravada (docs/30 D124, ligada desde a Live gravada de um video so, D125, pela
+  // RECORDED_AUDIENCE_COLUMN): a pagina desenha ao lado do video (gravado sem miniaturas) a
   // miniatura do proprio aluno e os participantes simulados daquele segundo, como o motor desenha na Live ao vivo
   // (D120). So com a Simulacao ligada e o video no ar, no computador e no desenho normal; nunca no Replay, no "ver
   // como" nem fora do acesso. A lista vem da mesma rota da live (GET .../audience), pedida ao entrar, quando a decisao

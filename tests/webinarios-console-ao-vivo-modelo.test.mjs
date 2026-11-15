@@ -342,6 +342,8 @@ test("cartao Gravação: Preparar, a frase da reserva, Gravar com a maquina pron
   const unavailable = model.recorderCard({ recorder: recorder({ status: "unavailable" }), recordingOn: false, status: "live" });
   assert.deepEqual([unavailable.note, unavailable.fallback], [copy.semGravadorHoje, true]);
   assert.equal(model.recorderCard({ recorder: recorder({ status: "uploaded" }), recordingOn: false, status: "ended" }).action, "release");
+  const deNovo = model.recorderCard({ recorder: recorder({ status: "uploaded" }), recordingOn: false, status: "live" });
+  assert.deepEqual([deNovo.action, deNovo.note], ["record", WEBINAR_COPY.consoleAoVivo.gravarDeNovo], "com a live no ar, grava de novo (A64)");
   assert.equal(model.recorderCard({ recorder: recorder({ status: "upload_failed" }), recordingOn: false, status: "ended" }).action, "none", "upload_failed so com FORCAR pela equipe tecnica");
 });
 
