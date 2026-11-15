@@ -8,11 +8,15 @@
 # responderia. Pelo mesmo endereco da sala, nada e pedido.
 #
 #   GET  /pecas/ativo?sala=<sala>   204 quando o webinario da sala esta em ativas.txt (um id por linha); senao 404.
+#   GET  /pecas/estado?sala=&estado=&detalhe=   o passo em que o gravador esta (na-sala, sem-senha, base, gravando,
+#                                   parado, erro-envio, erro), anotado no log so para as salas da lista; sempre 204.
 #   POST /pecas/<sala>/<arquivo>    um pedaco, na ordem: X-Pecas-Seq (0, 1, 2...), X-Pecas-Ts (ms) e X-Pecas-Assinatura,
 #                                   o HMAC-SHA256 de "<sala>\n<arquivo>\n<seq>\n<ts>\n<sha256 do corpo>" com a senha do
 #                                   usuario do gravador (JIBRI_RECORDER_PASSWORD: so o Jibri a tem, pelo localStorage que
 #                                   ele mesmo preenche). 204 gravado; 200 repetido (seq ja gravado); 409 fora de ordem;
-#                                   401 assinatura; 403 sala fora da lista; 413 grande demais; 507 sem espaco.
+#                                   401 assinatura; 403 sala fora da lista; 413 grande demais; 507 sem espaco. O
+#                                   corpo pode vir sem Content-Length, em pedacos (Transfer-Encoding: chunked), como o
+#                                   Caddy repassa o que chega sem tamanho (HTTP/2 e HTTP/3). Cada recusa vai ao log.
 #
 # Nada de segredo no log. Os arquivos ficam em /dados/<sala>/ ate a equipe apagar (docs/20 §8B.7). So a biblioteca
 # padrao do Python.
@@ -42,6 +46,10 @@ UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 
 trava = threading.Lock()
 proximo = {}  # (sala, arquivo) -> o seq esperado
+anotados = {}  # sala ou (sala, arquivo) -> quantas linhas ja foram ao log (o teto evita encher o disco)
+trava_log = threading.Lock()  # a propria: as recusas de dentro da trava das pecas tambem vao ao log
+TETO_LOG = 200
+TEXTO_LIVRE = re.compile(r"[^0-9A-Za-z .,:;_/()+-]")
 
 
 def log(texto):
@@ -75,6 +83,21 @@ def esperado(sala, arquivo):
     return proximo[chave]
 
 
+def anotar(chave, texto):
+    """Uma linha de log, ate TETO_LOG por chave."""
+    with trava_log:
+        n = anotados.get(chave, 0)
+        anotados[chave] = n + 1
+    if n < TETO_LOG:
+        log(texto)
+    elif n == TETO_LOG:
+        log(f"{chave}: mais linhas omitidas")
+
+
+def limpo(texto, limite=120):
+    return TEXTO_LIVRE.sub("?", str(texto or ""))[:limite]
+
+
 def tamanho_sala(pasta):
     total = 0
     for nome in os.listdir(pasta):
@@ -105,10 +128,46 @@ class Receptor(BaseHTTPRequestHandler):
 
     def do_GET(self):
         url = urlparse(self.path)
-        if url.path != "/pecas/ativo":
-            return self.responder(404)
-        sala = (parse_qs(url.query).get("sala") or [""])[0].lower()
-        return self.responder(204 if sala_ativa(sala) else 404)
+        consulta = parse_qs(url.query)
+        sala = (consulta.get("sala") or [""])[0].lower()
+        if url.path == "/pecas/ativo":
+            return self.responder(204 if sala_ativa(sala) else 404)
+        if url.path == "/pecas/estado":
+            if sala_ativa(sala):
+                estado = limpo((consulta.get("estado") or [""])[0], 20)
+                detalhe = limpo((consulta.get("detalhe") or [""])[0])
+                anotar(sala, f"{sala}: estado {estado}" + (f" ({detalhe})" if detalhe else ""))
+            return self.responder(204)
+        return self.responder(404)
+
+    def ler_corpo(self):
+        """O corpo do pedido: pelo Content-Length ou em pedacos (chunked). None se passa do teto; ValueError se mal formado."""
+        if "chunked" in (self.headers.get("Transfer-Encoding") or "").lower():
+            partes, total = [], 0
+            while True:
+                linha = self.rfile.readline(1024)
+                if not linha:
+                    raise ValueError("corpo cortado")
+                n = int(linha.split(b";", 1)[0].strip(), 16)
+                if n == 0:
+                    while self.rfile.readline(1024) not in (b"\r\n", b"\n", b""):
+                        pass
+                    return b"".join(partes)
+                total += n
+                if total > MAX_PEDACO:
+                    return None
+                partes.append(self.rfile.read(n))
+                self.rfile.readline(1024)
+        tamanho = int(self.headers.get("Content-Length", "-1"))
+        if tamanho < 0:
+            raise ValueError("sem tamanho")
+        if tamanho > MAX_PEDACO:
+            return None
+        return self.rfile.read(tamanho)
+
+    def recusar(self, sala, arquivo, status, motivo, corpo=None):
+        anotar((sala, arquivo), f"{sala}/{arquivo}: recusado {status} ({motivo})")
+        return self.responder(status, corpo)
 
     def do_POST(self):
         partes = urlparse(self.path).path.split("/")
@@ -118,27 +177,29 @@ class Receptor(BaseHTTPRequestHandler):
         if arquivo not in ARQUIVOS or not SALA.match(sala):
             return self.responder(404)
         try:
-            tamanho = int(self.headers.get("Content-Length", "-1"))
             seq = int(self.headers.get("X-Pecas-Seq", "-1"))
             ts = int(self.headers.get("X-Pecas-Ts", "0"))
         except ValueError:
-            return self.responder(400)
-        if tamanho < 0 or seq < 0:
-            return self.responder(400)
-        if tamanho > MAX_PEDACO:
-            return self.responder(413)
-        corpo = self.rfile.read(tamanho)
+            return self.recusar(sala, arquivo, 400, "cabecalho")
+        if seq < 0:
+            return self.recusar(sala, arquivo, 400, "sem seq")
+        try:
+            corpo = self.ler_corpo()
+        except ValueError as erro:
+            return self.recusar(sala, arquivo, 400, f"corpo: {erro}")
+        if corpo is None:
+            return self.recusar(sala, arquivo, 413, "grande demais")
         if not SEGREDO:
             log("PECAS_SEGREDO vazio: nada e aceito")
             return self.responder(503)
         if abs(int(time.time() * 1000) - ts) > JANELA_MS:
-            return self.responder(401, {"erro": "relogio"})
+            return self.recusar(sala, arquivo, 401, "relogio", {"erro": "relogio"})
         texto = f"{sala}\n{arquivo}\n{seq}\n{ts}\n{hashlib.sha256(corpo).hexdigest()}".encode()
         certo = hmac.new(SEGREDO, texto, hashlib.sha256).hexdigest()
         if not hmac.compare_digest(certo, (self.headers.get("X-Pecas-Assinatura") or "").lower()):
-            return self.responder(401, {"erro": "assinatura"})
+            return self.recusar(sala, arquivo, 401, "assinatura", {"erro": "assinatura"})
         if not sala_ativa(sala):
-            return self.responder(403)
+            return self.recusar(sala, arquivo, 403, "sala fora da lista")
         pasta = os.path.join(DADOS, sala)
         with trava:
             os.makedirs(pasta, exist_ok=True)
@@ -146,9 +207,10 @@ class Receptor(BaseHTTPRequestHandler):
             if seq < quer:
                 return self.responder(200, {"repetido": True})
             if seq > quer:
+                anotar((sala, arquivo), f"{sala}/{arquivo}: recusado 409 (pedaco {seq}, esperado {quer})")
                 return self.responder(409, {"esperado": quer})
             if shutil.disk_usage(DADOS).free - len(corpo) < MIN_LIVRE or tamanho_sala(pasta) + len(corpo) > MAX_SALA:
-                log(f"{sala}/{arquivo}: sem espaco; pedaco {seq} recusado")
+                anotar((sala, arquivo), f"{sala}/{arquivo}: sem espaco; pedaco {seq} recusado")
                 return self.responder(507)
             with open(os.path.join(pasta, arquivo), "ab") as f:
                 f.write(corpo)

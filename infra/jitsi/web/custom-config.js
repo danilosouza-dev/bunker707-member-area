@@ -124,9 +124,12 @@ config.localRecording = { disable: false };
     try {
         var hash = String((window.location && window.location.hash) || '');
         if (!/config\.iAmRecorder=(?:%22|"|%27|')?true\b/.test(hash)) { return; }
+        // O Jitsi limpa o endereco logo depois de ler as contas do gravador (appData.localStorageContent); o arquivo
+        // das pecas chega depois e le o endereco guardado aqui, no primeiro instante.
+        window.__bunker707PecasEndereco = hash;
         var script = document.createElement('script');
         // O v e o comeco do sha256 do arquivo (a guarda da infra confere e diz o valor novo).
-        script.src = '/libs/bunker707-pecas.js?v=3e222c83';
+        script.src = '/libs/bunker707-pecas.js?v=9fb0e70a';
         script.async = true;
         (document.head || document.documentElement).appendChild(script);
     } catch (e) {

@@ -213,8 +213,11 @@ up() {
     log "5/6 Subindo o gravador e esperando a saude"
     rsh "$target" "cd '$JIBRI_REMOTE_DIR' && docker compose up -d"
     # A CPU da maquina a cada 5 s, para o finalize.sh mandar o resumo junto com o aviso de fim (docs/30 A62). Fora do
-    # SSH (setsid): continua depois que a conexao fecha. Uma falha aqui nunca impede a gravacao.
-    rsh "$target" "cd '$JIBRI_REMOTE_DIR' && setsid nohup sh ./cpu-amostras.sh >/dev/null 2>&1 < /dev/null &" || true
+    # SSH (setsid): continua depois que a conexao fecha. Uma falha aqui nunca impede a gravacao. O `&` fica dentro das
+    # chaves, so no comando com a saida desviada: com `cd ... && setsid ... &` o shell remoto punha a lista inteira em
+    # segundo plano, e esse subshell segurava a saida do SSH enquanto o laco rodava; o `rsh` nunca voltava e o jibri-up
+    # parava aqui, sem o `ready` (15/11/2026, docs/20 §8B.10).
+    rsh "$target" "cd '$JIBRI_REMOTE_DIR' && { setsid nohup sh ./cpu-amostras.sh >/dev/null 2>&1 < /dev/null & }" || true
     local healthy="" i out=""
     for i in $(seq 60); do
         out=$(rsh "$target" "cd '$JIBRI_REMOTE_DIR' && $HEALTH_CMD 2>/dev/null" || true)
