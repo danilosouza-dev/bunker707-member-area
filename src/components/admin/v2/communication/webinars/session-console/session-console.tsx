@@ -6,7 +6,7 @@ import { usePanelMotion } from "@/components/member/webinars/room/use-panel-moti
 import { useConsoleAnswerAuthor, useConsolePanelOpen, useConsoleTheme, useConsoleThumbs } from "@/components/member/webinars/room/use-room-prefs";
 import { Button } from "@/components/ui/button";
 import { settleAction, type ActionResult } from "@/lib/action-result";
-import type { LiveEmbedLook } from "@/lib/jitsi-room-config";
+import type { LiveEmbedLook, RecordingMode } from "@/lib/jitsi-room-config";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import { cn } from "@/lib/utils";
 import type { AnswerAuthorChoice } from "@/server/webinars/answer-author-model";
@@ -618,11 +618,17 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
 
   /* Live ao vivo: gravacao */
 
-  function recordNow() {
+  /**
+   * Gravar (a sala) ou Live gravada (so a tela compartilhada e a voz de quem apresenta, docs/30 D125): o modo vai ao
+   * iframe antes do pedido, na presenca de quem modera; o gravador que entra (agora ou quando ficar pronto, na fila) ja
+   * o encontra.
+   */
+  function recordNow(mode: RecordingMode) {
     if (!sessionId) {
       return;
     }
 
+    room.recordingMode.choose(mode);
     void run("live:rec-start", () => requestRecording({ sessionId }), (reply) => {
       setRecordUnavailable(reply.action === "unavailable");
 
@@ -1228,7 +1234,8 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                     live={live}
                     nowMs={nowMs}
                     onOpenPanel={openPanel}
-                    onRecord={recordNow}
+                    onRecord={() => recordNow("sala")}
+                    onRecordClean={() => recordNow("tela")}
                     onStopRecording={stopRecording}
                     onThumbs={setThumbs}
                     onTogglePanel={() => setPanelOpen(!panelOpen)}
@@ -1290,6 +1297,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                       onPrepare={() => void run("live:rec-prepare", () => prepareRecorder({ sessionId: session.id }))}
                       onRelease={() => void run("live:rec-release", () => releaseRecorder({ sessionId: session.id }))}
                       recorder={live.recorder}
+                      recorderMode={room.recordingMode.applied}
                       recording={room.room.recording}
                       status={session.status}
                       unavailable={recordUnavailable}

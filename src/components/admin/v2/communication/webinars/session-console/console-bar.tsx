@@ -1,6 +1,6 @@
 "use client";
 
-import { BarChart3, CircleDot, Hand, Mic, MicOff, MonitorUp, Settings2, Video, VideoOff } from "lucide-react";
+import { BarChart3, CircleDot, Clapperboard, Hand, Mic, MicOff, MonitorUp, Settings2, Video, VideoOff } from "lucide-react";
 import { Fragment, useRef, useState, type KeyboardEvent } from "react";
 import { LiveSettings } from "@/components/member/webinars/room/live-settings";
 import { ROOM_SETTINGS_POPOVER, RoomBar, RoomBarButton, RoomPanelToggle } from "@/components/member/webinars/room/room-bar";
@@ -10,7 +10,7 @@ import { RoomViewMenu } from "@/components/member/webinars/room/room-view-menu";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import type { RoomThumbs } from "@/lib/webinar-room-prefs";
 import { cn } from "@/lib/utils";
-import { consoleBarItemsFor, consoleRecordButton, type ConsolePanelView } from "@/server/webinars/console-v2-model";
+import { consoleBarItemsFor, consoleRecordButtons, recordingModeNow, type ConsolePanelView } from "@/server/webinars/console-v2-model";
 import { lobbyNotice, recorderCard, type LiveConsoleSnapshot } from "@/server/webinars/live-console-model";
 import type { WebinarSession } from "@/server/webinars/model";
 import { CONSOLE_PANEL_ID, CONSOLE_SETTINGS_ID } from "./console-layout-model";
@@ -22,7 +22,8 @@ import type { LiveRoomHandle } from "./live-room-panel";
 // numa pilula quieta. No centro, Microfone (toggleAudio), Câmera (toggleVideo), Compartilhar tela (toggleShareScreen,
 // so onde o nosso circulo vale; no outro navegador, o botao de tela do proprio motor, V2-A39), Gravar (requestRecording
 // e o startRecording do arquivo; com o gravador por preparar, o clique abre o ⋯ › Gravação do painel, onde fica o
-// Preparar), Mãos (abre a aba Mãos do painel, com o numero de maos levantadas) e Lançar enquete (abre o ⋯ › Enquetes). A
+// Preparar), Live gravada (o mesmo Gravar, com o modo "tela" pedido ao iframe antes: so a tela compartilhada e a voz de
+// quem apresenta, docs/30 D125; gravando, so o circulo do modo no ar para), Mãos (abre a aba Mãos do painel, com o numero de maos levantadas) e Lançar enquete (abre o ⋯ › Enquetes). A
 // direita, o "Palco para todos ▾" do Apresentador (setTileView no proprio iframe; o seguir a visao leva a todos) ou a
 // Visão do vídeo de antes para o co-apresentador e a Equipe, as Configurações (o LiveSettings da sala, por cima do
 // palco, logo depois do botao no teclado) e o balao que abre e fecha o painel do console. Os nomes sao fixos (o de Mãos
@@ -66,8 +67,10 @@ export type ConsoleBarProps = {
   handsCount: number;
   live: Pick<LiveConsoleSnapshot, "recorder" | "roomLocked">;
   nowMs: number;
-  /** Gravar: o mesmo pedido do cartao Gravação (requestRecording e o startRecording do arquivo). */
+  /** Gravar: o mesmo pedido do cartao Gravação (requestRecording e o startRecording do arquivo), gravando a sala. */
   onRecord: () => void;
+  /** Live gravada: o mesmo pedido, gravando so a tela compartilhada e a voz de quem apresenta (docs/30 D125). */
+  onRecordClean: () => void;
   onStopRecording: () => void;
   /** Mãos, Lançar enquete e o Gravar por preparar: abre o painel na aba ou na entrada do ⋯ (o foco vai a ela). */
   onOpenPanel: (view: ConsolePanelView) => void;
@@ -81,7 +84,7 @@ export type ConsoleBarProps = {
   thumbs?: RoomThumbs;
 };
 
-export function ConsoleBar({ busyKey, canPublish, handle, handsCount, live: snapshot, nowMs, onOpenPanel, onRecord, onStopRecording, onThumbs, onTogglePanel, panelOpen, session, thumbs = "side" }: ConsoleBarProps) {
+export function ConsoleBar({ busyKey, canPublish, handle, handsCount, live: snapshot, nowMs, onOpenPanel, onRecord, onRecordClean, onStopRecording, onThumbs, onTogglePanel, panelOpen, session, thumbs = "side" }: ConsoleBarProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const { joined, room } = handle;
@@ -89,7 +92,7 @@ export function ConsoleBar({ busyKey, canPublish, handle, handsCount, live: snap
   const items = consoleBarItemsFor({ controls: handle.controls, knocking: room.knocking.length, lobbyNotice: notice, meetConfigured: handle.meetConfigured, role: handle.role, screenShare: handle.screenShare });
   const open = session.status === "waiting" || session.status === "live";
   const card = recorderCard({ nowMs, recorder: snapshot.recorder, recordingOn: room.recording.on, status: session.status });
-  const record = consoleRecordButton({ canPublish, card, joined, open });
+  const records = consoleRecordButtons({ canPublish, card, joined, mode: recordingModeNow(handle.recordingMode), open });
   const recordBusy = busyKey !== null && busyKey.startsWith("live:rec");
 
   function focusSettingsButton() {
@@ -194,8 +197,10 @@ export function ConsoleBar({ busyKey, canPublish, handle, handsCount, live: snap
           />
         );
       case "record":
+      case "recordClean": {
         // Com o gravador por preparar o circulo so abre o ⋯ › Gravação: sem aria-pressed (como Mãos e Lançar enquete),
         // para o leitor de tela nao anunciar um liga e desliga que o clique nao faz.
+        const record = item === "record" ? records.record : records.recordClean;
         return (
           <RoomBarButton
             active={record.opensPanel ? undefined : record.active}
@@ -203,14 +208,15 @@ export function ConsoleBar({ busyKey, canPublish, handle, handsCount, live: snap
             className={record.active ? "border border-room-danger-border bg-room-danger-bg text-room-danger-fg hover:bg-room-danger-bg/80" : undefined}
             controls={record.opensPanel ? CONSOLE_PANEL_ID : undefined}
             disabled={!record.enabled || recordBusy}
-            icon={CircleDot}
+            icon={item === "record" ? CircleDot : Clapperboard}
             item={item}
             key={item}
-            label={live.gravar}
-            onClick={record.opensPanel ? () => onOpenPanel({ more: "gravacao" }) : record.active ? onStopRecording : onRecord}
+            label={item === "record" ? live.gravar : live.liveGravada}
+            onClick={record.opensPanel ? () => onOpenPanel({ more: "gravacao" }) : record.active ? onStopRecording : item === "record" ? onRecord : onRecordClean}
             title={record.title}
           />
         );
+      }
       case "hands": {
         const count = Number.isFinite(handsCount) ? Math.max(0, Math.floor(handsCount)) : 0;
         return (

@@ -175,13 +175,15 @@ export function canReleaseRecorder(status: RecorderStatus, force = false): boole
 }
 
 /**
- * O que o botao Gravar faz agora (docs/30 §1.4 e §6.7): `start` (maquina pronta: startRecording ja), `queue` (a maquina
- * esta preparando: o clique fica em recording_requested_at e a gravacao comeca sozinha no ready), `recording` (ja grava),
- * `unavailable` (sem maquina: "Gravação não preparada para esta live" e a reserva Gravar no navegador).
+ * O que o botao Gravar faz agora (docs/30 §1.4 e §6.7): `start` (maquina pronta: startRecording ja; tambem com o arquivo
+ * anterior ja na Bunny, `uploaded`: o Gravar de novo na mesma live, docs/30 A64), `queue` (a maquina esta preparando: o
+ * clique fica em recording_requested_at e a gravacao comeca sozinha no ready), `recording` (ja grava), `unavailable`
+ * (sem maquina: "Gravação não preparada para esta live" e a reserva Gravar no navegador).
  */
 export function recordButtonAction(status: RecorderStatus, options: { stale?: boolean } = {}): "queue" | "recording" | "start" | "unavailable" {
   switch (status) {
     case "ready":
+    case "uploaded":
       return "start";
     case "preparing":
       // O preparo vencido nao entra na fila: a reserva (Gravar no navegador) e Preparar de novo.

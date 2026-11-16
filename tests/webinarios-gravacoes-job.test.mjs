@@ -345,7 +345,7 @@ test("sem o cliente da Bunny (BUNNY_STREAM_API_KEY / BUNNY_STREAM_LIBRARY_ID) a 
  * 3. Devolver a maquina
  * ---------------------------------------------------------------------------------------------- */
 
-test("devolucao: uploaded volta (jibri-down) e repete depois de 2 h sem gone; recording e upload_failed nunca; ready so 30 min depois do fim", async () => {
+test("devolucao: uploaded volta (jibri-down) com a live encerrada e repete depois de 2 h sem gone; com a live no ar fica (o Gravar de novo, A64); recording e upload_failed nunca; ready so 30 min depois do fim", async () => {
   const id = (n) => `acacacac-0000-4000-8000-0000000001${String(n).padStart(2, "0")}`;
   const pedido = iso(HORA_MARCADA - 30 * MIN);
   const db = escola({
@@ -357,7 +357,9 @@ test("devolucao: uploaded volta (jibri-down) e repete depois de 2 h sem gone; re
       sessaoRow(id(5), { ended_at: iso(HORA_MARCADA + HOUR + 20 * MIN), recorder_requested_at: pedido, recorder_status: "ready", status: "ended" }),
       sessaoRow(id(6), { recorder_requested_at: pedido, recorder_status: "ready", status: "live" }),
       sessaoRow(id(7), { recorder_requested_at: pedido, recorder_status: "uploading", status: "ended" }),
-      sessaoRow(id(8), { recorder_requested_at: pedido, recorder_status: "unavailable", status: "ended" })
+      sessaoRow(id(8), { recorder_requested_at: pedido, recorder_status: "unavailable", status: "ended" }),
+      // O primeiro arquivo ja esta na Bunny e a live continua no ar: a maquina fica para o Gravar de novo (A64).
+      sessaoRow(id(9), { recorder_requested_at: pedido, recorder_status: "uploaded", status: "live" })
     ]
   });
   const dispatcher = fakeRecorderDispatcher([]);
@@ -381,6 +383,12 @@ test("devolucao: uploaded volta (jibri-down) e repete depois de 2 h sem gone; re
   assert.equal(deNovo.released, 2, "2 h sem gone: pede de novo as duas primeiras");
   assert.deepEqual(dispatcher.log.slice(3).map((item) => item.sessionId), [id(1), id(4)]);
   assert.ok(!dispatcher.log.some((item) => [id(2), id(3), id(6), id(7), id(8)].includes(item.sessionId)), "nunca com o MP4 em risco nem sem maquina");
+  assert.ok(!dispatcher.log.some((item) => item.sessionId === id(9)), "a live no ar com o arquivo na Bunny fica com a maquina");
+
+  // A live encerra: a maquina do arquivo ja enviado volta no tick seguinte, sem esperar os 30 min da ready.
+  Object.assign(sessaoDe(db, id(9)), { ended_at: iso(agora + 2 * HOUR + 5 * MIN), status: "ended" });
+  await rodar(db, agora + 2 * HOUR + 6 * MIN, { dispatcher });
+  assert.equal(dispatcher.log.at(-1).sessionId, id(9));
 });
 
 test("live remarcada com a maquina do preparo automatico pronta: devolvida (nao fica ligada ate a nova data); perto da hora nao; na nova data o preparo automatico pede outra", async () => {
@@ -667,6 +675,13 @@ test("retencao: o video do gravador que virou aula fica na Bunny e a conferencia
   // Rascunho tambem e aula de pe; so a excluida libera o video.
   const emRascunho = escolaComDestino(null, { gravacoes: [vencida()], lessons: [aula("draft")] });
   assert.equal((await rodar(emRascunho, naHora, { bunny: bunnyFalsa() })).keptAsLesson, 1);
+
+  // O video gravado para a Live gravada (D125): a equipe colou o player dele no webinario gravado. Fica na Bunny.
+  const base = { ...gravacaoRow({ bunny_library_id: null, bunny_video_id: null, embed_url: `https://iframe.mediadelivery.net/embed/42/${VIDEO.toUpperCase()}`, session_id: null, source: "bunny", status: "ready" }), webinar_id: randomUUID() };
+  const naLiveGravada = escolaComDestino(null, { gravacoes: [vencida(), base] });
+  const outraVez = bunnyFalsa();
+  assert.deepEqual(semLogs(await rodar(naLiveGravada, naHora, { bunny: outraVez })), resultado({ keptAsLesson: 1 }));
+  assert.deepEqual(outraVez.log, [], "nenhum DELETE na Bunny: a Live gravada ainda usa o video");
 
   const excluida = escolaComDestino(null, { gravacoes: [vencida()], lessons: [aula("deleted")] });
   const outraBunny = bunnyFalsa();

@@ -119,7 +119,7 @@ else
 fi
 
 # ---- 4. avisar o app (docs/30 §5.3) --------------------------------------------------------------------
-# A CPU da maquina durante a live (cpu-amostras.sh, docs/30 A62): {"nucleos":N,"amostras":[[unix,pct],...]}, a media de
+# A CPU da maquina durante a live (cpu-amostras.sh, docs/30 §6.7 e A26): {"nucleos":N,"amostras":[[unix,pct],...]}, a media de
 # cada 30 s das ultimas 6 h. O app guarda o corpo cru e o schema ignora o campo. Sem o arquivo ou sem amostras, nada.
 cpu_json() {
     [ -f "$1" ] || return 0
@@ -144,11 +144,38 @@ cpu_json() {
             printf "]}"
         }' "$1" 2>/dev/null
 }
+# A fluidez medida pelo arquivo do modo da gravacao na pagina do gravador (bunker707-gravacao.js, docs/30 A65): as
+# linhas "bunker707-fluidez ..." que o Jibri guardou do console do navegador (/storage/logs/browser.*.txt), as mais
+# novas (no maximo 120 e 24 KB), como lista de textos. Cada linha comeca com t=<unix>: a da gravacao e a do horario
+# dela. O app guarda o corpo cru e o schema ignora o campo. Sem o log ou sem linhas, nada.
+fluidez_json() {
+    command -v python3 >/dev/null 2>&1 || return 0
+    python3 - "${BROWSER_LOGS:-/storage/logs}" <<'PY' 2>/dev/null || true
+import glob, json, os, re, sys
+lines = []
+for path in sorted(glob.glob(os.path.join(sys.argv[1], "browser.*.txt")), key=os.path.getmtime):
+    with open(path, errors="replace") as handle:
+        for line in handle:
+            found = re.search(r"bunker707-fluidez ([^\"\\]{1,600})", line)
+            if found:
+                lines.append(found.group(1).strip())
+out, size = [], 0
+for line in reversed(lines[-120:]):
+    size += len(line) + 4
+    if size > 24000:
+        break
+    out.append(line)
+if out:
+    print(json.dumps(list(reversed(out)), ensure_ascii=True, separators=(",", ":")))
+PY
+}
 sign() { printf '%s.%s' "$1" "$2" | openssl dgst -sha256 -hmac "$WEBINAR_RECORDER_WEBHOOK_SECRET" -r | cut -d' ' -f1; }
 body="{\"sessionId\":\"$(json_str "${SESSAO:-}")\",\"state\":\"$state\",\"room\":\"$(json_str "$room")\",\"fileName\":\"$(json_str "$name")\",\"startedAt\":$(json_opt "$started_at"),\"durationSeconds\":$duration,\"sizeBytes\":$size,\"sha256\":\"$sha\",\"bunnyLibraryId\":$(json_opt "${BUNNY_LIBRARY_ID:-}"),\"bunnyVideoId\":$(json_opt "$guid")"
 [ -n "$error" ] && body="$body,\"error\":\"$(json_str "$error")\""
 cpu=$(cpu_json "${CPU_LOG:-/storage/cpu.log}")
 [ -n "$cpu" ] && body="$body,\"cpu\":$cpu"
+fluidez=$(fluidez_json)
+[ -n "$fluidez" ] && body="$body,\"fluidez\":$fluidez"
 body="$body}"
 
 notified=0

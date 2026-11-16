@@ -727,6 +727,7 @@ function handleFor(role = "host", extra = {}) {
     joined: true,
     lobby: false,
     meetConfigured: true,
+    recordingMode: { applied: null, choose: () => true, chosen: null },
     retry: noop,
     role,
     room: { ...liveModel.EMPTY_ROOM, selfId: "p-eu" },
@@ -757,6 +758,7 @@ const bar = (handle, extra = {}) =>
       nowMs: NOW,
       onOpenPanel: noop,
       onRecord: noop,
+      onRecordClean: noop,
       onStopRecording: noop,
       onTogglePanel: noop,
       panelOpen: true,
@@ -782,8 +784,8 @@ test("barra de quem apresenta (V2-14): o <nav> com a Sala de espera, Microfone, 
   assert.match(markup, new RegExp(`^<div class="relative min-w-0" data-console-bar=""><nav aria-label="${escape(consoleV2.barra.rotulo)}"`));
   assert.doesNotMatch(markup, /role="group"/, "a barra do console e navegacao, nao grupo");
   // A ordem das zonas e dos circulos.
-  const itens = Array.from(markup.matchAll(/data-room-bar-item="([a-z]+)"/g)).map((match) => match[1]);
-  assert.deepEqual(itens, ["mic", "camera", "share", "record", "hands", "poll", "view", "settings", "panel"]);
+  const itens = Array.from(markup.matchAll(/data-room-bar-item="([a-zA-Z]+)"/g)).map((match) => match[1]);
+  assert.deepEqual(itens, ["mic", "camera", "share", "record", "recordClean", "hands", "poll", "view", "settings", "panel"]);
   assert.match(zone(markup, "left"), /data-console-lobby="knocking"/);
   assert.equal(textOf(zone(markup, "left")), `${consoleV2.barra.salaDeEspera(2)} ${copy.admitirTodos}`);
   // Com o painel aberto a 1024 px a coluna do palco tem 656 px: a zona da Sala de espera fica so com o que sobra (a
@@ -817,6 +819,10 @@ test("barra de quem apresenta (V2-14): o <nav> com a Sala de espera, Microfone, 
   assert.match(item(markup, "record"), new RegExp(`aria-label="${escape(copy.gravar)}"`));
   assert.match(item(markup, "record"), /aria-pressed="false"/);
   assert.doesNotMatch(item(markup, "record"), /disabled=""/, "o gravador pronto: Gravar liga");
+  // O Gravar para Live gravada (docs/30 D125): o circulo ao lado, com o mesmo gravador pronto.
+  assert.match(item(markup, "recordClean"), new RegExp(`aria-label="${escape(copy.liveGravada)}"`));
+  assert.match(item(markup, "recordClean"), new RegExp(`title="${escape(copy.gravarLiveGravada)}"`));
+  assert.doesNotMatch(item(markup, "recordClean"), /disabled=""/);
   // Mãos e Lançar enquete abrem o painel (a aba Mãos e o ⋯ › Enquetes): o aria-controls dele, sem aria-pressed.
   assert.match(item(markup, "hands"), new RegExp(`aria-controls="${CONSOLE_PANEL_ID}"(?=[^>]*aria-label="${escape(consoleV2.barra.maos(0))}")`));
   assert.match(item(markup, "poll"), new RegExp(`aria-controls="${CONSOLE_PANEL_ID}"(?=[^>]*aria-label="${escape(consoleV2.barra.lancarEnquete)}")`));
@@ -843,6 +849,15 @@ test("barra de quem apresenta (V2-14): o <nav> com a Sala de espera, Microfone, 
   assert.match(item(ligada, "record"), /aria-pressed="true"/);
   assert.match(item(ligada, "record"), new RegExp(`title="${escape(copy.pararGravacao)}"`));
   assert.match(item(ligada, "record"), /bg-room-danger-bg/);
+  // Gravando a sala: o Live gravada fica desligado, com o porque.
+  assert.match(item(ligada, "recordClean"), /disabled=""/);
+  assert.match(item(ligada, "recordClean"), new RegExp(`title="${escape(copy.gravandoSala)}"`));
+  // Gravando para a Live gravada (o gravador contou "tela"): o Live gravada para; o Gravar fica desligado.
+  const soTela = bar(handleFor("host", { recordingMode: { applied: "tela", choose: () => true, chosen: "tela" }, room: { ...liveModel.EMPTY_ROOM, recording: { mode: "file", on: true }, selfId: "p-eu" } }));
+  assert.match(item(soTela, "recordClean"), /aria-pressed="true"/);
+  assert.match(item(soTela, "recordClean"), new RegExp(`title="${escape(copy.gravandoLiveGravada)}"`));
+  assert.match(item(soTela, "record"), /disabled=""/);
+  assert.match(item(soTela, "record"), new RegExp(`title="${escape(copy.gravandoParaLiveGravada)}"`));
   assert.match(openTag(ligada, 'data-room-bar-item="view"'), new RegExp(`aria-label="${escape(consoleV2.visao.gradeParaTodos)}"`));
   // O painel fechado: "Mostrar o painel".
   assert.match(item(bar(handleFor("host"), { panelOpen: false }), "panel"), new RegExp(`aria-expanded="false"(?=[^>]*aria-label="${escape(consoleV2.painel.mostrar)}")`));
@@ -859,12 +874,12 @@ test("barra de quem apresenta (V2-14): o <nav> com a Sala de espera, Microfone, 
 
 test("barra por papel: o co-apresentador sem Gravar e com a Visão do vídeo so para si; a Equipe sem midia nem Configurações, com Mãos e Lançar enquete; o Compartilhar tela fora dos navegadores sem Chromium (o botao do motor fica no video)", () => {
   const coHost = bar(handleFor("co_host"));
-  assert.deepEqual(Array.from(coHost.matchAll(/data-room-bar-item="([a-z]+)"/g)).map((match) => match[1]), ["mic", "camera", "share", "hands", "poll", "view", "settings", "panel"]);
+  assert.deepEqual(Array.from(coHost.matchAll(/data-room-bar-item="([a-zA-Z]+)"/g)).map((match) => match[1]), ["mic", "camera", "share", "hands", "poll", "view", "settings", "panel"]);
   assert.match(openTag(coHost, 'data-room-bar-item="view"'), new RegExp(`aria-label="${escape(WEBINAR_COPY.salaV2.visao.atual(WEBINAR_COPY.salaV2.visao.palco))}"`));
   const equipe = bar(handleFor("team", { controls: liveModel.liveControlsFor({ canPublish: true, moderator: false, role: "team" }) }));
-  assert.deepEqual(Array.from(equipe.matchAll(/data-room-bar-item="([a-z]+)"/g)).map((match) => match[1]), ["hands", "poll", "view", "panel"]);
+  assert.deepEqual(Array.from(equipe.matchAll(/data-room-bar-item="([a-zA-Z]+)"/g)).map((match) => match[1]), ["hands", "poll", "view", "panel"]);
   const motor = bar(handleFor("host", { screenShare: "engine" }));
-  assert.deepEqual(Array.from(motor.matchAll(/data-room-bar-item="([a-z]+)"/g)).map((match) => match[1]), ["mic", "camera", "record", "hands", "poll", "view", "settings", "panel"]);
+  assert.deepEqual(Array.from(motor.matchAll(/data-room-bar-item="([a-zA-Z]+)"/g)).map((match) => match[1]), ["mic", "camera", "record", "recordClean", "hands", "poll", "view", "settings", "panel"]);
   assert.ok(!textOf(motor).includes(consoleV2.barra.compartilharTela) && !motor.includes(consoleV2.barra.compartilharTela));
 });
 

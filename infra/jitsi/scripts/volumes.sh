@@ -9,7 +9,7 @@
 
 . "$(dirname -- "$0")/_env.sh"
 
-dirs=(web storage/web prosody/config storage/prosody jicofo jvb pecas)
+dirs=(web storage/web prosody/config storage/prosody jicofo jvb)
 for d in "${dirs[@]}"; do
     mkdir -p "$COMPOSE_DIR/volumes/$d"
 done

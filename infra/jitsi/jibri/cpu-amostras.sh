@@ -1,6 +1,7 @@
 #!/bin/sh
-# Anota a CPU da maquina do gravador a cada 5 s (docs/30 A62 e §6.7): o finalize.sh resume e manda junto com o aviso de
-# fim de gravacao (o campo `cpu`, guardado cru pelo app), para saber se o gravador aguenta o trabalho de cada live.
+# Anota a CPU da maquina do gravador a cada 5 s (docs/30 §6.7 e A26; nasceu no teste das pecas, A62): o finalize.sh
+# resume e manda junto com o aviso de fim de gravacao (o campo `cpu`, guardado cru pelo app), para saber se o gravador
+# aguenta o trabalho de cada live.
 # Roda no host da maquina (fora do container), iniciado pelo jibri-up depois do `up -d`. Cada linha de
 # volumes/storage/jibri/cpu.log: <segundos unix> e a primeira linha de /proc/stat ("cpu user nice system idle ...").
 # A primeira linha do arquivo diz quantos nucleos a maquina tem. Idempotente: com outra copia viva, sai.

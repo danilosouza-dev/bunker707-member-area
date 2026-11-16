@@ -52,6 +52,7 @@ import {
 import type { JoinTokenReply } from "@/server/webinars/live-model";
 import type { WebinarSession } from "@/server/webinars/model";
 import { adminToast } from "../../../toast";
+import { useRecordingMode, type RecordingModeState } from "./use-recording-mode";
 
 // A sala da Live ao vivo no console (docs/30 §1.4, §2.4, §6.3, §6.4 e §8.1; fase 3): o hook useLiveRoom pede o token
 // (POST /api/webinars/[id]/join-token, o mesmo do aluno: o papel vem do servidor), monta o iframe pelo useJitsiMeet
@@ -210,6 +211,8 @@ export type LiveRoomHandle = {
   sharing: boolean;
   /** A propria camera no ar (videoMuteStatusChanged), dentro da sala. */
   videoOn: boolean;
+  /** O modo da gravacao (docs/30 D125): o que este console pediu, o que o gravador aplicou e o pedido ao iframe. */
+  recordingMode: RecordingModeState;
   startTesting: () => void;
   /**
    * A coluna de miniaturas pela largura (o co-apresentador e a Equipe, consoleColumnPolicy): o toggleFilmStrip so quando
@@ -654,6 +657,8 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
   const api = meet.api;
   // A lista dos simulados segue so para o gravador (o participante escondido): quem modera nunca os ve no proprio video.
   useAudienceTiles({ joined, people: input.audience ?? NO_AUDIENCE, post: meet.postToFrame, relay: true });
+  // O modo da gravacao (docs/30 D125): o pedido vai ao iframe antes de gravar; o aviso volta so do proprio iframe.
+  const frameWindow = useCallback(() => api.current?.getIFrame?.()?.contentWindow ?? null, [api]);
 
   const devices = useJitsiDevices({
     api,
@@ -837,6 +842,15 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
     [command]
   );
 
+  const recordingMode = useRecordingMode({
+    domain: token.reply?.domain ?? null,
+    frame: frameWindow,
+    joined,
+    post: meet.postToFrame,
+    recording: room.recording.on,
+    sessionId: input.session?.id ?? null
+  });
+
   const escolher = devices.escolher;
   const chooseDevice = (kind: DeviceKind, option: DeviceOption) => presenter && deviceSectionReady(deviceSettings, kind) && escolher(kind, option);
 
@@ -855,6 +869,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
     joined,
     lobby: wantedLobby,
     meetConfigured,
+    recordingMode,
     retry,
     role,
     room,

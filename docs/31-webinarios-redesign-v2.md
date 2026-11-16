@@ -798,3 +798,10 @@ na Live ao vivo. As decisões estão no `docs/30` (D124, §6.9 e as perguntas A5
 |---|---|---|
 | V2-A97 | A coluna da gravada deve ter o **Esconder** do menu, como a da live? | não nesta etapa: a gravada não tem o menu Visão do vídeo; se o produtor pedir, o mesmo Lateral e Esconder guardados no navegador |
 
+
+## 21. O círculo Live gravada na barra do console (15/11/2026, `docs/30` D125)
+
+- **Onde**: na barra de quem apresenta (V2-14), logo depois do **Gravar**, só para o Apresentador, com o ícone de claquete e o nome **Live gravada**. O title diz o que ele faz: "Gravar para Live gravada: só a tela compartilhada e a voz de quem apresenta".
+- **Estados**: os mesmos do **Gravar** (pronto, na fila girando, por preparar abrindo o ⋯ › Gravação, desligado com o porquê). Gravando, só o círculo do modo no ar fica ligado e para; o outro fica desligado com a frase ("Gravando a sala. Pare a gravação para gravar a Live gravada." ou "Gravando para a Live gravada: pare a gravação para gravar a sala.").
+- **Confirmação**: o cartão **Gravação** do ⋯ diz o que o próprio gravador aplicou ("O gravador está gravando só a tela compartilhada e a voz de quem apresenta." ou "O gravador está gravando a sala, como os alunos veem.").
+- **Largura**: a barra ganha um círculo; com o painel aberto de 1024 a 1279 px, o **Lançar enquete** continua saindo (o ⋯ › Enquetes faz o mesmo).

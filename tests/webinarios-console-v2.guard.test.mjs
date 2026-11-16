@@ -235,7 +235,7 @@ test("o console usa as regras puras, nao uma copia delas: as abas, o ⋯, o topo
   assert.match(fonte("session-console-skeleton.tsx"), /\bconsoleSkeleton\(/, "o esqueleto do carregamento e o mesmo");
   const bar = fonte("console-bar.tsx");
   assert.match(bar, /\bconsoleBarItemsFor\(/);
-  assert.match(bar, /\bconsoleRecordButton\(/);
+  assert.match(bar, /\bconsoleRecordButtons\(/);
   const panel = fonte("live-room-panel.tsx");
   for (const regra of ["screenShareWatchStep", "rolesToRead", "menuKickPlan", "participantMenuClickOf", "consoleFilmstripShouldToggle", "consoleScreenShareMode"]) {
     assert.match(panel, new RegExp(`\\b${regra}\\(`), `live-room-panel.tsx chama ${regra}`);

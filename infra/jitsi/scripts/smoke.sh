@@ -28,9 +28,9 @@ css_sha=$(sha256sum "$css_file" | cut -c1-64); css_v=${css_sha:0:8}
 # Os participantes simulados desenhados pelo motor (docs/30 D120): o mesmo ?v= pelo sha256, no arquivo de /libs.
 plateia_file="$(dirname -- "$0")/../web/bunker707-plateia.js"
 plateia_sha=$(sha256sum "$plateia_file" | cut -c1-64); plateia_v=${plateia_sha:0:8}
-# As pecas da Live gravada em teste (docs/30 A62), so no gravador: o mesmo ?v= pelo sha256, no arquivo de /libs.
-pecas_file="$(dirname -- "$0")/../web/bunker707-pecas.js"
-pecas_sha=$(sha256sum "$pecas_file" | cut -c1-64); pecas_v=${pecas_sha:0:8}
+# O modo da gravacao (docs/30 A63 e D125): o mesmo ?v= pelo sha256, no arquivo de /libs.
+gravacao_file="$(dirname -- "$0")/../web/bunker707-gravacao.js"
+gravacao_sha=$(sha256sum "$gravacao_file" | cut -c1-64); gravacao_v=${gravacao_sha:0:8}
 
 ok()    { printf '  ok   %-40s %s\n' "$1" "$2"; }
 falha() { printf '  FALHA %-40s %s\n' "$1" "$2"; failures=$((failures + 1)); }
@@ -60,11 +60,9 @@ if [ "$served_sha" = "$css_sha" ]; then ok "css/bunker707.css (conteudo)" "sha25
 check "libs/bunker707-plateia.js (os simulados)" 200 "$public_url/libs/bunker707-plateia.js"
 served_sha=$(curl -sS "${insecure[@]}" --max-time 20 "$public_url/libs/bunker707-plateia.js?v=$plateia_v" 2>/dev/null | sha256sum | cut -c1-64)
 if [ "$served_sha" = "$plateia_sha" ]; then ok "libs/bunker707-plateia.js (conteudo)" "sha256 $plateia_v"; else falha "libs/bunker707-plateia.js (conteudo)" "o servido nao e o do commit (esperado $plateia_v, veio ${served_sha:0:8}): o web foi recriado?"; fi
-check "libs/bunker707-pecas.js (as pecas em teste)" 200 "$public_url/libs/bunker707-pecas.js"
-served_sha=$(curl -sS "${insecure[@]}" --max-time 20 "$public_url/libs/bunker707-pecas.js?v=$pecas_v" 2>/dev/null | sha256sum | cut -c1-64)
-if [ "$served_sha" = "$pecas_sha" ]; then ok "libs/bunker707-pecas.js (conteudo)" "sha256 $pecas_v"; else falha "libs/bunker707-pecas.js (conteudo)" "o servido nao e o do commit (esperado $pecas_v, veio ${served_sha:0:8}): o web foi recriado?"; fi
-# O receptor das pecas responde pelo Caddy (404 para uma sala fora da lista); 502 seria o servico pecas fora do ar.
-check "pecas/ativo (o receptor das pecas)" "204|404" "$public_url/pecas/ativo?sala=w-00000000-0000-4000-8000-000000000000-smoke"
+check "libs/bunker707-gravacao.js (o modo da gravacao)" 200 "$public_url/libs/bunker707-gravacao.js"
+served_sha=$(curl -sS "${insecure[@]}" --max-time 20 "$public_url/libs/bunker707-gravacao.js?v=$gravacao_v" 2>/dev/null | sha256sum | cut -c1-64)
+if [ "$served_sha" = "$gravacao_sha" ]; then ok "libs/bunker707-gravacao.js (conteudo)" "sha256 $gravacao_v"; else falha "libs/bunker707-gravacao.js (conteudo)" "o servido nao e o do commit (esperado $gravacao_v, veio ${served_sha:0:8}): o web foi recriado?"; fi
 # Sem o upgrade do websocket o prosody responde com texto ou 4xx; 502/503 seria o nginx sem chegar nele.
 check "websocket (caminho ate o prosody)" "200|400|404|426" "$public_url/xmpp-websocket"
 
@@ -83,7 +81,7 @@ printf '%s' "$last" | grep -q 'false' || { brand_ok=0; falha "interface_config.j
 [ "$brand_ok" = 1 ] && ok "interface_config.js" "custom-interface_config.js no fim, sem a marca"
 cfg=$(curl -sS "${insecure[@]}" --max-time 20 "$public_url/config.js" 2>/dev/null || true)
 cfg_ok=1
-for expr in "config.disableChat = true" "config.readOnlyName = true" "config.hideConferenceTimer = true" "config.channelLastN = 9" "css/bunker707.css?v=$css_v" "libs/bunker707-plateia.js?v=$plateia_v" "libs/bunker707-pecas.js?v=$pecas_v"; do
+for expr in 'config.videoQuality.codecPreferenceOrder = ["VP8"' "config.videoQuality.screenshareCodec = 'VP8'" "config.disableChat = true" "config.readOnlyName = true" "config.hideConferenceTimer = true" "config.channelLastN = 9" "css/bunker707.css?v=$css_v" "libs/bunker707-plateia.js?v=$plateia_v" "libs/bunker707-gravacao.js?v=$gravacao_v"; do
     printf '%s' "$cfg" | grep -qF "$expr" || { cfg_ok=0; falha "config.js" "falta: $expr"; }
 done
 # A barra padrao servida e a minima (docs/30 §8.1): a ultima toolbarButtons nao tem tela, gravar, seguranca nem a lista.

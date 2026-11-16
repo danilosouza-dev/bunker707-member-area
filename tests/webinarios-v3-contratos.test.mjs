@@ -234,6 +234,7 @@ test("configOverwrite por papel (D26): aluno sem chat/enquete/reacao do Jitsi, m
 
 test("o gravador: Gravar pela situacao, quem pode pedir e devolver a maquina, aviso de 6 h, estimativa do preparo e as frases do card", () => {
   assert.equal(rec.recordButtonAction("ready"), "start");
+  assert.equal(rec.recordButtonAction("uploaded"), "start", "o arquivo anterior ja na Bunny: o Gravar de novo na mesma live (A64)");
   assert.equal(rec.recordButtonAction("preparing"), "queue");
   assert.equal(rec.recordButtonAction("recording"), "recording");
   assert.equal(rec.recordButtonAction("none"), "unavailable");
