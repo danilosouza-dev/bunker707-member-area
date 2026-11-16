@@ -647,6 +647,21 @@ pela Cloudflare). O IP do C fica visivel; a protecao e o firewall da Hetzner, o 
   e o `smoke.sh` confere o arquivo servido pelo sha256 e o `?v=` no `config.js`. Conferir depois, numa sala de teste
   com duas contas e participantes simulados ligados: a lista de miniaturas do aluno na ordem do `docs/30` §10.3 (item
   13), o console sem simulado nenhum no video e, com a gravacao ligada, as miniaturas simuladas no video gravado.
+- **O Gravar para Live gravada (15/11/2026, `docs/30` D125)**: o `web` do C serve tambem `/libs/bunker707-gravacao.js`
+  (montado pelo compose, somente leitura), ligado pelo `custom-config.js` so no iframe do nosso app e no gravador.
+  Vale como qualquer `deploy-meet` (da `main`, `SEM_LIVE_2H=sim`); o `smoke.sh` confere o arquivo servido pelo sha256
+  e o `?v=` no `config.js`. O app (`deploy-membros`) e o motor sobem em qualquer ordem: sem o arquivo, o gravador
+  grava a sala como sempre. Conferir depois, numa live de teste com o gravador: o circulo **Live gravada** ao lado do
+  **Gravar**, o cartao **Gravação** com "O gravador está gravando só a tela compartilhada e a voz de quem apresenta.",
+  e o video na Bunny so com a tela (preto antes do compartilhamento), sem a voz de aluno.
+- **A fluidez da gravacao (15/11/2026, `docs/30` A65 e D126)**: o motor passa a usar VP8 na camera e na tela
+  (`CODEC_ORDER_JVB`, `CODEC_ORDER_P2P` e `VIDEOQUALITY_SCREENSHARE_CODEC` no compose; o `smoke.sh` confere no
+  `config.js`), e o gravador escreve a cada 10 s uma linha `bunker707-fluidez` que o `finalize.sh` manda no aviso de
+  fim. Para ler: `exec-membros` com `cd /opt/bunker707 && docker compose -f infra/compose/docker-compose.yml exec -T db psql -U postgres -At -c "select received_at, payload->'fluidez' from webinar_recording_events where state = 'uploaded' order by received_at desc limit 1"`.
+  Em cada linha: `pintou` (os quadros por segundo desenhados no video que vai para a gravacao), e por video `rec` (os
+  que chegaram), `dec` (os que o gravador abriu), `ms` (o tempo para abrir cada um), `fz` (congelamentos); `envio`
+  diz o que o navegador de quem modera manda e o que segura (`cpu`, `bandwidth` ou `none`). Com a live no ar, o
+  mesmo pelo `exec-jibri` em `volumes/storage/jibri/logs/browser.*.txt`.
 - O `.env` do C leva `XMPP_MUC_MODULES=token_affiliation,bunker_room_guard,bunker_presence_guard,bunker_ghost_guard` e `ROOM_GUARD_URL=<origem da area de
   membros>/api/webhooks/room-guard` (o `generate-secrets.sh` deriva os dois; num `.env` gerado antes de 29/10/2026,
   acrescentar as duas linhas a mao antes do proximo `deploy-meet`): o Prosody busca ali, a cada 5 s, quem a equipe
@@ -788,76 +803,39 @@ Antes de cada live: **Testar sala** no console (com a sessao ainda agendada, o A
 sessao sem os alunos) e, com o gravador pedido, conferir que o cartao Gravacao chega a **Pronto**. Durante: o console
 mostra a maquina ligada ha quanto tempo e a ancora da gravacao.
 
-### 8B.10 O teste das pecas da Live gravada (plano A, `docs/30` A62; 15/11/2026)
+### 8B.10 O teste das pecas da Live gravada (plano A, `docs/30` A62): abandonado em 15/11/2026
 
-O que roda: no gravador, `infra/jitsi/web/bunker707-pecas.js` (carregado pelo `custom-config.js` so com
-`config.iAmRecorder=true`) grava a camera com o audio e a tela de quem apresenta em pecas separadas e manda os pedacos,
-assinados com a senha do usuario do gravador, ao receptor do C (servico `pecas`, `infra/jitsi/pecas/receptor.py`, atras
-do Caddy em `https://meet.<dominio>/pecas/`). So nas salas dos webinarios listados em
-`infra/jitsi/volumes/pecas/ativas.txt` (fora do git; vazio ou ausente: nada). Os 2 primeiros minutos do gravador na
-sala sao a base, sem as pecas. A gravacao de sempre do Jibri nao muda. No gravador, `cpu-amostras.sh` anota a CPU a
-cada 5 s e o `finalize.sh` manda o resumo no aviso de fim (o campo `cpu`, guardado cru em
-`webinar_recording_events.payload`), em toda gravacao.
+O plano A gravava, dentro da pagina do gravador, a camera com a voz e a tela de quem apresenta em pecas separadas, para
+a Live gravada remontar a live a partir delas. Tres testes em producao no mesmo dia, com o roteiro de tela e camera:
 
-Ligar um webinario (sem reiniciar nada; o receptor le a lista a cada pedido):
-`exec-meet` com `cd infra/jitsi && echo <id do webinario> >> volumes/pecas/ativas.txt && cat volumes/pecas/ativas.txt`.
-A linha `<id> canvas` grava pelo jeito antigo (o canvas), para comparar; sem nada, `direto` (a faixa recebida, sem
-redesenhar). Cada gravacao (cada vez que o gravador entra na sala; o Gravar de novo e outra) fica na propria pasta,
-`volumes/pecas/<sala>/<gravacao>/`, e cada peca vem em partes (`camera-1.webm`, `tela-1.webm`...: uma parte nova quando
-a faixa de quem apresenta muda; a tela comeca no primeiro compartilhamento); a marca `arquivo` da linha do tempo diz
-quando cada parte comeca. Antes de 15/11/2026, a pasta era a da sala, e o Gravar de novo perdia o comeco da segunda
-gravacao (o receptor guardava a ordem dos pedacos por sala).
+| Teste | Maquina | Resultado |
+|---|---|---|
+| 1 ("Teste pecas") | cpx42 | nenhuma peca: o Jibri manda a senha no endereco da sala (`appData.localStorageContent`), nao no `localStorage`; a CPU da gravacao de sempre: 9% so com a camera, 16% com a tela |
+| 2 ("Teste pecas 2", jeito canvas) | cpx42 | as pecas chegaram, uns 10 quadros por segundo; CPU de 35 a 57% so com a camera e de 66 a 90% com a tela |
+| 3 ("Teste pecas final", jeito direto) | cpx52 (a cpx62 bateu no teto de nucleos compartilhados da conta: `shared core limit exceeded`) | 17 a 19 quadros por segundo na camera e 17 na tela, de uns 24 que chegam; o navegador do gravador so decodifica uns 18 por segundo mesmo nos 2 minutos sem as pecas, com a maquina em 18% |
 
-Depois da live de teste, os resultados:
+O produtor abandonou o plano A no mesmo dia: 10 a 19 quadros por segundo nao servem nem para a camera nem para a tela.
+A Live gravada passa a ser um video so (`docs/30` A63). Sairam da instancia: o arquivo do gravador
+(`web/bunker707-pecas.js`) e o carregador dele no `custom-config.js`, o receptor e a previa (`infra/jitsi/pecas/`), o
+servico `pecas` do compose, a rota `/pecas/` do Caddy, a pasta `volumes/pecas` do `volumes.sh` e as conferencias do
+`smoke.sh`. O `deploy-meet` tira o container `bunker707-meet-pecas` que ficou rodando (o `up -d` nao tira um container
+que o compose ja nao conhece). Os arquivos dos testes ficam em `infra/jitsi/volumes/pecas/` no disco do C ate a limpeza:
+`exec-meet` com `rm -rf infra/jitsi/volumes/pecas`, so com o ok do produtor (sao a imagem e a voz dele).
 
-- as pecas e as medidas: `exec-meet` com `cd infra/jitsi/volumes/pecas && ls -la */*/ && tail -n 3 */*/metricas.jsonl && cat */*/linha-do-tempo.jsonl`;
-- a duracao e os quadros das partes: `exec-meet` com `docker run --rm -v "$PWD/infra/jitsi/volumes/pecas:/d:ro" alpine:3.22 sh -c 'apk add -q ffmpeg >/dev/null && for f in /d/*/*/*.webm; do echo "$f"; ffprobe -v error -show_entries format=duration -of csv=p=0 "$f"; done'`;
-- os passos do arquivo das pecas no gravador e cada pedaco recusado: `exec-meet` com `docker logs --since 3h bunker707-meet-pecas` (as linhas `estado na-sala`, `estado base (senha do endereco)`, `estado gravando`, `estado parado`, ou o motivo: `sem-senha`, `erro-envio`, `erro`, e `recusado <codigo> (<motivo>)`; so as salas da lista, sem segredo nenhum);
-- a CPU do gravador: `exec-membros` com `cd /opt/bunker707 && docker compose -f infra/compose/docker-compose.yml exec -T db psql -U postgres -At -c "select received_at, payload->'cpu' from webinar_recording_events where state = 'uploaded' order by received_at desc limit 1"` (a porcentagem da maquina inteira a cada 30 s, com o numero de nucleos).
+O que ficou, porque vale para qualquer gravacao:
 
-O primeiro teste em producao (15/11/2026, 10 min, webinario "Teste pecas"): a gravacao de sempre foi para a Bunny e o
-gravador desligou sozinho, mas nenhuma peca chegou. Causa, reproduzida no motor local: o Jibri da tag fixada nao poe a
-senha no `localStorage`; manda as contas no endereco da sala (`config.useHostPageLocalStorage=true` e
-`appData.localStorageContent`, o JSON codificado duas vezes), o Jitsi guarda so na memoria e limpa o endereco logo
-depois. O arquivo parava em `sem-senha` sem avisar ninguem. Agora o carregador do `custom-config.js` guarda o endereco no
-primeiro instante (`window.__bunker707PecasEndereco`), o arquivo le a senha dele (o `localStorage` fica de reserva) e
-cada passo vai ao log do receptor. O ensaio local com o endereco do Jibri de verdade gravou as quatro saidas. A CPU do
-gravador (cpx42, 8 nucleos) na live de teste, sem as pecas: 9% (0,7 nucleo) so com a camera e 16% (1,3 nucleo) com a
-tela compartilhada. O mesmo teste achou dois defeitos de infra, corrigidos: o `jibri-up` parava no comando das amostras
-de CPU (o `&` fora das chaves segurava a saida do SSH) e o Caddy lia o Caddyfile antigo (a montagem do arquivo sozinho).
+- a CPU do gravador: `cpu-amostras.sh` anota a CPU a cada 5 s no host e o `finalize.sh` manda o resumo de 30 s no aviso
+  de fim (o campo `cpu`, guardado cru em `webinar_recording_events.payload`). Para ler: `exec-membros` com `cd /opt/bunker707 && docker compose -f infra/compose/docker-compose.yml exec -T db psql -U postgres -At -c "select received_at, payload->'cpu' from webinar_recording_events where state = 'uploaded' order by received_at desc limit 1"` (a porcentagem da maquina inteira a cada 30 s, com o numero de nucleos). E a medida para escolher o tamanho do gravador (`docs/30` A26);
+- o comando que liga as amostras fica com o `&` dentro das chaves (`{ setsid nohup sh ./cpu-amostras.sh ... & }`): com
+  `cd ... && setsid ... &`, o shell remoto punha a lista inteira em segundo plano, esse subshell segurava a saida do SSH
+  e o `jibri-up` parava sem o `ready` (o primeiro teste);
+- o Caddy monta a pasta `infra/jitsi/caddy`, e nao o arquivo: o deploy troca os arquivos por novos
+  (`git archive | tar -x`), a montagem de um arquivo sozinho continua presa ao de antes e o reload leria a configuracao
+  velha (o primeiro `deploy-meet` das pecas). O `deploy-meet` recarrega o Caddy depois do `up -d`.
 
-O segundo teste (15/11/2026, "Teste pecas 2", cpx42): as quatro saidas chegaram (camera 720p com a voz, tela 1080p,
-237,7 s e 236,7 s, nenhum erro de envio, a linha do tempo com cada troca, ate o clique duplo na camera), mas a CPU do
-gravador subiu de 9% para 35 a 57% so com a camera e de 16% para 66 a 90% com a tela (o Chrome marcou a pressao como
-critica), e as pecas ficaram com uns 10 quadros por segundo. O ensaio local com as tres medidas novas (o elemento de
-video, o leitor de quadros e as estatisticas da conexao, no `metricas.jsonl`) mostrou a causa: os quadros chegam
-inteiros (25 a 30 por segundo nas estatisticas da conexao), mas redesenhar cada um num canvas, sem placa de video,
-prende a linha principal da pagina, e so uns 10 vao para o arquivo. Uma maquina maior nao resolve; a captura muda na
-proxima rodada. As pecas agora nunca baixam a qualidade que a gravacao de sempre pede e vao em pedacos de 1 s.
-
-A previa da equipe (a Live gravada remontada a partir das pecas de um teste, so com link assinado):
-
-1. as partes com indice, para o video andar: `exec-meet` com `cd infra/jitsi/volumes/pecas/<sala>/<gravacao> && docker run --rm --user 0 --entrypoint sh -v "$PWD:/d" alpine:3.22 -c 'apk add -q ffmpeg >/dev/null && for f in /d/camera-*.webm /d/tela-*.webm; do case "$f" in *-previa.webm) continue;; esac; ffmpeg -v error -y -i "$f" -c copy "${f%.webm}-previa.webm"; done && chown 1000:1000 /d/*-previa.webm'` (so copia, sem recodificar);
-2. o link: `exec-meet` com `docker exec bunker707-meet-pecas python3 /app/receptor.py link <sala> [gravacao] 24` (sem a gravacao, a mais nova da sala; horas, no maximo 7 dias), e o endereco e `https://meet.<dominio>` mais o caminho que ele imprime.
-
-O link so vale com o webinario em `ativas.txt` e ate vencer; sem ele, o receptor responde 404. A pagina toca a camera
-com a voz e a tela, a camera mandando e a tela seguindo, o palco pela linha do tempo, cada video na parte que cobre o
-instante, e mostra a diferenca entre as duas com a tela no palco (no ensaio local, de 2 a 24 ms). Quando a tela no palco
-para para carregar, a camera espera por ela.
-
-Desligar e limpar: tirar o id de `ativas.txt` e `exec-meet` com `rm -rf infra/jitsi/volumes/pecas/w-*` (os arquivos
-ficam no disco do C, 40 GB, ate isso; o receptor recusa acima de 8 GB por sala e com menos de 4 GB livres). O
-`deploy-meet` recarrega o Caddy depois do `up -d` (a rota `/pecas/` so existe com o Caddyfile novo) e o `smoke.sh`
-confere o arquivo servido e o receptor (`/pecas/ativo` responde 204 ou 404; 502 seria o servico fora do ar).
-
-O primeiro `deploy-meet` com as pecas (15/11/2026) falhou so no smoke: `/pecas/ativo` respondeu 200, a pagina da sala.
-O deploy troca os arquivos por novos (`git archive | tar -x`), e o Caddy montava o `Caddyfile` sozinho: a montagem de um
-arquivo continua presa ao arquivo de antes, entao o reload leu a configuracao velha, sem a rota `/pecas/`. Na hora,
-`exec-meet` com `docker compose -f infra/jitsi/docker-compose.yml --profile borda up -d --force-recreate --no-deps caddy`
-resolveu (a recriacao monta o arquivo novo). De vez: o compose monta a pasta `infra/jitsi/caddy` em `/etc/caddy`, e o
-reload passa a ver o arquivo novo (provado num Caddy local: com o arquivo montado, o reload continua na versao 1; com a
-pasta, vai para a 2). O primeiro `deploy-meet` depois dessa troca recria o Caddy (cerca de 1 s sem a borda; o
-`deploy-meet` ja pede `SEM_LIVE_2H=sim`).
+Achado do terceiro teste, que vale sem o plano A: o **Gravar de novo** na mesma live fica sem gravador. Quando o video da
+primeira gravacao chega a Bunny (`uploaded`), o job `webinar-recordings` do tick pede o `jibri-down` da sessao, e a
+maquina foi apagada 1 min 30 s depois do envio, com a live no ar (`docs/30` A64).
 
 ## 8C. Emissor de licencas: o servidor `bunker707-licencas` (10/11/2026)
 

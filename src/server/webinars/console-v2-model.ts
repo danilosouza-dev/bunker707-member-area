@@ -9,7 +9,7 @@
 import { liveElapsedLabel, liveOnAirLabel, stageOwnerId } from "../../components/member/webinars/room/live-room-model";
 import type { ConsoleBarItem } from "../../components/member/webinars/room/room-layout-model";
 import type { RoomStageTopLeft } from "../../components/member/webinars/room/room-stage-badges";
-import type { ConsoleScreenShareMode } from "../../lib/jitsi-room-config";
+import type { ConsoleScreenShareMode, RecordingMode } from "../../lib/jitsi-room-config";
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { formatWebinarDayMonthTime } from "../../lib/webinar-time";
 import { canEndSession, canOpenSession, consoleClockLabel, consoleClockMs, consolePhaseOf, questionAwaitsTeam, type ConsolePhase } from "./console-model";
@@ -216,8 +216,8 @@ export type ConsoleBarItems = { center: ConsoleBarItem[]; left: ConsoleBarItem[]
  * A barra de quem apresenta (V2-14), pelo papel do console na sala. A esquerda, a Sala de espera: "Sala de espera · 2"
  * com Admitir todos quando alguem bate e o papel admite (controls.admit); sem ninguem batendo, a frase da sala
  * (lobbyNotice: a Sessão de prática, a sala trancada, a Sala de espera ligada) numa pilula quieta; sem nada, a zona fica
- * vazia. No centro, para o Apresentador: Microfone, Câmera, Compartilhar tela, Gravar, Mãos e Lançar enquete; o
- * co-apresentador sem Gravar; a Equipe so Mãos e Lançar enquete (sem midia, como antes do V2). Mãos e Lançar enquete
+ * vazia. No centro, para o Apresentador: Microfone, Câmera, Compartilhar tela, Gravar, Live gravada (o Gravar para
+ * Live gravada, D125), Mãos e Lançar enquete; o co-apresentador sem os dois de gravar; a Equipe so Mãos e Lançar enquete (sem midia, como antes do V2). Mãos e Lançar enquete
  * abrem o painel (a aba Mãos e o ⋯ › Enquetes). O Compartilhar tela so com o nosso circulo valendo no navegador
  * (consoleScreenShareMode "ours"; no outro, o botao de tela do proprio motor fica no video, V2-A39). A direita, a visao
  * (para todos no Apresentador), Configurações (so quem apresenta, com a sala neste ambiente) e o painel.
@@ -240,7 +240,7 @@ export function consoleBarItemsFor(input: {
       center.push("share");
     }
     if (input.role === "host") {
-      center.push("record");
+      center.push("record", "recordClean");
     }
   }
   center.push("hands", "poll");
@@ -281,6 +281,39 @@ export function consoleRecordButton(input: { canPublish: boolean; card: Pick<Rec
     default:
       return { active: false, busy: false, enabled: false, opensPanel: false, title: input.open ? (card.note ?? card.label) : live.recusas.notRecording };
   }
+}
+
+/** Os dois circulos de gravar da barra: o Gravar de sempre (a sala) e o Live gravada (so a tela, D125). */
+export type ConsoleRecordButtons = { record: ConsoleRecordButton; recordClean: ConsoleRecordButton };
+
+/**
+ * O modo da gravacao no ar ou na fila (docs/30 D125): o que o proprio gravador contou (o aviso do iframe) vale mais
+ * que o que este console pediu; sem nenhum dos dois, a sala (a gravacao de sempre).
+ */
+export function recordingModeNow(input: { applied: RecordingMode | null; chosen: RecordingMode | null }): RecordingMode {
+  return input.applied ?? input.chosen ?? "sala";
+}
+
+/**
+ * Os dois circulos de gravar (docs/30 A63 e D125), pelos estados do cartao Gravação (consoleRecordButton): parados, os
+ * dois gravam, cada um no seu modo (o Gravar, a sala; o Live gravada, so a tela compartilhada e a voz de quem
+ * apresenta); o preparo abre o ⋯ › Gravação nos dois. Gravando ou na fila, o circulo do modo da gravacao
+ * (recordingModeNow) fica ligado ou girando e o outro desligado, com o title que diz o porque: um gravador grava uma
+ * coisa por vez.
+ */
+export function consoleRecordButtons(input: { canPublish: boolean; card: Pick<RecorderCard, "action" | "label" | "note">; joined: boolean; mode: RecordingMode; open: boolean }): ConsoleRecordButtons {
+  const live = WEBINAR_COPY.consoleAoVivo;
+  const base = consoleRecordButton(input);
+  if (input.card.action === "recording" || input.card.action === "queued") {
+    const off = (title: string): ConsoleRecordButton => ({ active: false, busy: false, enabled: false, opensPanel: false, title });
+    return input.mode === "tela"
+      ? { record: off(live.gravandoParaLiveGravada), recordClean: base.active ? { ...base, title: live.gravandoLiveGravada } : base }
+      : { record: base, recordClean: off(live.gravandoSala) };
+  }
+  if (input.card.action === "record") {
+    return { record: base, recordClean: { ...base, title: input.canPublish ? live.gravarLiveGravada : base.title } };
+  }
+  return { record: base, recordClean: base };
 }
 
 /* ------------------------------------------------------------------------------------------------

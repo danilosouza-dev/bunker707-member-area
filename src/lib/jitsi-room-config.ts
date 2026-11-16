@@ -456,6 +456,34 @@ export function audienceFrameMessage(people: readonly AudienceTilePerson[], rela
   return relay ? { people: list, relay: true, type: AUDIENCE_FRAME_MESSAGE } : { people: list, type: AUDIENCE_FRAME_MESSAGE };
 }
 
+/**
+ * O modo da gravacao (docs/30 A63 e D125): "sala", a gravacao de sempre (a pagina do motor como ela e), ou "tela", o
+ * Gravar para Live gravada (so a tela compartilhada e a voz de quem modera). O console manda o modo ao iframe antes de
+ * gravar (RECORDING_MODE_MESSAGE, aceito pelo infra/jitsi/web/bunker707-gravacao.js so de quem montou o iframe), e o
+ * iframe avisa o modo que o gravador aplicou (RECORDING_APPLIED_MESSAGE). Os dois tipos sao os mesmos do arquivo da
+ * instancia (o teste confere).
+ */
+export type RecordingMode = "sala" | "tela";
+export const RECORDING_MODE_MESSAGE = "bunker707:gravacao";
+export const RECORDING_APPLIED_MESSAGE = "bunker707:gravacao-aplicada";
+
+/** A mensagem que pede o modo ao iframe. */
+export function recordingModeMessage(mode: RecordingMode): { modo: RecordingMode; type: string } {
+  return { modo: mode, type: RECORDING_MODE_MESSAGE };
+}
+
+/**
+ * O modo que o gravador aplicou, pela mensagem do iframe: "sala", "tela" ou nulo (sem gravador na sala); undefined
+ * quando a mensagem nao e esse aviso (outro tipo, ou um modo que nao existe).
+ */
+export function appliedRecordingModeOf(data: unknown): RecordingMode | null | undefined {
+  if (!data || typeof data !== "object" || (data as { type?: unknown }).type !== RECORDING_APPLIED_MESSAGE) {
+    return undefined;
+  }
+  const mode = (data as { modo?: unknown }).modo;
+  return mode === "sala" || mode === "tela" ? mode : mode === null ? null : undefined;
+}
+
 /** Os nomes que POST .../room-events aceita (o mesmo ROOM_EVENT_NAMES de src/server/webinars/live-schemas.ts). */
 export type RoomEventSignal =
   | "audioMuteStatusChanged"

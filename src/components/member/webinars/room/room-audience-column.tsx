@@ -19,11 +19,12 @@ import { WEBINAR_COPY } from "@/lib/webinar-copy";
 const COPY = WEBINAR_COPY.simulacao.coluna;
 
 /**
- * A coluna esta pronta e desligada (docs/30 D124 e A62): ela liga junto com a Live gravada que remonta a live a partir
- * das pecas (a entrega 2 do plano A), quando a gravacao ja sai sem as miniaturas dentro do video. Ligada antes, uma
- * gravacao com as miniaturas no video mostraria duas plateias.
+ * A coluna liga em toda Live gravada com a Simulacao ligada (docs/30 D124 e D125, decisao do produtor de 15/11/2026):
+ * a Live gravada e um video so, gravado pelo Gravar para Live gravada (so a tela compartilhada, sem miniaturas) ou
+ * pronto e enviado pela equipe. Um video antigo com as miniaturas dentro mostraria duas plateias: desligue a Simulacao
+ * dele, ou troque o video.
  */
-export const RECORDED_AUDIENCE_COLUMN = false;
+export const RECORDED_AUDIENCE_COLUMN = true;
 
 export type RoomAudienceSelf = {
   /** O nome do aluno na sala (o primeiro nome e a inicial do sobrenome, D64); nulo, "Você". */

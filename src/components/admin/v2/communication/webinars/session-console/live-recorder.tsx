@@ -2,6 +2,7 @@
 
 import { MonitorDown, Power, Timer } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import type { RecordingMode } from "@/lib/jitsi-room-config";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
 import {
   LIVE_CONSOLE_COPY,
@@ -36,12 +37,14 @@ type LiveRecorderProps = {
   onRelease: () => void;
   recorder: LiveConsoleRecorder;
   recording: { mode: string | null; on: boolean };
+  /** O modo que o proprio gravador contou que aplicou (docs/30 D125): gravando, o cartao diz o que vai para o video. */
+  recorderMode?: RecordingMode | null;
   status: SessionStatus;
   /** O ultimo "Gravar" respondeu que nao ha gravador (a corrida com o webhook). */
   unavailable: boolean;
 };
 
-export function LiveRecorder({ busyKey, canPublish, controls, joined, nowMs, onBrowserRecord, onPrepare, onRelease, recorder, recording, status, unavailable }: LiveRecorderProps) {
+export function LiveRecorder({ busyKey, canPublish, controls, joined, nowMs, onBrowserRecord, onPrepare, onRelease, recorder, recorderMode = null, recording, status, unavailable }: LiveRecorderProps) {
   const card = recorderCard({ nowMs, recorder, recordingOn: recording.on, status });
   const local = recording.on && recording.mode === "local";
   const open = status === "waiting" || status === "live";
@@ -49,7 +52,8 @@ export function LiveRecorder({ busyKey, canPublish, controls, joined, nowMs, onB
   const anchor = anchorLabel(recorder.anchorAt);
   const drift = driftLabel(recorder.driftMs);
   const busy = busyKey !== null && busyKey.startsWith("live:rec");
-  const notes = [card.note, unavailable && card.action !== "recording" ? `${copy.gravacaoNaoPreparada}. ${copy.semGravadorHoje}` : null].filter((note): note is string => Boolean(note));
+  const modeNote = recording.on && !local && recorderMode ? (recorderMode === "tela" ? copy.gravadorSoTela : copy.gravadorSala) : null;
+  const notes = [card.note, modeNote, unavailable && card.action !== "recording" ? `${copy.gravacaoNaoPreparada}. ${copy.semGravadorHoje}` : null].filter((note): note is string => Boolean(note));
 
   return (
     <SectionCard

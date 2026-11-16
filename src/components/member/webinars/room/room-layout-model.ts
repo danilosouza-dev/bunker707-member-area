@@ -133,9 +133,10 @@ export type RoomBarItem = "camera" | "fullscreen" | "hand" | "leave" | "mic" | "
 /**
  * Os botoes da barra de quem apresenta no console (docs/31 V2-14; consoleBarItemsFor, console-v2-model.ts), que usa a
  * mesma casca e os mesmos circulos da barra da sala: a Sala de espera, Microfone, Câmera, Compartilhar tela, Gravar,
- * Mãos, Lançar enquete, a visao para todos, Configurações e o painel.
+ * Live gravada (o Gravar para Live gravada, docs/30 D125), Mãos, Lançar enquete, a visao para todos, Configurações e o
+ * painel.
  */
-export type ConsoleBarItem = "camera" | "hands" | "lobby" | "mic" | "panel" | "poll" | "record" | "settings" | "share" | "view";
+export type ConsoleBarItem = "camera" | "hands" | "lobby" | "mic" | "panel" | "poll" | "record" | "recordClean" | "settings" | "share" | "view";
 
 /** As tres zonas da barra, na ordem da tela: o Sair a esquerda, os circulos no centro, o resto a direita. */
 export type RoomBarItems = { center: RoomBarItem[]; left: RoomBarItem[]; right: RoomBarItem[] };

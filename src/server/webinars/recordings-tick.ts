@@ -12,7 +12,8 @@
 //      session_id (replayRecordingOf) e liga depois de medir. Erro, envio falho,
 //      video inexistente ou 24 h sem terminar viram `failed` com o motivo; o resto so anota a consulta (checked_at).
 //      Sem BUNNY_STREAM_API_KEY / BUNNY_STREAM_LIBRARY_ID nao consulta (a equipe liga o video pelo console);
-//   3. Devolver a maquina: `uploaded` (o MP4 esta na Bunny), ou `ready` com a sessao encerrada ha 30 min (maquina que
+//   3. Devolver a maquina: `uploaded` (o MP4 esta na Bunny) com a live ja encerrada (no ar, a maquina fica para o Gravar
+//      de novo, docs/30 A64), ou `ready` com a sessao encerrada ha 30 min (maquina que
 //      nao gravou), ou `ready` numa live agendada remarcada para longe (o preparo da nova data a mais de 60 min: a
 //      maquina nao fica ligada ate la, e o passo 1 pede outra na nova janela), sem pedido de devolucao ou com o ultimo
 //      ha mais de 2 h sem `gone`: jibri-down e a hora do pedido. E o preparo abandonado (`preparing` ha mais de 70 min,
@@ -358,8 +359,13 @@ export function shouldReleaseRecorder(session: SessionRow, nowMs: number): boole
     return true;
   }
 
+  const finished = session.status === "ended" || session.status === "cancelled";
+
+  // O arquivo ja esta na Bunny: a maquina volta quando a live acaba. Antes disso ela fica, para o Gravar de novo na
+  // mesma live (docs/30 A64: devolvida 1 min 30 s depois do primeiro envio, com a live no ar, o segundo Gravar ficava
+  // sem gravador).
   if (status === "uploaded") {
-    return true;
+    return finished;
   }
 
   if (status === "ready" && session.status === "scheduled") {
@@ -367,7 +373,6 @@ export function shouldReleaseRecorder(session: SessionRow, nowMs: number): boole
     return Number.isFinite(prepareAt) && prepareAt - nowMs > RECORDER_RESCHEDULE_RELEASE_MINUTES * MINUTE_MS;
   }
 
-  const finished = session.status === "ended" || session.status === "cancelled";
   const finishedAt = toTime(session.ended_at ?? session.updated_at);
 
   return finished && Number.isFinite(finishedAt) && nowMs - finishedAt >= RECORDER_IDLE_RELEASE_MINUTES * MINUTE_MS;
@@ -477,6 +482,20 @@ async function videoIsLesson(db: WebinarsDb, videoId: string): Promise<boolean> 
   return (data ?? []).length > 0;
 }
 
+/**
+ * O video gravado pelo nosso gravador que virou o video de uma Live gravada (docs/30 A63 e D125: o Gravar para Live
+ * gravada sobe para a Bunny e a equipe cola o player no webinario): a gravacao base do webinario (origem bunny, sem
+ * sessao) com o endereco do player apontando para o mesmo video. O id da Bunny e um uuid; a busca e por ele no endereco.
+ */
+async function videoIsRecordedLive(db: WebinarsDb, videoId: string): Promise<boolean> {
+  if (!/^[0-9a-fA-F-]{8,80}$/.test(videoId)) {
+    return false;
+  }
+  const { data, error } = await db.from("webinar_recordings").select("id").eq("source", "bunny").ilike("embed_url", `%${videoId}%`).limit(1);
+  assertNoDbError(error, "Webinarios: conferir se o video e de uma Live gravada");
+  return (data ?? []).length > 0;
+}
+
 /** Adia a retencao da gravacao (o video virou aula): a proxima conferencia fica para depois, sem travar a fila. */
 async function postponePurge(db: WebinarsDb, id: string, dueIso: string): Promise<void> {
   const { error } = await db.from("webinar_recordings").update({ purge_due_at: dueIso }).eq("id", id).is("purged_at", null);
@@ -494,9 +513,9 @@ async function purgeRecordings(ctx: TickContext, bunny: BunnyStreamClient) {
 
     const ref = bunnyRefOfRecording(recording, bunny.libraryId);
 
-    // O replay que virou aula (docs/30 §6.8, D113): enquanto a aula existir, o video fica na Bunny. A conferencia
-    // volta em RECORDINGS_LESSON_RECHECK_DAYS; com a aula excluida, a retencao segue como antes.
-    if (ref && (await videoIsLesson(ctx.db, ref.videoId))) {
+    // O replay que virou aula (docs/30 §6.8, D113) ou o video de uma Live gravada (D125): enquanto a aula ou o webinario
+    // usar o video, ele fica na Bunny. A conferencia volta em RECORDINGS_LESSON_RECHECK_DAYS; sem uso, a retencao segue.
+    if (ref && ((await videoIsLesson(ctx.db, ref.videoId)) || (await videoIsRecordedLive(ctx.db, ref.videoId)))) {
       await postponePurge(ctx.db, recording.id, new Date(ctx.nowMs + RECORDINGS_LESSON_RECHECK_DAYS * 24 * HOUR_MS).toISOString());
       ctx.result.keptAsLesson += 1;
       return;
