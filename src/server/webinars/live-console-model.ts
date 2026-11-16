@@ -1038,6 +1038,10 @@ export function recorderCard(input: { nowMs?: number; recorder: LiveConsoleRecor
   if (recorder.status === "ready") {
     return { action: open ? "record" : "none", fallback: false, label, note: copy.gravacaoPronta };
   }
+  if (recorder.status === "uploaded") {
+    // O arquivo anterior ja esta na Bunny e a maquina continua ligada ate a live acabar: grava de novo (docs/30 A64).
+    return { action: open ? "record" : "none", fallback: false, label, note: open ? copy.gravarDeNovo : null };
+  }
   if (recorder.status === "recording") {
     return { action: open ? "recording" : "none", fallback: false, label, note: null };
   }

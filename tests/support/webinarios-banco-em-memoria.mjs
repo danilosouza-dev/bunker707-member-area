@@ -44,6 +44,12 @@ function matches(row, [op, column, value]) {
       return current != null && compare(current, value) <= 0;
     case "lt":
       return current != null && compare(current, value) < 0;
+    case "ilike": {
+      // O like do PostgREST sem diferenca de maiusculas: % e qualquer trecho (o _ nao e usado nos testes).
+      if (current == null) return false;
+      const pattern = String(value).split("%").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*");
+      return new RegExp(`^${pattern}$`, "i").test(String(current));
+    }
     default:
       return true;
   }
@@ -121,6 +127,7 @@ export function bancoEmMemoria(seed = {}, { unique: UNIQUE = {} } = {}) {
       eq: filter("eq"),
       gt: filter("gt"),
       gte: filter("gte"),
+      ilike: filter("ilike"),
       in: filter("in"),
       insert: (payload) => ((state.op = "insert"), (state.payload = payload), chain),
       is: filter("is"),
