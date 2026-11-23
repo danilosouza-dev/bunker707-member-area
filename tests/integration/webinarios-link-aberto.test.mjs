@@ -51,6 +51,9 @@ async function seed() {
           id: FECHADO.id,
           kind: "live",
           published_at: new Date(agora - 60_000).toISOString(),
+          // Gravadas juntas, as duas linhas mandam as mesmas colunas: sem a chave, o PostgREST mandaria nulo.
+          product_id: null,
+          room_settings: { chatMode: "open" },
           scheduled_at: new Date(agora + 3_600_000).toISOString(),
           slug: FECHADO.slug,
           status: "published",
