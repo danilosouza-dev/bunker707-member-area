@@ -13,7 +13,7 @@ import test from "node:test";
 const root = new URL("../", import.meta.url).pathname;
 const read = (path) => readFileSync(join(root, path), "utf8");
 
-test("o comando que liga as amostras de CPU volta na hora e deixa o laco rodando (o jibri-up de 15/11/2026 parou nele)", async () => {
+test("o comando que liga as amostras de CPU volta na hora e deixa o laco rodando (o jibri-up de 15/11/2026 parou nele)", { skip: process.platform !== "linux" && "o setsid é do Linux (util-linux)" }, async () => {
   // O SSH so devolve o controle quando ninguem mais segura a saida do comando remoto. Roda o mesmo texto do jibri.sh num
   // bash com a saida num cano, como o sshd faz: o cano tem de fechar logo, com o laco das amostras vivo.
   const comando = /rsh "\$target" "(cd '\$JIBRI_REMOTE_DIR' && [^\n]*cpu-amostras\.sh[^\n]*?)" \|\| true/.exec(read("infra/cloud/jibri.sh"))?.[1];
