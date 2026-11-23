@@ -52,7 +52,9 @@ test("o cliente do proxy so le admin_roles e o do navegador so grava student_eve
   assert.ok(browserUsers.length >= 2, browserUsers.join(", "));
   for (const file of browserUsers) {
     const code = codeOf(read(file));
-    assert.deepEqual([...new Set([...code.matchAll(/\.from\(\s*"([^"]+)"/g)].map((match) => match[1]))], ["student_events"], file);
+    // So student_events, ou nenhuma tabela (o formulario do link aberto so entra com a conta de convidado, docs/30 §14).
+    const tables = [...new Set([...code.matchAll(/\.from\(\s*"([^"]+)"/g)].map((match) => match[1]))];
+    assert.ok(tables.every((table) => table === "student_events"), `${file}: ${tables.join(", ")}`);
     assert.doesNotMatch(code, /\.rpc\(|\.storage\b/, file);
   }
 });

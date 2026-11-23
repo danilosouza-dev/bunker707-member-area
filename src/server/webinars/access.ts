@@ -49,9 +49,14 @@ import {
 import { fetchEntitlements, type EntitlementRow } from "../students/store";
 import { WebinarError, webinarsDb, type WebinarsDb } from "./db";
 import { accessModeAnchorsAudience, accessModeUsesAudience, accessModeUsesProduct, type Webinar } from "./model";
+import { fetchGuestWebinarId } from "./guest-store";
+import { openLinkEnabled } from "./open-link-model";
 import { webinarEntitlementMatches } from "./student-model";
 
-export type WebinarAccessTarget = Pick<Webinar, "accessMode" | "audience" | "id" | "productId">;
+export type WebinarAccessTarget = Pick<Webinar, "accessMode" | "audience" | "id" | "productId"> & {
+  /** O link aberto (docs/30 §14); ausente (quem monta o alvo sem ele) = desligado. */
+  openLink?: Pick<Webinar["openLink"], "enabled"> | null;
+};
 
 /** Os acessos que hasWebinarAccess le: as colunas de webinarEntitlementMatches e dos fatos do segmento. */
 export type WebinarAccessEntitlement = Pick<EntitlementRow, "created_at" | "ends_at" | "starts_at" | "status" | "target_id" | "target_type" | "user_id">;
@@ -66,6 +71,11 @@ export type StudentAccessFacts = {
   /** Turmas de agora quando `loaded` e nulo (os avisos de quem tem vaga); com `loaded`, valem as dos fatos. */
   cohortIds?: readonly string[];
   entitlements: readonly WebinarAccessEntitlement[];
+  /**
+   * O webinario de que a pessoa e convidada pelo link aberto (docs/30 §14, D128): o convidado so ve esse, e so com o
+   * link ligado. Nulo (ou ausente) para aluno e equipe.
+   */
+  guestWebinarId?: string | null;
   isStaff: boolean;
   /** Fatos do segmento; nulo quando nenhum webinario da leva precisa (ou a pessoa e da equipe). */
   loaded: LoadedAudience | null;
@@ -178,9 +188,13 @@ export async function loadStudentAccessFacts(
   webinars: readonly WebinarAccessTarget[],
   now = Date.now()
 ): Promise<StudentAccessFacts> {
-  const staff = await loadAdminAccess(userId, db);
+  const [staff, guestWebinarId] = await Promise.all([loadAdminAccess(userId, db), fetchGuestWebinarId(db, userId)]);
   if (staff) {
     return { anchoredWebinarIds: NO_ANCHORS, entitlements: [], isStaff: true, loaded: null, now, userId };
+  }
+  if (guestWebinarId) {
+    // O convidado nao tem acesso nem segmento: so o webinario dele, pelo link (hasWebinarAccess).
+    return { anchoredWebinarIds: NO_ANCHORS, entitlements: [], guestWebinarId, isStaff: false, loaded: null, now, userId };
   }
 
   const needsEntitlements = webinars.some(usesProduct) || webinars.some(usesAudience);
@@ -276,11 +290,26 @@ function segmentHolds(facts: StudentAccessFacts, webinar: WebinarAccessTarget) {
   );
 }
 
-/** O "Quem pode" da equipe sobre os fatos ja lidos (sem ir ao banco). */
+/**
+ * O "Quem pode" da equipe sobre os fatos ja lidos (sem ir ao banco). Com o link aberto (docs/30 §14, D128), toda
+ * pessoa com conta de aluno tambem ve o webinario (quem tem o link entra, e o aluno e qualquer um), e o convidado ve so
+ * o webinario dele, enquanto o link estiver ligado.
+ */
 export function hasWebinarAccess(facts: StudentAccessFacts, webinar: WebinarAccessTarget): boolean {
   if (facts.isStaff) {
     return true;
   }
+  if (facts.guestWebinarId) {
+    return facts.guestWebinarId === webinar.id && openLinkEnabled(webinar);
+  }
+  if (openLinkEnabled(webinar)) {
+    return true;
+  }
+  return hasWebinarAccessByRules(facts, webinar);
+}
+
+/** O "Quem pode" da equipe sem o link aberto. */
+function hasWebinarAccessByRules(facts: StudentAccessFacts, webinar: WebinarAccessTarget): boolean {
   switch (webinar.accessMode) {
     case "everyone":
       return true;

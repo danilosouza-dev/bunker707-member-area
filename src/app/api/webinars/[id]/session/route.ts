@@ -23,7 +23,7 @@ export async function GET(request: Request, context: RouteContext) {
   const licenseRefusal = await licenseRouteRefusal({ feature: WEBINARS_FEATURE });
   if (licenseRefusal) return licenseRefusal;
 
-  const auth = await requireApiUser();
+  const auth = await requireApiUser({ allowGuest: true });
 
   if (auth.response || !auth.user) {
     return noStore(auth.response!);

@@ -3,6 +3,7 @@
 // store.ts/queries.ts; aqui so a forma das linhas e os mapeadores, para admin, aluno e tick lerem igual.
 
 import { normalizeAudience, type AudienceDefinition } from "../communications/audience-model";
+import { openLinkOfRoomSettings } from "./open-link-model";
 import { RECORDER_STATUSES, type RecorderStatus } from "./recorder-model";
 import {
   ACCESS_MODE_COLUMN_VALUES,
@@ -369,6 +370,7 @@ export function webinarFromRow(row: WebinarRow, presenters: readonly PresenterRo
     hostUserId: row.host_user_id,
     id: row.id,
     kind: oneOf<WebinarKind>(WEBINAR_KINDS, row.kind, "live"),
+    openLink: openLinkOfRoomSettings(row.room_settings),
     presenters: presenters.filter((presenter) => presenter.webinar_id === row.id).map(presenterFromRow),
     productId: row.product_id,
     publishedAt: row.published_at,
@@ -507,7 +509,8 @@ export function webinarRowPatch(draft: WebinarDraft): Omit<WebinarRow, "cancel_r
     reminders: draft.reminders,
     replay_days_on_home: draft.replayDaysOnHome,
     replay_lesson_target: draft.replayLessonTarget,
-    room_settings: draft.roomSettings,
+    // O link aberto mora no mesmo jsonb (open-link-model.ts), sem coluna nova.
+    room_settings: { ...draft.roomSettings, openLink: draft.openLink },
     scheduled_at: draft.kind === "live" ? draft.scheduledAt : null,
     show_banner: draft.showBanner,
     show_on_home: draft.showOnHome,

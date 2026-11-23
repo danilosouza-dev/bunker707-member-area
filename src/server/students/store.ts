@@ -129,10 +129,27 @@ async function fetchAll<Row>(
   return rows;
 }
 
-export function fetchProfiles(db: StudentsDb) {
-  return fetchAll<ProfileRow>("Alunos", (from, to, count) =>
-    db.from("profiles").select(PROFILE_COLUMNS, count).order("created_at", { ascending: false }).order("id").range(from, to)
+/**
+ * Todos os alunos (a lista de Alunos e os segmentos da Comunicacao). O convidado do link aberto de um webinario
+ * (profiles.is_guest, docs/30 §14) nunca entra: ele so existe para aquela live.
+ */
+export async function fetchProfiles(db: StudentsDb): Promise<ProfileRow[]> {
+  const rows = await fetchAll<ProfileRow & { is_guest?: boolean | null }>("Alunos", (from, to, count) =>
+    db.from("profiles").select(`${PROFILE_COLUMNS},is_guest`, count).order("created_at", { ascending: false }).order("id").range(from, to)
   );
+
+  return withoutGuests(rows);
+}
+
+/** Tira o convidado do link aberto (profiles.is_guest) e a marca da linha. */
+function withoutGuests(rows: readonly (ProfileRow & { is_guest?: boolean | null })[]): ProfileRow[] {
+  return rows
+    .filter((row) => row.is_guest !== true)
+    .map((row) => {
+      const copy: ProfileRow & { is_guest?: boolean | null } = { ...row };
+      delete copy.is_guest;
+      return copy;
+    });
 }
 
 export async function fetchProfile(db: StudentsDb, userId: string): Promise<ProfileRow | null> {
@@ -145,13 +162,17 @@ export async function fetchProfile(db: StudentsDb, userId: string): Promise<Prof
 export async function fetchProfileByEmail(db: StudentsDb, email: string): Promise<ProfileRow | null> {
   const { data, error } = await db
     .from("profiles")
-    .select(PROFILE_COLUMNS)
+    .select(`${PROFILE_COLUMNS},is_guest`)
     .ilike("email", email.replace(/[\\%_]/g, "\\$&"))
+    .order("is_guest", { ascending: true })
     .limit(1)
     .maybeSingle();
   failOnError(error, "Aluno por e-mail");
 
-  return (data ?? null) as ProfileRow | null;
+  // O e-mail de contato do convidado do link aberto (docs/30 §14) nunca e a conta de um aluno.
+  const row = (data ?? null) as (ProfileRow & { is_guest?: boolean | null }) | null;
+
+  return row && row.is_guest !== true ? withoutGuests([row])[0] : null;
 }
 
 /** A conta e da equipe (admin_roles)? Senha, convite e dados da equipe nao mudam por Alunos. */

@@ -534,9 +534,10 @@ test("a equipe nao le acessos, segmento nem ancora", async () => {
   const facts = await access.loadStudentAccessFacts(db, ALUNA, [webinar("both", { audience: GANHOU_HOJE })], AGORA);
 
   assert.equal(facts.isStaff, true);
+  // A equipe e o convidado do link aberto (docs/30 §14) sao lidos juntos, numa ida so; nada mais.
   assert.deepEqual(
-    db.queries.map((query) => query.table),
-    ["admin_roles"]
+    db.queries.map((query) => query.table).sort(),
+    ["admin_roles", "webinar_guests"]
   );
 });
 

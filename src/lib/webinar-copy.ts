@@ -13,6 +13,7 @@ import { ASSISTENTE_COPY } from "./webinar-copy-v4/assistente";
 import { CONSOLE_V2_COPY } from "./webinar-copy-v4/console-v2";
 import { EXPORTAR_COPY } from "./webinar-copy-v4/exportar";
 import { JIT_COPY } from "./webinar-copy-v4/jit";
+import { LINK_ABERTO_COPY } from "./webinar-copy-v4/link-aberto";
 import { NA_TELA_COPY } from "./webinar-copy-v4/na-tela";
 import { OFERTA_COPY } from "./webinar-copy-v4/oferta";
 import { PAINEIS_COPY } from "./webinar-copy-v4/paineis";
@@ -687,7 +688,9 @@ export const WEBINAR_COPY = {
   /* A "Na tela" (docs/31 §12): src/lib/webinar-copy-v4/na-tela.ts. */
   naTela: NA_TELA_COPY,
   /* As pessoas que comentam e a pergunta simulada (docs/31 §13.1): src/lib/webinar-copy-v4/pessoas.ts. */
-  pessoas: PESSOAS_COPY
+  pessoas: PESSOAS_COPY,
+  /* O link aberto (docs/30 §14): src/lib/webinar-copy-v4/link-aberto.ts. */
+  linkAberto: LINK_ABERTO_COPY
 } as const;
 
 export type WebinarCopy = typeof WEBINAR_COPY;

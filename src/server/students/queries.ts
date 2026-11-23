@@ -678,7 +678,7 @@ export async function getStudentDetail(userId: string): Promise<StudentDetail | 
 export async function listStudentOptions(input: { productId?: string | null; q: string }): Promise<StudentOption[]> {
   const db = studentsDb();
   const search = input.q.trim().replace(/[,()]/g, " ").trim();
-  let query = db.from("profiles").select("id,email,full_name,avatar_url").order("full_name", { ascending: true }).limit(OPTIONS_LIMIT);
+  let query = db.from("profiles").select("id,email,full_name,avatar_url,is_guest").order("full_name", { ascending: true }).limit(OPTIONS_LIMIT);
 
   if (search) {
     const pattern = likeContains(search.slice(0, 80));
@@ -697,7 +697,8 @@ export async function listStudentOptions(input: { productId?: string | null; q: 
   const now = Date.now();
   const withAccess = new Set(accessRows.filter((row) => isOpenRow(row, now)).map((row) => row.user_id));
 
-  return ((data ?? []) as Pick<ProfileRow, "avatar_url" | "email" | "full_name" | "id">[]).map((row) => ({
+  // O convidado do link aberto (docs/30 §14) nunca ganha acesso por aqui.
+  return ((data ?? []) as (Pick<ProfileRow, "avatar_url" | "email" | "full_name" | "id"> & { is_guest?: boolean | null })[]).filter((row) => row.is_guest !== true).map((row) => ({
     avatarUrl: row.avatar_url?.trim() || null,
     email: row.email?.trim().toLowerCase() ?? "",
     fullName: displayName(row),
