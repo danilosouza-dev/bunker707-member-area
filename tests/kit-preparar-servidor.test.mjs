@@ -376,7 +376,7 @@ test("fechar a senha volta como estava quando o sshd recusa ou quando outro arqu
   assert.equal(outro.chamadas().filter((c) => c.tool === "systemctl").length, 0);
 });
 
-test("debaixo do sudo, a sessao SSH e achada no processo que chamou (o sudo limpa o SSH_CONNECTION)", () => {
+test("debaixo do sudo, a sessao SSH e achada no processo que chamou (o sudo limpa o SSH_CONNECTION)", { skip: process.platform !== "linux" && "o /proc é do Linux" }, () => {
   const s = servidorDeMentira({ estado: sessaoComChave });
   // O processo de cima tem o SSH_CONNECTION; o bootstrap roda sem ele (como depois do sudo) e le os processos de verdade.
   const ambiente = { ...s.ambiente({ ...KIT, BOOTSTRAP_PROC: "/proc" }), PERFIL: "kit", NOME: "escola-x", PASTA_ESTADO: "/var/lib/escola-x", PASTA_BACKUP: "/var/backups/escola-x", PASTA_CERTIFICADOS: "/var/lib/escola-x/caddy", PASTA_INSTALACAO: "/opt/escola-x" };
