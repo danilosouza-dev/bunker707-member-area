@@ -367,3 +367,44 @@ test("a busca de aluno por e-mail nunca devolve o convidado que deu o mesmo e-ma
   const convidado = scriptedDb(() => ({ data: perfil({ is_guest: true }), error: null }));
   assert.equal(await studentsStore.fetchProfileByEmail(convidado, "ana@exemplo.com"), null);
 });
+
+test("o card Quem pode so mostra o link depois de publicar: no rascunho o endereco ainda muda com o titulo (D135)", async () => {
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { AccessCard } = await import("../src/components/admin/v2/communication/webinars/webinar-editor-cards.tsx");
+  const draft = { ...model.emptyWebinarDraft("live"), openLink: LIGADO, title: "Live" };
+  const desenhar = (saved) =>
+    renderToStaticMarkup(
+      createElement(AccessCard, {
+        audienceDescription: "",
+        audienceErrors: {},
+        countState: { status: "incomplete" },
+        disabled: false,
+        draft,
+        errorFor: () => undefined,
+        now: AGORA,
+        onBlur: () => undefined,
+        onChange: () => undefined,
+        onRetryCount: () => undefined,
+        options: { cohorts: [], notices: [], products: [], productsLoaded: true, segments: [], webinars: [] },
+        pickerItems: [],
+        saved,
+        webinarId: WEBINAR
+      })
+    );
+
+  // Rascunho salvo (o caso do teste do produtor): nada de link para copiar, so a frase.
+  const rascunho = desenhar({ published: false, slug: "copia-de-live" });
+  assert.doesNotMatch(rascunho, /data-webinar-open-link-url/);
+  assert.doesNotMatch(rascunho, /\/webinarios\/copia-de-live\/entrar/);
+  assert.match(rascunho, /data-webinar-open-link-pending/);
+  assert.match(rascunho, /O link aparece depois de publicar/);
+
+  // Publicado: o link (a origem do navegador fica vazia no servidor) e o Copiar.
+  const publicado = desenhar({ published: true, slug: "live-de-agentes" });
+  assert.match(publicado, /data-webinar-open-link-url[^>]*>\/webinarios\/live-de-agentes\/entrar</);
+  assert.doesNotMatch(publicado, /data-webinar-open-link-pending/);
+
+  // Webinario novo, nunca salvo: a frase tambem.
+  assert.match(desenhar(null), /O link aparece depois de publicar/);
+});
