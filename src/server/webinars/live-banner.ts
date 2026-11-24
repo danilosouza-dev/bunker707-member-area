@@ -19,6 +19,7 @@
 
 import { WEBINAR_COPY } from "../../lib/webinar-copy";
 import { WEBINAR_ROOM_PATH } from "../../lib/webinar-paths";
+import { simulationHidden } from "./open-link-model";
 import { bannerWindow, REMINDER_RULES, toTime, webinarHref, type Webinar, type WebinarRegistration, type WebinarSession } from "./model";
 import { isJitSession } from "./jit-model";
 import { canJoinSimulated, simulatedPhase } from "./room-model";
@@ -56,7 +57,7 @@ export type LiveBannerEntry = {
   durationMsBySession?: ReadonlyMap<string, number>;
   registrations: readonly WebinarRegistration[];
   sessions: readonly WebinarSession[];
-  webinar: Pick<Webinar, "cancelledAt" | "capacity" | "durationMinutes" | "registrationRequired" | "showBanner" | "slug" | "title">;
+  webinar: Pick<Webinar, "cancelledAt" | "capacity" | "durationMinutes" | "registrationRequired" | "showBanner" | "slug" | "title"> & { openLink?: Pick<Webinar["openLink"], "enabled"> | null };
 };
 
 function durationMsOf(entry: LiveBannerEntry, session: WebinarSession): number {
@@ -116,7 +117,10 @@ export function chooseLiveNow(input: { entries: readonly LiveBannerEntry[]; meet
       const seatMissing = seatRequired(webinar, session) && !registered;
       const enterHref = seatMissing ? webinarHref(webinar.slug) : roomHref(webinar.slug, session.id);
 
-      if (sessionOnAir(session, durationMs, clock)) {
+      // Com o link aberto a gravada nunca e anunciada como no ar (docs/30 §8.6 e §14): sem o selo, a faixa so a mostra
+      // como "comeca em breve".
+      const shown = simulationHidden(webinar) && session.kind === "simulated" ? { ...session, showLiveBadge: false } : session;
+      if (sessionOnAir(shown, durationMs, clock)) {
         const item = { href: enterHref, startedAt: startedAtOf(session), title: webinar.title };
         if (!onAir || toTime(item.startedAt) > toTime(onAir.startedAt)) {
           onAir = item;

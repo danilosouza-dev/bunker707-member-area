@@ -109,7 +109,8 @@ test("o app le a lista da escola, o Duplicar nao copia a lista, e o aviso de mig
   assert.doesNotMatch(jsCode(store), /copyPersonasToWebinar/);
   assert.doesNotMatch(jsCode(read("src/server/webinars/actions.ts")), /copyPersonasToWebinar/);
   assert.match(dbSource, /export const WEBINARS_PERSONAS_SCHOOL_MIGRATION = "202611180001";/);
-  assert.match(dbSource, /export const WEBINARS_MIGRATION = "202611180001";/);
+  // O link aberto (202611190001, docs/30 §14) veio depois e e a que o aviso aponta agora.
+  assert.match(dbSource, /export const WEBINARS_MIGRATION = "202611190001";/);
   const webinarFiles = migrationFiles().filter((name) => /webinar/.test(name));
-  assert.equal(webinarFiles.at(-1), "202611180001_webinars_pessoas_da_escola.sql", "nenhuma migracao de webinario mais nova sem o aviso atualizado");
+  assert.equal(webinarFiles.at(-1), "202611190001_webinars_link_aberto.sql", "nenhuma migracao de webinario mais nova sem o aviso atualizado");
 });

@@ -12,6 +12,7 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import { fetchProfile } from "../students/store";
+import { simulationHidden } from "./open-link-model";
 import { loadAuthorPhotos, roomPhotoUrl } from "./author-photos";
 import { personaAvatarUrl } from "./persona-model";
 import { loadScriptedMessageAvatars, loadScriptedQuestionAvatars } from "./persona-store";
@@ -412,7 +413,8 @@ export async function loadRoomExtras(db: WebinarsDb, context: RoomContext, userI
       join,
       offsetMs: Number.isFinite(offset) ? Math.round(offset) : null,
       roomPhase: simulated ? simulatedPhase(session, durationMs, now) : null,
-      showLiveBadge: session.showLiveBadge
+      // Com o link aberto o webinario sai da area de membros: nunca o selo "Ao vivo" da gravada (docs/30 §8.6 e §14).
+      showLiveBadge: session.showLiveBadge && !simulationHidden(context.webinar)
     },
     video: join.ok && session.kind !== "live" ? roomVideoFor(context, now) : null
   };

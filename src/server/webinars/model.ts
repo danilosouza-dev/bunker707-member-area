@@ -10,6 +10,7 @@ import { saoPauloDayKey } from "../../lib/webinar-time";
 import { slugifyTitle } from "../catalog/model";
 import type { AudienceDefinition } from "../communications/audience-model";
 import type { AnswerAuthor, AnswerAuthorMode } from "./answer-author-model";
+import { defaultOpenLink, type OpenLinkSettings } from "./open-link-model";
 import type { RecorderStatus } from "./recorder-model";
 
 export const WEBINAR_KINDS = ["live", "simulated"] as const;
@@ -187,6 +188,11 @@ export type WebinarDraft = {
   durationMinutes: number;
   hostUserId: string | null;
   kind: WebinarKind;
+  /**
+   * O link aberto (docs/30 §14, D127): quem nao e aluno entra pelo formulario com o que a equipe pediu. Gravado em
+   * room_settings.openLink (open-link-model.ts), sem coluna nova.
+   */
+  openLink: OpenLinkSettings;
   presenters: WebinarPresenter[];
   productId: string | null;
   quality: Quality;
@@ -350,6 +356,7 @@ export function emptyWebinarDraft(kind: WebinarKind): WebinarDraft {
     durationMinutes: 60,
     hostUserId: null,
     kind,
+    openLink: defaultOpenLink(),
     presenters: [],
     productId: null,
     quality: defaultQuality(),

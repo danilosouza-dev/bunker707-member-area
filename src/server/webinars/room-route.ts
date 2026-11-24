@@ -40,7 +40,8 @@ export type Guarded = { response: NextResponse } | { userId: string; webinarId: 
 
 /** Sessao (401), teto de escritas quando `write` (429), id do webinario (400). */
 export async function guardRoomRequest(context: RouteContext, options: { session?: "auth" | "claims"; write?: boolean } = {}): Promise<Guarded> {
-  const auth = options.session === "claims" ? await requireApiSessionUser() : await requireApiUser();
+  // O convidado do link aberto (docs/30 §14) usa a sala do webinario dele: o acesso conferido depois decide.
+  const auth = options.session === "claims" ? await requireApiSessionUser({ allowGuest: true }) : await requireApiUser({ allowGuest: true });
 
   if (auth.response || !auth.user) {
     return { response: noStore(auth.response!) };

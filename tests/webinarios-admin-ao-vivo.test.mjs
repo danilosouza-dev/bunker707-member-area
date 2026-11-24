@@ -701,7 +701,9 @@ test("publicar a Live ao vivo gera o nome da sala (so na sessao live); duplicar 
 
 test("salvar o rascunho (D64): o card Sala que ainda traz anonymousQuestions e displayName e salvo sem as duas chaves; o webinario antigo com elas no JSON perde as duas no proximo salvar", async () => {
   const db = usar(bancoEmMemoria({ admin_roles: [{ permissions: null, role: "owner", user_id: HOST }] }));
-  const CHAVES = Object.keys(model.defaultRoomSettings()).sort();
+  // O link aberto (docs/30 §14) mora no mesmo jsonb da sala, gravado pelo rascunho.
+  const CHAVES = [...Object.keys(model.defaultRoomSettings()), "openLink"].sort();
+  const CHAVES_DO_RASCUNHO = Object.keys(model.defaultRoomSettings()).sort();
   // O editor aberto com a pagina de antes de 10/11/2026 manda o card Sala com as duas chaves.
   const antigo = { ...liveDraft(), roomSettings: { ...model.defaultRoomSettings(), anonymousQuestions: true, chatMode: "moderated", displayName: "anonymous" } };
   const saved = ok(await actions.saveWebinarDraft({ draft: antigo }));
@@ -712,7 +714,7 @@ test("salvar o rascunho (D64): o card Sala que ainda traz anonymousQuestions e d
   // O webinario de antes: o JSON no banco ainda tem as duas chaves. O editor le sem elas e o proximo salvar as tira.
   linha().room_settings = { ...linha().room_settings, anonymousQuestions: true, displayName: "nickname" };
   const data = await queries.getWebinarEditorData(saved.id);
-  assert.deepEqual(Object.keys(data.draft.roomSettings).sort(), CHAVES, "o rascunho lido nao leva as chaves antigas");
+  assert.deepEqual(Object.keys(data.draft.roomSettings).sort(), CHAVES_DO_RASCUNHO, "o rascunho lido nao leva as chaves antigas");
   ok(await actions.saveWebinarDraft({ draft: { ...data.draft, title: "Live de teste, de novo" }, expectedUpdatedAt: data.updatedAt, id: saved.id }));
   assert.deepEqual(Object.keys(linha().room_settings).sort(), CHAVES, "as chaves antigas sumiram no proximo salvar");
   assert.equal(linha().room_settings.chatMode, "moderated");

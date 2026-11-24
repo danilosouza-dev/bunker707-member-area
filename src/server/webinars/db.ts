@@ -54,9 +54,11 @@ export type WebinarsDb = SupabaseClient;
  * As pessoas que comentam da escola (docs/30 D117, 13/11/2026): a 202611180001 e a mais nova (a lista uma so da escola,
  * o nome unico na escola e a origem nula quando o webinario sai); sem ela o app segue de pe (a lista le todas as
  * pessoas, e o nome repetido de outro webinario e recusado pela conferencia do servidor), entao o aviso a aponta
- * (docs/21 §9.21).
+ * (docs/21 §9.21). O link aberto (docs/30 §14, 23/11/2026): a 202611190001 (profiles.is_guest e webinar_guests) e a mais
+ * nova; sem ela ninguem e convidado (a leitura do convidado devolve nulo) e so a entrada pelo link e o CSV caem no aviso
+ * (docs/21 §9.22).
  */
-export const WEBINARS_MIGRATION = "202611180001";
+export const WEBINARS_MIGRATION = "202611190001";
 
 /** 4a: webinar_panel (os paineis Lives ao vivo e Lives gravadas e os numeros da lista). */
 export const WEBINARS_PANELS_MIGRATION = "202610300002";

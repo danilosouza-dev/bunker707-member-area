@@ -6,8 +6,16 @@ import { getSafeRedirectPath } from "@/lib/auth/redirect";
 import {
   getAdminAccessForUser,
   getAuthenticatedUser,
-  getSessionUser
+  getAuthenticatedUserOrGuest,
+  getSessionUser,
+  getSessionUserOrGuest
 } from "@/server/auth/session";
+
+/**
+ * `allowGuest`: so as paginas e rotas do webinario aceitam o convidado do link aberto (docs/30 §14); o acesso ao
+ * webinario (access.ts) deixa ele ver so o dele. Sem a opcao, o convidado e "sem sessao".
+ */
+export type GuardOptions = { allowGuest?: boolean };
 
 function redirectToLogin(nextPath: string): never {
   redirect(`/login?next=${encodeURIComponent(getSafeRedirectPath(nextPath))}`);
@@ -25,8 +33,8 @@ export async function requirePageUser(nextPath = "/") {
 }
 
 /** Paginas de conteudo do aluno: sessao pelos claims do JWT quando AUTH_SESSION_STRATEGY=claims (session.ts). */
-export async function requireStudentPageUser(nextPath = "/") {
-  const user = await getSessionUser();
+export async function requireStudentPageUser(nextPath = "/", options: GuardOptions = {}) {
+  const user = options.allowGuest ? await getSessionUserOrGuest() : await getSessionUser();
 
   if (!user) {
     redirectToLogin(nextPath);
@@ -47,8 +55,8 @@ export async function requirePageAdmin() {
   return { access, role: access.role, user };
 }
 
-export async function requireApiUser() {
-  const user = await getAuthenticatedUser();
+export async function requireApiUser(options: GuardOptions = {}) {
+  const user = options.allowGuest ? await getAuthenticatedUserOrGuest() : await getAuthenticatedUser();
 
   if (!user) {
     return {
@@ -66,8 +74,8 @@ export async function requireApiUser() {
  * (audio ouvido do sino e visitas de pagina, docs/23): sessao revogada continua entrando ate o token
  * vencer, a mesma troca que as paginas de conteudo aceitaram (docs/06).
  */
-export async function requireApiSessionUser() {
-  const user = await getSessionUser();
+export async function requireApiSessionUser(options: GuardOptions = {}) {
+  const user = options.allowGuest ? await getSessionUserOrGuest() : await getSessionUser();
 
   if (!user) {
     return {

@@ -1289,6 +1289,29 @@ por nome **em cada webinário**. Rodar de novo a `202611140001` depois desta, co
 de webinários diferentes, esbarra no índice único da escola. Nenhum caminho de hoje faz isso (o `migrate.sh` só aplica
 as que faltam); se for preciso, rode antes a seção 2 desta, que junta os nomes.
 
+### 9.22 O link aberto dos webinários: migração `202611190001` antes do merge (23/11/2026)
+
+O link aberto (`docs/30` §14, D127 a D134): quem não é aluno entra por `/webinarios/<slug>/entrar` como convidado preso
+àquele webinário. A chave mora em `webinars.room_settings.openLink` (sem coluna); a migração traz só o que a conta de
+convidado precisa. Vem depois da `202611180001` (§9.21) e não muda as de antes.
+
+| Ordem | Arquivo | O que faz | Seções | Nome em `schema_migrations` |
+|---|---|---|---|---|
+| 1 | `202611190001_webinars_link_aberto.sql` | `profiles.is_guest` (a marca do convidado, falso por padrão, com índice parcial) e a tabela `webinar_guests` (quem entrou pelo link: nome, e-mail, telefone, a frase do aceite com a hora, a origem; só do service_role) | 2 | `webinars_link_aberto` |
+
+**Antes do merge na `dev`**: o app novo lê `profiles.is_guest` na lista de Alunos, nos segmentos da Comunicação, na
+busca por e-mail e no seletor Liberar acesso; sem a coluna essas leituras falham. Nada é apagado nem reescrito: todo
+perfil de antes fica com `is_guest = false`. Ela é a mais nova dos webinários, então `WEBINARS_MIGRATION` passa a
+apontá-la.
+
+**Ambiente de teste (`hrtnqcznhdmodjikvddm`)**: pelo `apply_migration` do MCP do Supabase com o arquivo inteiro (é
+idempotente). Depois, conferir pela verificação manual do cabeçalho (o total é 3). **Aplicada em 23/11/2026**, pelo
+`execute_sql` com o arquivo inteiro e a versão gravada em `schema_migrations` (`202611190001`, `webinars_link_aberto`);
+a verificação deu 3.
+
+**Produção**: o `deploy-membros` aplica as migrações novas da `main` no servidor (a produção está guardada em snapshot,
+§10: vale no próximo `restaurar` + `deploy-membros`).
+
 ## 10. Producao guardada em snapshot (03/11/2026)
 
 **Decisao do produtor (03/11/2026, no chat):** a producao na Hetzner so serve para a equipe testar; ninguem de fora a
