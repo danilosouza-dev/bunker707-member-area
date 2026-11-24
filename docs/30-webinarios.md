@@ -1843,6 +1843,7 @@ O que a especificação não fixava e cada parte decidiu, para a próxima pessoa
 | D132 | Com o link ligado a live sai da área de membros (§8.6, CDC art. 37): o selo "Ao vivo" da gravada, o contador, as entradas, os avisos de venda e os participantes simulados não aparecem para ninguém (o aluno também, para a sala ser a mesma). O roteiro de comentários continua | link aberto |
 | D133 | A lista de quem entrou pelo link (`webinar_guests`: nome, e-mail, telefone, autorização, hora e origem pelo `?origem=`) sai em CSV no card Quem pode (`GET /api/admin/webinars/[id]/convidados/csv`, `messaging.write`, com a auditoria `webinar_export` e `report: open_link`) | link aberto |
 | D134 | O e-mail que o convidado deu é o contato do perfil: os avisos da live por e-mail (vaga, lembretes, cancelada) chegam a ele quando o e-mail está ligado no webinário; sem e-mail, nenhum. O e-mail da conta é inventado (`convidado-<id>@convidados.invalid`) e nunca recebe nada | link aberto |
+| D135 | O link aberto só aparece no editor depois de publicar (teste do produtor de 24/11/2026: o link copiado no rascunho de uma cópia deu 404 depois de publicar com o título mudado; o endereço acompanha o título enquanto o webinário nunca foi publicado). Antes, a frase "O link aparece depois de publicar. Até lá, o endereço ainda muda junto com o título." | link aberto |
 
 **Redesign V2 (`docs/31` §1, aprovado em 31/10/2026).** As decisões V2-1 a V2-19 valem sobre esta tabela onde houver conflito; o texto de cada uma, as notas de cada fase e as perguntas abertas (V2-A1 a V2-A48) ficam no `docs/31`. Onde cada uma está:
 
@@ -1959,11 +1960,11 @@ Números marcados como "a medir" ou "a conferir" neste documento (tempo do `jibr
 - Mux e Cloudflare Stream (fase 2 de escala): preços de live por minuto (https://www.mux.com/pricing e https://developers.cloudflare.com/stream/pricing/).
 - Repositório: `AGENTS.md`, `docs/04`, `docs/05`, `docs/12`, `docs/13`, `docs/17` §1.8.3 e §2.4, `docs/18`, `docs/19` §3.3, `docs/20`, `docs/21` §9, `docs/22` a `docs/29`; a pesquisa de 28/10/2026 (resumos e fatos completos no scratchpad desta sessão).
 
-## 14. O link aberto (23/11/2026, D127 a D134)
+## 14. O link aberto (23/11/2026, D127 a D135)
 
 Pedido do produtor: "Eu quero ter um link para mandar para pessoas que queiram participar sem ser alunos", "pode ser 1 como pode ser 100 ou mais"; e "Os convidados não serão alunos após preencher o form".
 
-**Na equipe.** O card **Quem pode** termina com **Link aberto**: a chave **Qualquer pessoa com o link pode entrar**; ligada, **O que pedir para entrar** (Nome, E-mail e Telefone, cada um Não pedir, Opcional ou Obrigatório; o padrão é só o Nome), o **Link para mandar** com **Copiar link** (aparece depois de salvar e funciona depois de publicar) e a frase da simulação (D132). **Baixar a lista (CSV)** fica no card com o webinário salvo. O link aceita `?origem=` (o anúncio, o grupo), que fica gravado com a entrada.
+**Na equipe.** O card **Quem pode** termina com **Link aberto**: a chave **Qualquer pessoa com o link pode entrar**; ligada, **O que pedir para entrar** (Nome, E-mail e Telefone, cada um Não pedir, Opcional ou Obrigatório; o padrão é só o Nome), o **Link para mandar** com **Copiar link** (só depois de publicar, D135: antes disso o endereço ainda muda junto com o título) e a frase da simulação (D132). **Baixar a lista (CSV)** fica no card com o webinário salvo. O link aceita `?origem=` (o anúncio, o grupo), que fica gravado com a entrada.
 
 **Para quem recebe o link.** `/webinarios/<slug>/entrar` mostra a capa, o título, a próxima data, a descrição e só os campos pedidos, com a autorização quando há e-mail ou telefone e o "Já é aluno? Entre com a sua conta". **Entrar** cria a conta de convidado e abre a página do webinário numa moldura só com a marca da escola (sem menu, busca, sino nem rodapé da área): o Garantir vaga, o Entrar na sala, o chat, as perguntas, as enquetes e as reações funcionam como para o aluno. O aluno logado que abre o link vai direto para a página do webinário; quem abre `/webinarios/<slug>` sem sessão e com o link ligado cai no formulário.
 

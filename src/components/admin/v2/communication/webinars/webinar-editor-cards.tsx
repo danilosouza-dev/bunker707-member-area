@@ -459,7 +459,8 @@ function OpenLinkSection({
   const origin = useSyncExternalStore(noopSubscribe, browserOrigin, emptyOrigin);
   const [copied, setCopied] = useState(false);
 
-  const url = saved ? `${origin}${webinarEntryPath(saved.slug)}` : null;
+  // So publicado: antes da primeira publicacao o endereco acompanha o titulo e o link copiado daria 404 (D135).
+  const url = saved?.published ? `${origin}${webinarEntryPath(saved.slug)}` : null;
 
   async function copyLink() {
     if (!url) {
@@ -521,9 +522,10 @@ function OpenLinkSection({
                 </Button>
               </div>
             ) : (
-              <p className="text-xs leading-5 text-[var(--text-secondary)]">{linkCopy.linkAntesDeSalvar}</p>
+              <p className="text-xs leading-5 text-[var(--text-secondary)]" data-webinar-open-link-pending="">
+                {linkCopy.linkAntesDePublicar}
+              </p>
             )}
-            {url && !saved?.published ? <p className="text-xs leading-5 text-[var(--warning)]">{linkCopy.linkAntesDePublicar}</p> : null}
           </div>
           <p className="text-xs leading-5 text-[var(--text-secondary)]" role="note">
             {linkCopy.simulacao}

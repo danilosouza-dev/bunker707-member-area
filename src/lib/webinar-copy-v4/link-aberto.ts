@@ -14,8 +14,9 @@ export const LINK_ABERTO_COPY = {
     campos: { email: "E-mail", name: "Nome", phone: "Telefone" },
     modos: { off: "Não pedir", optional: "Opcional", required: "Obrigatório" },
     link: "Link para mandar",
-    linkAntesDeSalvar: "O link aparece depois de salvar.",
-    linkAntesDePublicar: "O link funciona depois de publicar.",
+    // Antes da primeira publicacao o endereco acompanha o titulo e pode mudar (teste do produtor de 24/11/2026: o link
+    // copiado no rascunho deu 404 depois de publicar com o titulo mudado). So depois de publicar ele fica fixo.
+    linkAntesDePublicar: "O link aparece depois de publicar. Até lá, o endereço ainda muda junto com o título.",
     copiar: "Copiar link",
     copiado: "Link copiado",
     simulacao:
