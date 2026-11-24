@@ -1844,6 +1844,7 @@ O que a especificação não fixava e cada parte decidiu, para a próxima pessoa
 | D133 | A lista de quem entrou pelo link (`webinar_guests`: nome, e-mail, telefone, autorização, hora e origem pelo `?origem=`) sai em CSV no card Quem pode (`GET /api/admin/webinars/[id]/convidados/csv`, `messaging.write`, com a auditoria `webinar_export` e `report: open_link`) | link aberto |
 | D134 | O e-mail que o convidado deu é o contato do perfil: os avisos da live por e-mail (vaga, lembretes, cancelada) chegam a ele quando o e-mail está ligado no webinário; sem e-mail, nenhum. O e-mail da conta é inventado (`convidado-<id>@convidados.invalid`) e nunca recebe nada | link aberto |
 | D135 | O link aberto só aparece no editor depois de publicar (teste do produtor de 24/11/2026: o link copiado no rascunho de uma cópia deu 404 depois de publicar com o título mudado; o endereço acompanha o título enquanto o webinário nunca foi publicado). Antes, a frase "O link aparece depois de publicar. Até lá, o endereço ainda muda junto com o título." | link aberto |
+| D136 | O link aberto compartilhado no WhatsApp e nas redes mostra a capa, o título e a descrição do webinário (teste do produtor de 24/11/2026: o link mandado no grupo saiu sem imagem, porque a página não dizia nenhuma). Só com o link ligado e o webinário publicado; sem capa, sem imagem; sem descrição, "Entre na live pelo link." O cartão é montado por quem manda a mensagem: o que já foi mandado não muda | link aberto |
 
 **Redesign V2 (`docs/31` §1, aprovado em 31/10/2026).** As decisões V2-1 a V2-19 valem sobre esta tabela onde houver conflito; o texto de cada uma, as notas de cada fase e as perguntas abertas (V2-A1 a V2-A48) ficam no `docs/31`. Onde cada uma está:
 
@@ -1960,7 +1961,7 @@ Números marcados como "a medir" ou "a conferir" neste documento (tempo do `jibr
 - Mux e Cloudflare Stream (fase 2 de escala): preços de live por minuto (https://www.mux.com/pricing e https://developers.cloudflare.com/stream/pricing/).
 - Repositório: `AGENTS.md`, `docs/04`, `docs/05`, `docs/12`, `docs/13`, `docs/17` §1.8.3 e §2.4, `docs/18`, `docs/19` §3.3, `docs/20`, `docs/21` §9, `docs/22` a `docs/29`; a pesquisa de 28/10/2026 (resumos e fatos completos no scratchpad desta sessão).
 
-## 14. O link aberto (23/11/2026, D127 a D135)
+## 14. O link aberto (23/11/2026, D127 a D136)
 
 Pedido do produtor: "Eu quero ter um link para mandar para pessoas que queiram participar sem ser alunos", "pode ser 1 como pode ser 100 ou mais"; e "Os convidados não serão alunos após preencher o form".
 
@@ -1975,6 +1976,7 @@ Pedido do produtor: "Eu quero ter um link para mandar para pessoas que queiram p
 | A chave e as regras (formulário, convidado, páginas permitidas, CSV) | `src/server/webinars/open-link-model.ts` (puro) |
 | A entrada: confere o link, o formulário, o robô e os tetos; cria a conta com `app_metadata.webinar_guest = { webinar_id, slug }`, marca o perfil e grava a linha; se a marca falha, a conta sai | `src/server/webinars/guests.ts`, `POST /api/webinars/entrar/[slug]` |
 | O convidado nas guardas: `getAuthenticatedUser` e `getSessionUser` devolvem nulo para ele; só `allowGuest` (as rotas da sala por `guardRoomRequest`, `register`, `session` e `preferences`) e as páginas do webinário (`resolveWebinarViewer`) o aceitam | `src/server/auth/session.ts`, `guards.ts`, `src/server/webinars/guest-page.ts` |
+| O cartão do link nos mensageiros (D136): `openLinkShareMetadata`, no `generateMetadata` da página | `open-link-model.ts`, `entrar/page.tsx` |
 | O proxy: sem sessão, a página do webinário e o formulário decidem; o convidado só abre `/webinarios/<slug>`, `/sala`, `/entrar`, o login e os retornos do Auth | `src/proxy.ts` |
 | O acesso: o convidado só o dele, com o link ligado; com o link ligado, todo aluno | `src/server/webinars/access.ts` (`guestWebinarId`) |
 | A simulação escondida (D132) | rotas `simulation` e `audience`, `room-queries.ts` (selo), `live-banner.ts` (faixa) |
