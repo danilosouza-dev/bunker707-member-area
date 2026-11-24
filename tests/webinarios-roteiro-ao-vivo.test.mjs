@@ -414,8 +414,8 @@ test("R8 tick: a espera (sem started_at), a gravada e o Replay ficam de fora; o 
   });
   const [pendente, avisos] = await silenciando(() => tick.runLiveScriptTick({ db: semTabela, now: new Date() }));
   assert.deepEqual(pendente, { failed: 0, pendingMigration: true, released: 0, sessions: 0, skipped: 0 });
-  // O log aponta a mais nova dos webinarios (WEBINARS_MIGRATION; desde 13/11/2026 a 202611180001, a das pessoas da escola).
-  assert.ok(avisos.some((linha) => linha.includes("migracao 202611180001 pendente")));
+  // O log aponta a mais nova dos webinarios (WEBINARS_MIGRATION; desde 23/11/2026 a 202611190001, a do link aberto).
+  assert.ok(avisos.some((linha) => linha.includes("migracao 202611190001 pendente")));
 });
 
 test("R8 tick: a corrida com o Soltar agora (a chave unica) nao repete; o banco sem a coluna da foto solta sem a foto", async () => {

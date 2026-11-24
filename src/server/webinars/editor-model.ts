@@ -25,6 +25,7 @@ import {
 } from "../communications/audience-model";
 import { formatSaoPauloDateTime, saoPauloLocalToIso } from "../communications/campaign-model";
 import { RECORDER_LABELS, RECORDER_RULES, canRequestRecorder, type RecorderStatus } from "./recorder-model";
+import { defaultOpenLink } from "./open-link-model";
 import { webinarReportHref } from "./report-page-model";
 import { jitActive, jitSummary, withJitPublishProblems } from "./jit-model";
 import {
@@ -1223,6 +1224,7 @@ export function webinarCardTitle(card: WebinarEditorCard, kind: WebinarKind = "s
 /** Em que card cada campo do rascunho fica (o foco do primeiro erro e o resumo do banner). */
 const FIELD_CARDS: readonly [string, WebinarEditorCard][] = [
   ["accessMode", "quemPode"],
+  ["openLink", "quemPode"],
   ["audience", "quemPode"],
   ["productId", "quemPode"],
   ["capacity", "quemPode"],
@@ -1454,6 +1456,7 @@ export function webinarDraftOf(source: WebinarDraft): WebinarDraft {
     durationMinutes: source.durationMinutes,
     hostUserId: source.hostUserId,
     kind: source.kind,
+    openLink: source.openLink ? { ...source.openLink } : defaultOpenLink(),
     presenters: source.presenters.map((presenter) => ({ ...presenter })),
     productId: source.productId,
     quality: { ...source.quality },

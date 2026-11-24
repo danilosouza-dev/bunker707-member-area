@@ -865,6 +865,7 @@ export function WebinarEditor({ defaultKind, initial, liveRoomReady, now, option
               onRetryCount={() => setCountAttempt((attempt) => attempt + 1)}
               options={options}
               pickerItems={pickerItems}
+              saved={savedVersion ? { published: savedVersion.status === "published", slug: savedVersion.slug } : null}
               webinarId={savedVersion?.id ?? null}
             />
           </SectionCard>

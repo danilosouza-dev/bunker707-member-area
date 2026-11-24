@@ -1,5 +1,7 @@
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
+import { NO_AUDIENCE_TILES } from "@/server/webinars/audience-tiles-model";
 import { loadAudienceTiles } from "@/server/webinars/audience-tiles-store";
+import { simulationHidden } from "@/server/webinars/open-link-model";
 import { webinarsDb } from "@/server/webinars/db";
 import { guardRoomRequest, loadCachedRoomContext, ok, roomErrorResponse, sessionIdOf, type RouteContext } from "@/server/webinars/room-route";
 import { WEBINARS_FEATURE } from "@/server/licensing/features";
@@ -38,6 +40,10 @@ export async function GET(request: Request, context: RouteContext) {
 
   try {
     const room = await loadCachedRoomContext(guarded.userId, guarded.webinarId, session.sessionId);
+    // Com o link aberto, nenhum participante simulado (docs/30 §8.6 e §14, CDC art. 37).
+    if (simulationHidden(room.webinar)) {
+      return ok(NO_AUDIENCE_TILES);
+    }
     return ok(await loadAudienceTiles(webinarsDb(), { session: room.session, webinarId: guarded.webinarId }));
   } catch (error) {
     return roomErrorResponse(error, WEBINAR_COPY.simulacao.card.erroCarregar);

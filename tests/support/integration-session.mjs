@@ -36,13 +36,30 @@ export async function actAsSignedIn(conta, senha) {
   return data.user;
 }
 
+/** O convidado do link aberto (docs/30 §14): a mesma marca que o app le no app_metadata. */
+function isGuest(user) {
+  const raw = user?.app_metadata?.webinar_guest;
+  return Boolean(raw && typeof raw === "object" && raw.webinar_id && raw.slug);
+}
+
+// Com o convidado do link aberto, como o app: so as versoes OrGuest o devolvem; as outras dizem "sem sessao".
+export async function getAuthenticatedUserOrGuest() {
+  return integrationSession.user;
+}
+
 export async function getAuthenticatedUser() {
+  const user = integrationSession.user;
+  return user && !isGuest(user) ? user : null;
+}
+
+export async function getSessionUserOrGuest() {
   return integrationSession.user;
 }
 
 // Paginas de conteudo (getSessionUser: claims do JWT no app): aqui e a mesma pessoa simulada.
 export async function getSessionUser() {
-  return integrationSession.user;
+  const user = integrationSession.user;
+  return user && !isGuest(user) ? user : null;
 }
 
 // Import dinamico: o alias "@/" so existe depois que integration-hooks.mjs registra os ganchos.

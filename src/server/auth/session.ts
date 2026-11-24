@@ -7,6 +7,7 @@ import { getAuthSessionStrategy } from "@/lib/auth/session-strategy";
 import { hasSupabaseAuthConfig } from "@/server/auth/config";
 import type { AdminAccess, AdminRole } from "@/server/auth/roles";
 import { createSupabaseServerClient } from "@/server/auth/supabase";
+import { isGuestUser } from "@/lib/auth/guest-account";
 
 export type AuthenticatedUser = User;
 /** O que as paginas de conteudo do aluno usam do usuario; um AuthenticatedUser tambem serve. */
@@ -17,7 +18,7 @@ export type { AdminAccess, AdminRole };
 // guards e loaders compartilham o mesmo getUser(). O proxy pode usar getClaims() (AUTH_SESSION_STRATEGY);
 // aqui seguimos com getUser(), que consulta o Auth e enxerga sessao revogada. Nunca use getSession() no servidor.
 // Quem troca a sessao no meio do request (login/logout em Server Action) nao deve reler o usuario depois disso.
-export const getAuthenticatedUser = cache(async (): Promise<AuthenticatedUser | null> => {
+export const getAuthenticatedUserOrGuest = cache(async (): Promise<AuthenticatedUser | null> => {
   if (!hasSupabaseAuthConfig()) {
     return null;
   }
@@ -44,9 +45,9 @@ export const getAuthenticatedUser = cache(async (): Promise<AuthenticatedUser | 
 // revogada so deixam de entrar aqui quando o token vence (JWT_EXPIRY, 1 h); o acesso aos cursos
 // (entitlements) e lido do banco a cada pagina e vale na hora. Admin, compras, perfil, suporte e troca de
 // senha seguem com getAuthenticatedUser. Sem "claims", e o proprio getAuthenticatedUser.
-export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
+export const getSessionUserOrGuest = cache(async (): Promise<SessionUser | null> => {
   if (getAuthSessionStrategy() !== "claims") {
-    return getAuthenticatedUser();
+    return getAuthenticatedUserOrGuest();
   }
 
   if (!hasSupabaseAuthConfig()) {
@@ -72,6 +73,21 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
   } catch {
     return null;
   }
+});
+
+// O convidado do link aberto de um webinario (docs/30 §14, app_metadata.webinar_guest) nao e aluno: para todo o resto
+// do app ele e "sem sessao". So as paginas e rotas do webinario dele pedem a versao OrGuest (requireStudentPageUser,
+// requireApiUser e requireApiSessionUser com allowGuest), e o acesso ao webinario decide o resto (access.ts).
+export const getAuthenticatedUser = cache(async (): Promise<AuthenticatedUser | null> => {
+  const user = await getAuthenticatedUserOrGuest();
+
+  return user && !isGuestUser(user) ? user : null;
+});
+
+export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
+  const user = await getSessionUserOrGuest();
+
+  return user && !isGuestUser(user) ? user : null;
 });
 
 // Memoizado por request (chave: userId) para que guards, shell e redirects leiam admin_roles uma vez so.

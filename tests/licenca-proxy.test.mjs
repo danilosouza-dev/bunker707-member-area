@@ -31,8 +31,16 @@ test.after(() => {
   else process.env.BUNKER_LICENSING_MODE = antes;
 });
 
-test("modo off: /webinarios sem sessão vai para o login, como antes", async () => {
-  for (const caminho of ["/webinarios", "/webinarios/live-de-teste", "/webinarios/live-de-teste/sala?sessao=x"]) {
+test("modo off: /webinarios sem sessão vai para o login, como antes; a página do webinário e o formulário do link aberto decidem", async () => {
+  // O link aberto (docs/30 §14): sem sessão, a página do webinário manda ao formulário quando o link está ligado (e ao
+  // login quando não está); o proxy não lê o webinário.
+  for (const caminho of ["/webinarios/live-de-teste", "/webinarios/live-de-teste/entrar"]) {
+    const resposta = await proxy(pedido(caminho));
+    assert.equal(resposta.status, 200, caminho);
+    assert.equal(resposta.headers.get("cache-control"), "private, no-store", caminho);
+  }
+
+  for (const caminho of ["/webinarios", "/webinarios/live-de-teste/sala?sessao=x"]) {
     const resposta = await proxy(pedido(caminho));
 
     assert.equal(resposta.status, 307, caminho);
@@ -70,4 +78,26 @@ test("enforce: com sessão, nada muda (a troca de senha obrigatória continua va
   const resposta = await proxy(pedido("/webinarios"));
   assert.equal(resposta.status, 307);
   assert.equal(new URL(resposta.headers.get("location")).pathname, "/alterar-senha");
+});
+
+test("o convidado do link aberto só circula pelas páginas do webinário e pelo login; o resto volta para a página dele", async () => {
+  const convidado = { ...aluna, app_metadata: { webinar_guest: { slug: "live-de-teste", webinar_id: "aaaaaaaa-1111-4111-8111-111111111111" } } };
+  proxyStubs.userResult = { data: { user: convidado }, error: null };
+
+  for (const caminho of ["/webinarios/live-de-teste", "/webinarios/live-de-teste/sala?sessao=x", "/webinarios/live-de-teste/entrar", "/login"]) {
+    const resposta = await proxy(pedido(caminho));
+    assert.equal(resposta.status, 200, caminho);
+  }
+
+  for (const caminho of ["/", "/webinarios", "/perfil", "/admin", "/conteudo/curso"]) {
+    const resposta = await proxy(pedido(caminho));
+    assert.equal(resposta.status, 307, caminho);
+    const destino = new URL(resposta.headers.get("location"));
+    assert.equal(destino.pathname, "/webinarios/live-de-teste", caminho);
+    assert.equal(destino.search, "", caminho);
+  }
+
+  // O slug fora do formato nunca vira endereço: a conta é tratada como aluna comum.
+  proxyStubs.userResult = { data: { user: { ...aluna, app_metadata: { webinar_guest: { slug: "//outro.site", webinar_id: "x" } } } }, error: null };
+  assert.equal((await proxy(pedido("/perfil"))).status, 200);
 });

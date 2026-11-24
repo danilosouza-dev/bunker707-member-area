@@ -64,7 +64,7 @@ function calendarJson(request: Request, webinar: Webinar, session: WebinarSessio
 }
 
 async function guard(context: RouteContext) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser({ allowGuest: true });
 
   if (auth.response || !auth.user) {
     return { response: noStore(auth.response!) };

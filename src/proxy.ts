@@ -8,6 +8,7 @@ import { supabaseServerGlobalOptions } from "@/server/db/supabase/internal-fetch
 import { getSentryCspReportUri } from "@/lib/sentry-csp-report-uri";
 import { licensingMode } from "@/server/licensing/build-config";
 import { isFeatureStudentPage } from "@/server/licensing/features";
+import { guestAllowedPath, guestIdentityOf, openLinkAnonymousPath } from "@/lib/auth/guest-account";
 
 const supabaseUrl = cleanEnvValue(process.env.NEXT_PUBLIC_SUPABASE_URL) ?? cleanEnvValue(process.env.SUPABASE_URL);
 const supabasePublicKey =
@@ -196,6 +197,7 @@ function redirectToPasswordChange(request: NextRequest, contentSecurityPolicy: s
 }
 
 type ProxySessionUser = {
+  app_metadata?: unknown;
   id: string;
   user_metadata: unknown;
 };
@@ -235,7 +237,7 @@ async function getProxySessionUser(supabase: ProxySupabaseClient): Promise<Proxy
     return getVerifiedUser(supabase);
   }
 
-  return { id: claims.sub, user_metadata: claims.user_metadata ?? null };
+  return { app_metadata: claims.app_metadata ?? null, id: claims.sub, user_metadata: claims.user_metadata ?? null };
 }
 
 export async function proxy(request: NextRequest) {
@@ -299,6 +301,27 @@ export async function proxy(request: NextRequest) {
 
   if (needsUser && !user && featurePageDecides) {
     return secureResponse(response, contentSecurityPolicy, true);
+  }
+
+  // O link aberto de um webinario (docs/30 §14): sem sessao, a pagina do webinario e o formulario decidem (com o link
+  // ligado, o formulario; senao, o login de sempre). O proxy nao le o webinario (ele mora no banco).
+  if (needsUser && !user && openLinkAnonymousPath(pathname)) {
+    return secureResponse(response, contentSecurityPolicy, true);
+  }
+
+  // O convidado do link aberto so circula pelas paginas do webinario (a pagina confere de qual) e pelo login, onde
+  // pode entrar com uma conta de aluno. O resto volta para a pagina do webinario dele.
+  const guest = user ? guestIdentityOf(user.app_metadata) : null;
+
+  if (guest) {
+    if (publicPage || guestAllowedPath(pathname)) {
+      return secureResponse(response, contentSecurityPolicy, true);
+    }
+
+    const guestUrl = request.nextUrl.clone();
+    guestUrl.pathname = `/webinarios/${guest.slug}`;
+    guestUrl.search = "";
+    return secureResponse(NextResponse.redirect(guestUrl), contentSecurityPolicy, true);
   }
 
   if (needsUser && !user) {

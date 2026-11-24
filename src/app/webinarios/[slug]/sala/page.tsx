@@ -10,7 +10,8 @@ import { MemberButtonLink } from "@/components/member/ui/member-button";
 import { MemberPage } from "@/components/member/ui/member-page";
 import { normalizeAccessPreviewMode, withAccessPreviewParam } from "@/lib/access-preview";
 import { WEBINAR_COPY } from "@/lib/webinar-copy";
-import { requireStudentPageUser } from "@/server/auth/guards";
+import { GuestFrame } from "@/components/member/webinars/guest-frame";
+import { resolveWebinarViewer } from "@/server/webinars/guest-page";
 import { isUuid } from "@/server/communications/route-support";
 import { getAppShellData } from "@/server/db/platform-store";
 import { webinarHref } from "@/server/webinars/model";
@@ -59,9 +60,9 @@ export default async function WebinarRoomPage({ params, searchParams }: RoomPage
   }
 
   const requestedAccessPreviewMode = normalizeAccessPreviewMode(resolvedSearchParams?.accessPreview);
-  const user = await requireStudentPageUser(`${webinarHref(slug)}/sala?sessao=${encodeURIComponent(sessao)}`);
-  const shellData = await getAppShellData(user);
-  const accessPreviewMode = shellData.canUseAccessPreview ? requestedAccessPreviewMode : undefined;
+  const { guest, user } = await resolveWebinarViewer(slug, `${webinarHref(slug)}/sala?sessao=${encodeURIComponent(sessao)}`);
+  const shellData = await getAppShellData(guest ? undefined : user);
+  const accessPreviewMode = !guest && shellData.canUseAccessPreview ? requestedAccessPreviewMode : undefined;
   const data = await getRoomPageData(accessPreviewMode, user, slug, sessao.toLowerCase());
 
   if (data.state === "not_found") {
@@ -72,8 +73,8 @@ export default async function WebinarRoomPage({ params, searchParams }: RoomPage
   const copy = WEBINAR_COPY.sala;
   const nonce = data.state === "ready" && data.payload.session.kind === "live" ? ((await headers()).get("x-nonce") ?? null) : null;
 
-  return (
-    <AppShell accessPreviewMode={accessPreviewMode} branding={shellData.branding} canUseAccessPreview={shellData.canUseAccessPreview} disabledFeatures={shellData.disabledFeatures} student={shellData.student}>
+  const content = (
+    <>
       {data.state === "error" ? (
         <MemberPage width="default">
           <MemberEmptyState
@@ -139,6 +140,17 @@ export default async function WebinarRoomPage({ params, searchParams }: RoomPage
           />
         )
       ) : null}
+    </>
+  );
+
+  // O convidado do link aberto (docs/30 §14): a moldura dele, sem o menu e o rodape da area de membros.
+  if (guest) {
+    return <GuestFrame branding={shellData.branding}>{content}</GuestFrame>;
+  }
+
+  return (
+    <AppShell accessPreviewMode={accessPreviewMode} branding={shellData.branding} canUseAccessPreview={shellData.canUseAccessPreview} disabledFeatures={shellData.disabledFeatures} student={shellData.student}>
+      {content}
       <MemberFooter branding={shellData.branding} />
     </AppShell>
   );

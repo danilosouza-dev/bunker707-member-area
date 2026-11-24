@@ -1,8 +1,8 @@
 "use client";
 
-import { BellRing, Clapperboard, MonitorPlay, PanelTop, Plus, Trash2, Upload } from "lucide-react";
+import { BellRing, Clapperboard, Copy, Download, Link2, MonitorPlay, PanelTop, Plus, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { type ReactNode, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PRODUCT_FORMAT_LABELS, PRODUCT_SITUATION_LABELS } from "@/server/catalog/model";
@@ -29,6 +29,7 @@ import {
   type WebinarPermissions
 } from "@/server/webinars/editor-model";
 import { toTime, type AccessMode, type ChatMode, type WebinarDraft, type WebinarSession } from "@/server/webinars/model";
+import { OPEN_LINK_FIELDS, OPEN_LINK_FIELD_MODES, webinarEntryPath, type OpenLinkFieldMode } from "@/server/webinars/open-link-model";
 import type { WebinarEditorOptions } from "@/server/webinars/queries";
 import { AdminField, PillGroup, adminInputClass, adminTextareaClass, fieldDescribedBy } from "../../form";
 import { AdminSwitch } from "../../settings/kit";
@@ -336,9 +337,11 @@ type AccessCardProps = CardProps & {
   pickerItems: readonly ProductPickerItem[];
   /** O webinario gravado (null no novo): a regra "Participação em lives" nunca oferece a propria live. */
   webinarId: string | null;
+  /** O endereco e a situacao gravados (o link aberto so aparece depois de salvar e so funciona publicado). */
+  saved?: { published: boolean; slug: string } | null;
 };
 
-export function AccessCard({ audienceDescription, audienceErrors, countState, disabled, draft, errorFor, onBlur, onChange, onRetryCount, options, pickerItems, webinarId }: AccessCardProps) {
+export function AccessCard({ audienceDescription, audienceErrors, countState, disabled, draft, errorFor, onBlur, onChange, onRetryCount, options, pickerItems, saved = null, webinarId }: AccessCardProps) {
   const capacityDisabled = disabled || !draft.registrationRequired;
   const hint = webinarAccessHint(draft.accessMode);
   const notice = webinarAccessNotice(draft);
@@ -429,6 +432,116 @@ export function AccessCard({ audienceDescription, audienceErrors, countState, di
         label={copy.showRegisteredCount}
         onCheckedChange={(checked) => onChange({ showRegisteredCount: checked })}
       />
+      <OpenLinkSection disabled={disabled} draft={draft} onChange={onChange} saved={saved} webinarId={webinarId} />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Link aberto (docs/30 §14): a chave, o que pedir, o link para mandar e a lista de quem entrou
+ * ---------------------------------------------------------------------------------------------- */
+
+const linkCopy = WEBINAR_COPY.linkAberto.editor;
+const noopSubscribe = () => () => {};
+const browserOrigin = () => window.location.origin;
+const emptyOrigin = () => "";
+const FIELD_MODE_OPTIONS = OPEN_LINK_FIELD_MODES.map((mode) => ({ label: linkCopy.modos[mode], value: mode }));
+
+function OpenLinkSection({
+  disabled,
+  draft,
+  onChange,
+  saved,
+  webinarId
+}: Pick<CardProps, "disabled" | "draft" | "onChange"> & { saved: { published: boolean; slug: string } | null; webinarId: string | null }) {
+  const openLink = draft.openLink;
+  // A origem do navegador (o endereco que a equipe abriu e o que o aluno abre); no servidor, vazio.
+  const origin = useSyncExternalStore(noopSubscribe, browserOrigin, emptyOrigin);
+  const [copied, setCopied] = useState(false);
+
+  const url = saved ? `${origin}${webinarEntryPath(saved.slug)}` : null;
+
+  async function copyLink() {
+    if (!url) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div className="flex min-w-0 flex-col gap-4 border-t border-[var(--border-subtle)] pt-4" data-webinar-open-link="">
+      <p className="text-[13px] leading-5 font-semibold text-[var(--text-primary)]">{linkCopy.titulo}</p>
+      <AdminSwitch
+        checked={openLink.enabled}
+        description={openLink.enabled ? linkCopy.chaveLigada : linkCopy.chaveDesligada}
+        disabled={disabled}
+        id="webinar-openLink"
+        label={linkCopy.chave}
+        onCheckedChange={(checked) => onChange({ openLink: { ...openLink, enabled: checked } })}
+      />
+      {openLink.enabled ? (
+        <>
+          <div className="flex min-w-0 flex-col gap-3">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{linkCopy.pedir}</span>
+              <span className="text-xs leading-5 text-[var(--text-secondary)]">{linkCopy.pedirDica}</span>
+            </div>
+            {OPEN_LINK_FIELDS.map((field) => (
+              <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2" key={field}>
+                <span className="w-20 shrink-0 text-[13px] text-[var(--text-secondary)]" id={`webinar-openLink-${field}-label`}>
+                  {linkCopy.campos[field]}
+                </span>
+                <PillGroup
+                  ariaLabel={linkCopy.campos[field]}
+                  disabled={disabled}
+                  name={`webinar-openLink-${field}`}
+                  onChange={(mode: OpenLinkFieldMode) => onChange({ openLink: { ...openLink, [field]: mode } })}
+                  options={FIELD_MODE_OPTIONS}
+                  value={openLink[field]}
+                />
+              </div>
+            ))}
+          </div>
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{linkCopy.link}</span>
+            {url ? (
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <code className="min-w-0 flex-1 truncate rounded-[8px] border border-[var(--border-subtle)] bg-[var(--surface-2)] px-3 py-2 text-xs text-[var(--text-primary)]" data-webinar-open-link-url="">
+                  {url}
+                </code>
+                <Button disabled={!origin} onClick={() => void copyLink()} size="sm" type="button" variant="outline">
+                  {copied ? <Link2 aria-hidden="true" /> : <Copy aria-hidden="true" />}
+                  {copied ? linkCopy.copiado : linkCopy.copiar}
+                </Button>
+              </div>
+            ) : (
+              <p className="text-xs leading-5 text-[var(--text-secondary)]">{linkCopy.linkAntesDeSalvar}</p>
+            )}
+            {url && !saved?.published ? <p className="text-xs leading-5 text-[var(--warning)]">{linkCopy.linkAntesDePublicar}</p> : null}
+          </div>
+          <p className="text-xs leading-5 text-[var(--text-secondary)]" role="note">
+            {linkCopy.simulacao}
+          </p>
+        </>
+      ) : null}
+      {webinarId ? (
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <a
+            className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[var(--text-primary)] underline-offset-4 hover:underline"
+            href={`/api/admin/webinars/${encodeURIComponent(webinarId)}/convidados/csv`}
+          >
+            <Download aria-hidden="true" className="size-4" />
+            {linkCopy.baixarLista}
+          </a>
+          <span className="text-xs leading-5 text-[var(--text-secondary)]">{linkCopy.listaDica}</span>
+        </div>
+      ) : null}
     </div>
   );
 }

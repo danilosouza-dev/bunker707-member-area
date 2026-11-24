@@ -4,6 +4,7 @@ import { isMissingWebinarSchema, webinarsDb } from "@/server/webinars/db";
 import { badRequest, guardRoomRequest, loadCachedRoomContext, ok, roomErrorResponse, type RouteContext } from "@/server/webinars/room-route";
 import { emptySimulationFeed, liveSimulationEndOffsetMs, liveSimulationShapeMs, simulationDecisionRecorded, simulationEndOffsetMs, simulationFeed } from "@/server/webinars/simulation-model";
 import { simulationFeedQuerySchema } from "@/server/webinars/simulation-schemas";
+import { simulationHidden } from "@/server/webinars/open-link-model";
 import { fetchSessionSimulationFeed } from "@/server/webinars/simulation-store";
 import { WEBINARS_FEATURE } from "@/server/licensing/features";
 import { licenseRouteRefusal } from "@/server/licensing/guards";
@@ -46,7 +47,8 @@ export async function GET(request: Request, context: RouteContext) {
     const room = await loadCachedRoomContext(guarded.userId, guarded.webinarId, sessao.toLowerCase());
     const cached = room.session;
     const live = cached.kind === "live";
-    if (cached.kind !== "simulated" && !live) {
+    // Com o link aberto, nada simulado para ninguem (docs/30 §8.6 e §14, CDC art. 37).
+    if ((cached.kind !== "simulated" && !live) || simulationHidden(room.webinar)) {
       return ok(emptySimulationFeed(from, to));
     }
 

@@ -8,6 +8,7 @@ import { isHttpsOrLoopbackUrl } from "../../lib/loopback-url";
 import { catalogIdSchema, expectedUpdatedAtSchema } from "../catalog/schemas";
 import { isAudienceGroup, type AudienceDefinition, type AudienceNode } from "../communications/audience-model";
 import { accessAudienceDefinitionSchema } from "../communications/schemas";
+import { defaultOpenLink, openLinkSchema } from "./open-link-model";
 import {
   ACCESS_MODES,
   CHAT_MODES,
@@ -149,6 +150,8 @@ export const webinarDraftObjectSchema = z.object({
   durationMinutes: z.number({ error: WEBINAR_MESSAGES.duration }).int(WEBINAR_MESSAGES.duration).min(WEBINAR_LIMITS.durationMin, WEBINAR_MESSAGES.duration).max(WEBINAR_LIMITS.durationMax, WEBINAR_MESSAGES.duration),
   hostUserId: z.uuid({ error: WEBINAR_MESSAGES.hostRequired }).nullable(),
   kind: z.enum(WEBINAR_KINDS, { error: "Escolha Live ao vivo ou Live gravada." }),
+  // O editor aberto com o codigo de antes nao manda a chave: o link fica desligado.
+  openLink: openLinkSchema.optional().default(defaultOpenLink()),
   presenters: z.array(presenterSchema).max(WEBINAR_LIMITS.presentersMax, WEBINAR_MESSAGES.tooManyPresenters).default([]),
   productId: catalogIdSchema.nullable(),
   quality: qualitySchema,
