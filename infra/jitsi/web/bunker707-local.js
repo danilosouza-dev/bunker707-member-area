@@ -27,7 +27,7 @@
     try { framed = Boolean(window.parent && window.parent !== window); } catch (e) { framed = true; }
     if (!framed || !window.VideoEncoder || !window.AudioEncoder || !window.MediaStreamTrackProcessor || !window.Worker) { return; }
 
-    var WORKER = '/libs/bunker707-local-worker.js?v=ed14ca65';
+    var WORKER = '/libs/bunker707-local-worker.js?v=b2bc20c5';
     var PREFIX = 'gravacao-local-';
     var MESSAGE = 'bunker707:gravacao-local';
     // A origem da pagina que montou o iframe e mandou o "ola" (o console novo); nula, vale o painel daqui.
@@ -130,7 +130,17 @@
 
     function syncAudio(r, conf) {
         var mic = localTrack(conf, 'mic');
-        var want = (mic ? [mic] : []).concat(remoteAudio(conf));
+        // O microfone vai direto para a gravacao, fora da mistura (que segura o som por um tempo que varia); a mistura fica
+        // com as outras vozes. Se a linha da gravacao recusar (outro ritmo de amostras), ele volta para a mistura.
+        var direct = r.direct !== false ? mic : null;
+        var want = (mic && !direct ? [mic] : []).concat(remoteAudio(conf));
+
+        if (direct !== r.voice) {
+            r.voice = direct;
+            var voiceReadable = direct ? new window.MediaStreamTrackProcessor({ maxBufferSize: 200, track: direct }).readable : null;
+
+            r.composer.postMessage({ papel: 'voz', readable: voiceReadable }, voiceReadable ? [voiceReadable] : []);
+        }
 
         want.forEach(function (track) {
             if (r.audio.has(track)) { return; }
@@ -144,7 +154,7 @@
         Array.from(r.audio.keys()).forEach(function (track) {
             if (want.indexOf(track) < 0) { try { r.audio.get(track).disconnect(); } catch (e) { /* ja solto */ } r.audio.delete(track); }
         });
-        if (mic && mic !== r.mic) { r.mic = mic; r.notes.push('microfone: ' + micText(mic)); }
+        if (mic && mic !== r.mic) { r.mic = mic; r.notes.push('microfone: ' + micText(mic) + (direct ? ' (direto)' : '')); }
     }
 
     function micText(track) {
@@ -194,6 +204,7 @@
         r.composer.onmessage = function (e) {
             if (e.data.tipo === 'contas') { r.counts.push(e.data.contas); r.last = e.data.contas; }
             else if (e.data.tipo === 'ritmo') { r.notes.push('ritmo da câmera ' + e.data.medido.toFixed(3) + ', gravado ' + e.data.ritmo.toFixed(3)); }
+            else if (e.data.tipo === 'voz-recusada') { r.direct = false; r.voice = null; r.notes.push('microfone pela mistura'); }
             else if (e.data.tipo === 'pronto') { running(r); }
             else if (e.data.tipo === 'parte') { part(r, e.data.bytes); }
             else if (e.data.tipo === 'acabou') { if (r.onDisk) { r.disk.postMessage({ papel: 'fechar' }); } else { finish(r); } }

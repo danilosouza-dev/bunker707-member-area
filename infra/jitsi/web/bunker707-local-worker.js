@@ -42,9 +42,15 @@ var failed = false;
 var RATE = 48000;
 var CHANNELS = 2;
 var BITRATE = 10000000;
-// O som do arquivo anda isto para a frente: as amostras vazias do comeco do AAC e a espera da mistura, que o atrasariam.
+// O som do arquivo anda isto para a frente (as amostras vazias do comeco do AAC e a espera do caminho, que o atrasariam):
+// um valor para o som que vem da mistura do navegador e outro para o microfone lido direto.
 var ADVANCE = 900;
-var audio = { drop: 0, filled: 0, lead: null, mean: 0, next: null, reader: null, samples: 0, seen: 0, started: false };
+var ADVANCE_VOICE = -1100;
+var audio = { bias: null, drop: 0, filled: 0, lead: null, mean: 0, next: null, reader: null, samples: 0, seen: 0, started: false };
+// O microfone de quem apresenta, lido direto da faixa (docs/30 D143): fora da mistura do navegador, que segura o som por um
+// tempo que varia. Com ele no ar, ele manda no relogio do som e as outras vozes (a mistura) esperam numa fila curta.
+var voice = { last: 0, on: false, reader: null, refused: false };
+var rest = { frames: 0, list: [] };
 // Cada imagem que chega (a camera, a tela e a camera de quem mais estiver no ar), na ordem de chegada.
 var feeds = new Map();
 var people = [];
@@ -194,34 +200,121 @@ function silence(frames) {
     }
 }
 
-/** Cada pedaco de som que chega da mistura, na ordem, com a hora contada em amostras. */
-function hear(data) {
-    if (!aenc || !startAt || data.sampleRate !== RATE) { data.close(); return; }
-    var frames = data.numberOfFrames;
-    var planes = new Float32Array(frames * CHANNELS);
+/** Esvazia a fila das outras vozes (na troca de quem manda no relogio). */
+function clearRest() {
+    rest.list = [];
+    rest.frames = 0;
+}
 
-    for (var c = 0; c < CHANNELS; c += 1) {
-        data.copyTo(planes.subarray(c * frames, (c + 1) * frames), { format: 'f32-planar', planeIndex: Math.min(c, data.numberOfChannels - 1) });
+/** Soma em `planes` as proximas n amostras das outras vozes; o que faltar fica so com a voz. */
+function addRest(planes, n) {
+    var done = 0;
+
+    while (done < n && rest.list.length) {
+        var head = rest.list[0];
+        var take = Math.min(n - done, head.n - head.at);
+
+        for (var c = 0; c < CHANNELS; c += 1) {
+            for (var i = 0; i < take; i += 1) {
+                var v = planes[c * n + done + i] + head.planes[c * head.n + head.at + i];
+
+                planes[c * n + done + i] = v > 1 ? 1 : v < -1 ? -1 : v;
+            }
+        }
+        head.at += take;
+        done += take;
+        rest.frames -= take;
+        if (head.at === head.n) { rest.list.shift(); }
     }
+}
+
+/** O microfone parou de entregar (mudo na sala, aparelho tirado): a mistura volta a mandar, e o buraco vira silencio. */
+function voiceOff(gapMs) {
+    if (!voice.on) { return; }
+    voice.on = false;
+    audio.next = null;
+    clearRest();
+    if (audio.started && gapMs > 20) { silence(Math.round((gapMs - 10) * RATE / 1000)); }
+}
+
+/** Um pedaco pronto vai para o arquivo, na ordem, com a hora contada em amostras. */
+function emitSound(planes, frames, stamp, who) {
     if (!audio.started) {
         audio.started = true;
+        audio.bias = who;
         // O primeiro som do arquivo vale a hora em que chegou; o que faltar ate o comeco e silencio.
-        var fill = Math.round((performance.now() - startAt) * RATE / 1000) - frames - ADVANCE + Math.round(LATE * RATE / 1000);
+        var fill = Math.round((performance.now() - startAt) * RATE / 1000) - frames - (who === 'voz' ? ADVANCE_VOICE : ADVANCE) + Math.round(LATE * RATE / 1000);
 
         if (fill > 0) { silence(fill); } else { audio.drop = -fill; }
+    } else if (who === 'voz' && audio.bias !== 'voz') {
+        // A gravacao comecou so com a mistura: o microfone direto chega mais cedo que ela, e entra no lugar certo.
+        audio.bias = 'voz';
+        if (ADVANCE > ADVANCE_VOICE) { silence(ADVANCE - ADVANCE_VOICE); } else { audio.drop = ADVANCE_VOICE - ADVANCE; }
     }
     // Um trecho que a captura perdeu (a maquina engasgou) vira silencio do mesmo tamanho: o resto nao adianta.
-    var hole = audio.next === null ? 0 : Math.round((data.timestamp - audio.next) * RATE / 1e6);
+    var hole = audio.next === null ? 0 : Math.round((stamp - audio.next) * RATE / 1e6);
 
     if (hole > 240 && hole < RATE * 60 && !audio.drop) { silence(hole); }
-    audio.next = data.timestamp + frames * 1e6 / RATE;
-    if (audio.drop >= frames) { audio.drop -= frames; data.close(); return; }
+    audio.next = stamp + frames * 1e6 / RATE;
+    if (audio.drop >= frames) { audio.drop -= frames; return; }
     var out = new AudioData({ data: planes, format: 'f32-planar', numberOfChannels: CHANNELS, numberOfFrames: frames, sampleRate: RATE, timestamp: Math.round(audio.samples * 1e6 / RATE) });
 
     aenc.encode(out);
     out.close();
     audio.samples += frames;
+}
+
+/** Cada pedaco de som que chega: do microfone direto ('voz') ou da mistura das outras vozes ('mistura'). */
+function hear(data, who) {
+    if (!aenc || !startAt) { data.close(); return; }
+    if (data.sampleRate !== RATE) {
+        data.close();
+        // O microfone noutro ritmo de amostras: a pagina o poe na mistura, como antes.
+        if (who === 'voz' && !voice.refused) { voice.refused = true; voiceOff(0); self.postMessage({ tipo: 'voz-recusada' }); }
+
+        return;
+    }
+    var frames = data.numberOfFrames;
+    var stamp = data.timestamp;
+    var planes = new Float32Array(frames * CHANNELS);
+
+    for (var c = 0; c < CHANNELS; c += 1) {
+        data.copyTo(planes.subarray(c * frames, (c + 1) * frames), { format: 'f32-planar', planeIndex: Math.min(c, data.numberOfChannels - 1) });
+    }
     data.close();
+    if (who === 'voz') {
+        if (voice.refused) { return; }
+        voice.last = performance.now();
+        if (!voice.on) { voice.on = true; audio.next = null; clearRest(); }
+        addRest(planes, frames);
+        emitSound(planes, frames, stamp, who);
+
+        return;
+    }
+    if (!voice.on) { emitSound(planes, frames, stamp, who); return; }
+    rest.list.push({ at: 0, n: frames, planes: planes });
+    rest.frames += frames;
+    // Os dois relogios divergem aos poucos: a fila nunca passa de 1/4 de segundo (o corte cai nas outras vozes, nunca na voz).
+    while (rest.frames > RATE / 4 && rest.list.length > 1) { rest.frames -= rest.list[0].n - rest.list[0].at; rest.list.shift(); counts.corte = (counts.corte || 0) + 1; }
+}
+
+/** A faixa do microfone lida direto (nula: mudo ou sem microfone). */
+function listen(readable) {
+    if (voice.reader) { voice.reader.cancel().catch(function () {}); voice.reader = null; }
+    voiceOff(0);
+    if (!readable) { return; }
+    if (voice.refused) { readable.cancel().catch(function () {}); return; }
+    var reader = readable.getReader();
+
+    voice.reader = reader;
+    (function next() {
+        reader.read().then(function (result) {
+            if (voice.reader !== reader) { if (result.value) { result.value.close(); } return; }
+            if (result.done) { voiceOff(0); return; }
+            hear(result.value, 'voz');
+            next();
+        }).catch(function () { /* a faixa acabou */ });
+    }());
 }
 
 /* ---- o arquivo: MP4 em fragmentos (ISO 14496-12), um por grupo de 2 s, para gravar enquanto acontece ---- */
@@ -397,7 +490,7 @@ function prepare(readable, hint) {
     // O som e lido desde ja (o de antes do comeco e jogado fora): senao o comeco traria o que ficou na espera.
     audio.reader = readable.getReader();
     (function next() {
-        audio.reader.read().then(function (result) { if (!result.done) { hear(result.value); next(); } }).catch(function () { /* acabou */ });
+        audio.reader.read().then(function (result) { if (!result.done) { hear(result.value, 'mistura'); next(); } }).catch(function () { /* acabou */ });
     }());
     measure(hint).then(function () { open(); });
 }
@@ -448,6 +541,7 @@ function end() {
     venc = null;
     aenc = null;
     if (audio.reader) { audio.reader.cancel().catch(function () {}); }
+    if (voice.reader) { voice.reader.cancel().catch(function () {}); voice.reader = null; }
     Array.from(feeds.keys()).forEach(drop);
     Promise.all([v, a].map(function (e) { return e && e.state === 'configured' ? e.flush() : null; })).catch(broke).then(function () {
         cut(slot);
@@ -460,6 +554,7 @@ function end() {
 function beat() {
     timer = null;
     if (!venc) { return; }
+    if (voice.on && performance.now() - voice.last > 400) { voiceOff(performance.now() - voice.last); }
     var due = Math.floor((performance.now() - startAt) * NUM / DEN / 1000);
 
     follow();
@@ -532,6 +627,8 @@ self.onmessage = function (event) {
         // Sem nenhuma imagem (camera desligada e sem tela), a gravacao segue com o preto, no mesmo ritmo.
         LATE = data.atraso || 0;
         prepare(data.audio, data.aparelho || 0);
+    } else if (data.papel === 'voz') {
+        listen(data.readable || null);
     } else if (data.papel === 'faixa') {
         pump(data.qual, data.readable || null);
     } else if (data.papel === 'pessoas') {
