@@ -38,6 +38,12 @@ bash "$jibri_dir/ffmpeg-gravacao.sh" "$ffdir" 2>&1 | tail -n 2
 [ -x "$ffdir/ffmpeg" ] || { echo "ERRO: o ffmpeg da gravacao nao compilou"; tail -n 30 "$ffdir/make.log" 2>/dev/null; exit 1; }
 mounts+=(-v "$ffdir/ffmpeg:/usr/local/bin/ffmpeg:ro" -v "$jibri_dir/custom-jibri.conf:/config/custom-jibri.conf:ro")
 
+# O capturador de verdade do Jibri (captura/Captura.java), compilado com o Java da maquina.
+capdir=$(mktemp -d)
+chmod 755 "$capdir"
+javac --release 11 -d "$capdir" "$here/captura/Captura.java"
+mounts+=(-v "$capdir:/captura:ro")
+
 trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
 # As mesmas opcoes do docker-compose.yml do gravador: raiz so de leitura, /run e /tmp em memoria (o /tmp sem execucao),
 # 2 GB de /dev/shm e o /storage numa pasta do disco, do usuario 1000 da imagem.

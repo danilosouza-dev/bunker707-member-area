@@ -115,6 +115,21 @@ recordings="${GRAVACOES:-gravador|-r 30|$pulse|$gravador_path|;imagem|-r 30|$pul
 
 record() {  # record <nome> <opcoes da entrada da tela> <entrada do audio> <variaveis> <opcoes a mais da saida>
     local name="$1" vin="$2" ain="$3" vars="$4" more="$5" aenc=()
+    # JIBRI: o capturador de verdade do Jibri (captura/Captura.java), com o ffmpeg de JIBRI_FF, parado por SIGINT como na live.
+    if [ "$vin" = "JIBRI" ]; then
+        local dir="$out/$name" bin="${vars#JIBRI_FF=}"
+        mkdir -p "$dir"
+        java -cp /opt/jitsi/jibri/jibri.jar:/captura -Dconfig.file=/run/jibri/config/jibri.conf \
+            -Djava.util.logging.config.file=/bancada/captura/logging.properties -Djava.io.tmpdir=/run/jibri/tmp \
+            "-Djibri.ffmpeg.ffmpeg-binary=$bin" Captura "$dir" "$seconds" > "$out/$name.log" 2>&1
+        echo "  capturador: $(grep -h -E 'Starting ffmpeg with|transitioning|exited with|Timed out|forcibly|CAPTURA|Exception' "$out/$name.log" | cut -c1-900 | head -n 14)"
+        echo "  quantas vezes o Jibri ficou 2 s sem ler nada do ffmpeg: $(grep -c "hasn't written" "$out/$name.log")"
+        echo "  o que o Jibri leu do ffmpeg:"
+        grep -h . "$out"/ffmpeg-jibri.*.txt 2>/dev/null | sed 's/^/    /' | cut -c1-220 | { head -n 34; echo "    ..."; tail -n 6; }
+        rm -f "$out"/ffmpeg-jibri.*
+        mv "$(find "$dir" -name '*.mp4' | head -n1)" "$out/$name.mp4"
+        return
+    fi
     [ -n "$ain" ] && aenc=(-acodec aac -strict -2 -ar 44100 -b:a 128k -af aresample=async=1)
     # -nostdin: dentro do laco o ffmpeg leria a lista das gravacoes como se fossem teclas.
     # shellcheck disable=SC2086

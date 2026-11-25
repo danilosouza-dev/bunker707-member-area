@@ -138,6 +138,16 @@ jobs:
             minimo: ""
             segundos: "120"
             gravacoes: "gravador|-r 30|-f pulse -thread_queue_size 4096 -i default|PATH=/usr/local/bin:/usr/bin:/bin|;gravador-alinhado|-r 30|-isync 0 -f pulse -thread_queue_size 4096 -i default|PATH=/usr/local/bin:/usr/bin:/bin|"
+          # O capturador de verdade do Jibri, com o ffmpeg da gravacao e com o da imagem: se o Jibri reconhece que esta gravando
+          # (sem isso o Jicofo manda parar em 90 s) e o arquivo depois da parada por SIGINT.
+          - nome: nossa-1080-jibri
+            tela: nossa
+            tamanho: 1920x1080
+            extra: ""
+            pagina: av
+            minimo: ""
+            segundos: "40"
+            gravacoes: "jibri-61|JIBRI||JIBRI_FF=/usr/local/bin/ffmpeg|;jibri-71|JIBRI||JIBRI_FF=/usr/bin/ffmpeg|"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
