@@ -114,7 +114,8 @@ jobs:
             extra: ""
             pagina: arquivo
             minimo: "28"
-          # O palco da sala com a tela compartilhada: com o fundo desfocado do Jitsi e sem ele (docs/30 A65).
+          # O palco da sala com a tela compartilhada: com o fundo desfocado do Jitsi (o defeito, sem regua) e sem ele, como o
+          # gravador fica com o custom-interface_config.js (docs/30 D139).
           - nome: nossa-1080-sala
             tela: nossa
             tamanho: 1920x1080
@@ -126,7 +127,7 @@ jobs:
             tamanho: 1920x1080
             extra: ""
             pagina: sala-sem-fundo
-            minimo: ""
+            minimo: "28"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
