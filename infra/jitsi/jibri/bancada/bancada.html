@@ -1,0 +1,33 @@
+<!doctype html>
+<!-- A pagina da bancada do gravador (docs/30 A65): um video de taxa conhecida em tela cheia, como o palco da sala, e as
+     contas da propria pagina no titulo (o medir.sh as le pelo /json do Chrome): quantas voltas de desenho a pagina deu,
+     quantos quadros do video foram para a tela e quantos o Chrome diz que perdeu, por segundo, a cada 5 s. Sao medidas
+     de dentro da pagina: a que vale e a contagem no arquivo gravado. -->
+<meta charset="utf-8">
+<title>bancada iniciando</title>
+<style>
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  video { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; background: #000; }
+</style>
+<video id="v" src="fonte.webm" autoplay muted loop playsinline></video>
+<script>
+  (function () {
+    var v = document.getElementById('v');
+    var raf = 0, pintou = 0, inicio = performance.now(), antes = null;
+    function volta() { raf += 1; requestAnimationFrame(volta); }
+    function quadro() { pintou += 1; v.requestVideoFrameCallback(quadro); }
+    requestAnimationFrame(volta);
+    v.requestVideoFrameCallback(quadro);
+    setInterval(function () {
+      var dt = (performance.now() - inicio) / 1000;
+      var q = v.getVideoPlaybackQuality();
+      var perdeu = antes ? q.droppedVideoFrames - antes.droppedVideoFrames : 0;
+      var abriu = antes ? q.totalVideoFrames - antes.totalVideoFrames : 0;
+      antes = q;
+      document.title = 'bancada raf=' + (raf / dt).toFixed(1) + ' pintou=' + (pintou / dt).toFixed(1)
+        + ' abriu=' + (abriu / dt).toFixed(1) + ' perdeu=' + (perdeu / dt).toFixed(1)
+        + ' video=' + v.videoWidth + 'x' + v.videoHeight + ' janela=' + innerWidth + 'x' + innerHeight;
+      raf = 0; pintou = 0; inicio = performance.now();
+    }, 5000);
+  })();
+</script>
