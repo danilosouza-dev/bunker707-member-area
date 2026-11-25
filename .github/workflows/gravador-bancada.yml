@@ -82,6 +82,7 @@ jobs:
           SEGUNDOS: ${{ inputs.segundos }}
           PAGINA_MODO: ${{ inputs.pagina }}
           GRAVACOES: ${{ inputs.gravacoes }}
+          SAIDA_NO_CANO: "1"
         run: bash infra/jitsi/jibri/bancada/rodar.sh
 
   bancada:

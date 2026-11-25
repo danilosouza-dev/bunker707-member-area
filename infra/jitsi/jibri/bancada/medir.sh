@@ -122,7 +122,7 @@ record() {  # record <nome> <opcoes da entrada da tela> <entrada do audio> <vari
         java -cp /opt/jitsi/jibri/jibri.jar:/captura -Dconfig.file=/run/jibri/config/jibri.conf \
             -Djava.util.logging.config.file=/bancada/captura/logging.properties -Djava.io.tmpdir=/run/jibri/tmp \
             "-Djibri.ffmpeg.ffmpeg-binary=$bin" Captura "$dir" "$seconds" > "$out/$name.log" 2>&1
-        echo "  capturador: $(grep -h -E 'Starting ffmpeg with|transitioning|exited with|Timed out|forcibly|CAPTURA|Exception' "$out/$name.log" | cut -c1-900 | head -n 14)"
+        echo "  capturador: $(grep -h -E 'Starting ffmpeg with|transitioning|exited with|Timed out|forcibly|CAPTURA|PILHA|Exception' "$out/$name.log" | cut -c1-900 | head -n 14)"
         echo "  quantas vezes o Jibri ficou 2 s sem ler nada do ffmpeg: $(grep -c "hasn't written" "$out/$name.log")"
         echo "  o que o Jibri leu do ffmpeg:"
         grep -h . "$out"/ffmpeg-jibri.*.txt 2>/dev/null | sed 's/^/    /' | cut -c1-220 | { head -n 34; echo "    ..."; tail -n 6; }
@@ -145,6 +145,14 @@ av_offsets() {  # av_offsets <arquivo>
     "$FF" -nostdin -v info -i "$1" -vn -af "silencedetect=noise=-35dB:d=0.3" -f null - 2> "$out/bipes.txt"
     python3 "$here/desvio-av.py" "$out/claroes.txt" "$out/bipes.txt"
 }
+
+if [ -n "${SAIDA_NO_CANO:-}" ]; then
+    echo "==> O 6.1 e o 7.1 com a entrada aberta e a saida num cano, sem o Jibri: linhas e quadros que chegam em 8 s"
+    for bin in /usr/local/bin/ffmpeg /usr/bin/ffmpeg; do
+        { sleep 12; } | timeout -s INT 8 "$bin" -y -v info -f x11grab -draw_mouse 0 -r 30 -s "$res" -i :0.0+0,0 -f pulse -i default -c:v libx264 -preset ultrafast -t 30 -f mp4 "$out/cano.mp4" 2>&1 | tr '\r' '\n' > "$out/cano.txt"
+        echo "  $bin: $(wc -l < "$out/cano.txt") linhas, $(grep -c 'frame=' "$out/cano.txt") de andamento; exemplo: $(grep 'frame=' "$out/cano.txt" | head -n 2 | tail -n 1)"
+    done
+fi
 
 status=0
 while IFS='|' read -r name vin ain vars more; do

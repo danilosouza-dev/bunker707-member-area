@@ -35,7 +35,14 @@ public class Captura {
         Class<?> k = capturer.getClass();
         long t0 = System.currentTimeMillis();
         k.getMethod("start", Class.forName("org.jitsi.jibri.sink.Sink")).invoke(capturer, sink);
-        Thread.sleep(Long.parseLong(a[1]) * 1000);
+        Thread.sleep(10_000);
+        // Em que ponto esta cada linha de execucao do Jibri que le a saida do ffmpeg.
+        Thread.getAllStackTraces().forEach((t, stack) -> {
+            String where = "";
+            for (StackTraceElement e : stack) if (where.length() < 700) where += " < " + e.getClassName().replaceAll(".*\\.", "") + "." + e.getMethodName() + ":" + e.getLineNumber();
+            if (where.contains("Tee") || where.contains("Tail") || where.contains("JibriSubprocess") || where.contains("OutputParser")) System.err.println("PILHA " + t.getState() + where);
+        });
+        Thread.sleep(Long.parseLong(a[1]) * 1000 - 10_000);
         long t1 = System.currentTimeMillis();
         k.getMethod("stop").invoke(capturer);
         System.err.println("CAPTURA gravou_ms=" + (t1 - t0) + " parada_ms=" + (System.currentTimeMillis() - t1));

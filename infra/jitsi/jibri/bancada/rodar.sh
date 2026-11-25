@@ -76,5 +76,5 @@ docker exec "$name" sh -c 'pid=$(pgrep -f jibri.jar | head -n1); [ -n "$pid" ] |
 docker exec \
     -e DISPLAY=:0 -e HOME=/home/s6 -e JIBRI_RECORDING_RESOLUTION="$res" \
     -e FONTE_TAMANHO="${FONTE_TAMANHO:-1920x1080}" -e FONTE_FPS="${FONTE_FPS:-30}" -e SEGUNDOS="${SEGUNDOS:-20}" \
-    -e CHROMIUM_FLAGS_EXTRA="${CHROMIUM_FLAGS_EXTRA:-}" -e PAGINA_MODO="${PAGINA_MODO:-arquivo}" -e BANCADA_MINIMO="${BANCADA_MINIMO:-}" ${GRAVACOES:+-e GRAVACOES="$GRAVACOES"} \
+    -e CHROMIUM_FLAGS_EXTRA="${CHROMIUM_FLAGS_EXTRA:-}" -e PAGINA_MODO="${PAGINA_MODO:-arquivo}" -e BANCADA_MINIMO="${BANCADA_MINIMO:-}" ${GRAVACOES:+-e GRAVACOES="$GRAVACOES"} -e SAIDA_NO_CANO="${SAIDA_NO_CANO:-}" \
     "$name" bash /bancada/medir.sh
