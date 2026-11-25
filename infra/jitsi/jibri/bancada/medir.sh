@@ -61,27 +61,30 @@ screen_kept=$(ffmpeg -v info -f x11grab -draw_mouse 0 -framerate 60 -video_size 
 screen_fps=$(awk -v k="${screen_kept:-0}" 'BEGIN { printf "%.1f", k / 8 }')
 echo "  $screen_fps por segundo"
 
-# As gravacoes: cada uma e "nome|opcoes da entrada da tela|entrada do audio", separadas por ponto e virgula. A primeira e
-# o comando de gravacao do Jibri como a imagem o monta (reference.conf do Jibri com o audio do jibri.conf da imagem); as
-# outras mudam uma coisa so, para achar o que derruba as imagens do arquivo.
-recordings="${GRAVACOES:-jibri|-r 30|-f pulse -thread_queue_size 4096 -i default;sem-audio|-r 30|;pulse-fragmento|-r 30|-f pulse -fragment_size 1920 -thread_queue_size 4096 -i default;framerate|-framerate 30|-f pulse -thread_queue_size 4096 -i default}"
+# As gravacoes: cada uma e "nome|opcoes da entrada da tela|entrada do audio|variaveis de ambiente|opcoes a mais da
+# saida", separadas por ponto e virgula. A primeira e o comando de gravacao do Jibri como a imagem o monta (reference.conf
+# do Jibri com o audio do jibri.conf da imagem); as outras mudam uma coisa so, para achar o que derruba as imagens do
+# arquivo. Achado de 25/11/2026: com o ffmpeg 7.1 da imagem, a entrada de audio segura a captura da tela (4 imagens por
+# segundo com o audio, 30 sem ele).
+pulse="-f pulse -thread_queue_size 4096 -i default"
+recordings="${GRAVACOES:-jibri|-r 30|$pulse||;sem-audio|-r 30|||;latencia-30|-r 30|$pulse|PULSE_LATENCY_MSEC=30|;zerolatency|-r 30|$pulse||-tune zerolatency;latencia-30-zerolatency|-r 30|$pulse|PULSE_LATENCY_MSEC=30|-tune zerolatency}"
 
-record() {  # record <nome> <opcoes da entrada da tela> <entrada do audio>
-    local name="$1" vin="$2" ain="$3" aenc=()
+record() {  # record <nome> <opcoes da entrada da tela> <entrada do audio> <variaveis> <opcoes a mais da saida>
+    local name="$1" vin="$2" ain="$3" vars="$4" more="$5" aenc=()
     [ -n "$ain" ] && aenc=(-acodec aac -strict -2 -ar 44100 -b:a 128k -af aresample=async=1)
-    # shellcheck disable=SC2086
     # -nostdin: dentro do laco o ffmpeg leria a lista das gravacoes como se fossem teclas.
-    ffmpeg -nostdin -y -v info -f x11grab -draw_mouse 0 $vin -s "$res" -thread_queue_size 4096 -i :0.0+0,0 $ain \
-        "${aenc[@]}" -c:v libx264 -pix_fmt yuv420p -r 30 -crf 25 -preset ultrafast -profile:v main -level 3.1 \
+    # shellcheck disable=SC2086
+    env $vars ffmpeg -nostdin -y -v info -f x11grab -draw_mouse 0 $vin -s "$res" -thread_queue_size 4096 -i :0.0+0,0 $ain \
+        "${aenc[@]}" -c:v libx264 -pix_fmt yuv420p -r 30 -crf 25 -preset ultrafast -profile:v main -level 3.1 $more \
         -t "$seconds" -f mp4 "$out/$name.mp4" > "$out/$name.log" 2>&1
 }
 
 status=0
-while IFS='|' read -r name vin ain; do
+while IFS='|' read -r name vin ain vars more; do
     [ -n "$name" ] || continue
-    echo "==> Gravando $seconds s: $name (tela: ${vin:-padrao}; audio: ${ain:-sem audio})"
+    echo "==> Gravando $seconds s: $name (tela: ${vin:-padrao}; audio: ${ain:-sem audio}${vars:+; ambiente: $vars}${more:+; saida: $more})"
     read -r cpu_a idle_a <<< "$(cpu_total)"
-    if ! record "$name" "$vin" "$ain"; then
+    if ! record "$name" "$vin" "$ain" "$vars" "$more"; then
         echo "ERRO: a gravacao $name falhou"; tail -n 8 "$out/$name.log"; status=1; continue
     fi
     read -r cpu_b idle_b <<< "$(cpu_total)"
@@ -89,11 +92,12 @@ while IFS='|' read -r name vin ain; do
     echo "  ffmpeg: $(tr '\r' '\n' < "$out/$name.log" | grep 'frame=' | tail -n1 | tr -s ' ')"
     total=$(ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -of csv=p=0 "$out/$name.mp4" 2>/dev/null | head -n1)
     duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$out/$name.mp4" 2>/dev/null | head -n1)
+    audio_s=$(ffprobe -v error -select_streams a:0 -show_entries stream=duration -of csv=p=0 "$out/$name.mp4" 2>/dev/null | head -n1)
     kept=$(ffmpeg -nostdin -v info -i "$out/$name.mp4" -vf mpdecimate -an -f null - 2>&1 | tr '\r' '\n' | grep -o 'frame= *[0-9]*' | tail -n1 | grep -o '[0-9]*$')
     # Os parenteses em volta da conta: no awk, um > solto depois de printf manda a saida para um arquivo.
     unique=$(awk -v k="${kept:-0}" -v d="${duration:-0}" 'BEGIN { printf "%.1f", (d > 0 ? k / d : 0) }')
     cpu=$(awk -v a="$cpu_a" -v b="$cpu_b" -v ia="$idle_a" -v ib="$idle_b" 'BEGIN { d = b - a; printf "%d", (d > 0 ? (1 - (ib - ia) / d) * 100 : 0) }')
-    echo "RESULTADO gravacao=$name arquivo_imagens_por_s=$unique tela_imagens_por_s=$screen_fps tela=${screen_hz:-?}Hz pagina=$mode tamanho=$res fonte=${src_size}@${src_fps} extra=[${extra}] quadros_do_arquivo=${total:-?} duracao=${duration:-?}s cpu=${cpu}% nucleos=$(nproc) | $page_now"
+    echo "RESULTADO gravacao=$name arquivo_imagens_por_s=$unique tela_imagens_por_s=$screen_fps tela=${screen_hz:-?}Hz pagina=$mode tamanho=$res fonte=${src_size}@${src_fps} extra=[${extra}] quadros_do_arquivo=${total:-?} duracao=${duration:-?}s audio=${audio_s:-sem}s cpu=${cpu}% nucleos=$(nproc) | $page_now"
 done <<< "$(printf '%s' "$recordings" | tr ';' '\n')"
 echo "  as linhas de execucao que mais usaram CPU: $(ps -eLo pcpu,comm --sort=-pcpu 2>/dev/null | sed -n '2,9p' | tr -s ' ' | tr '\n' ';')"
 exit "$status"

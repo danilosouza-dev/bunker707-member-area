@@ -47,7 +47,7 @@ on:
         default: arquivo
         options: [arquivo, stream]
       gravacoes:
-        description: "Variacoes do comando de gravacao: nome|entrada da tela|entrada do audio; ... (vazio = as do medir.sh)"
+        description: "Variacoes do comando de gravacao: nome|entrada da tela|entrada do audio|variaveis|opcoes da saida; ... (vazio = as do medir.sh)"
         type: string
         default: ""
 
