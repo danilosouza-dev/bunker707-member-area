@@ -46,6 +46,10 @@ on:
         type: choice
         default: arquivo
         options: [arquivo, stream]
+      gravacoes:
+        description: "Variacoes do comando de gravacao: nome|entrada da tela|entrada do audio; ... (vazio = as do medir.sh)"
+        type: string
+        default: ""
 
 permissions: {}
 
@@ -75,6 +79,7 @@ jobs:
           FONTE_TAMANHO: ${{ inputs.fonte }}
           SEGUNDOS: ${{ inputs.segundos }}
           PAGINA_MODO: ${{ inputs.pagina }}
+          GRAVACOES: ${{ inputs.gravacoes }}
         run: bash infra/jitsi/jibri/bancada/rodar.sh
 
   bancada:
@@ -104,17 +109,6 @@ jobs:
             tamanho: 1280x720
             extra: ""
             pagina: arquivo
-          - nome: nossa-1080-sem-gpu
-            tela: nossa
-            tamanho: 1920x1080
-            extra: "--disable-gpu"
-            pagina: arquivo
-          # O video entregue por um MediaStream, o caminho do video que chega pela rede na sala.
-          - nome: nossa-1080-stream
-            tela: nossa
-            tamanho: 1920x1080
-            extra: ""
-            pagina: stream
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
