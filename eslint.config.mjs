@@ -15,6 +15,8 @@ const eslintConfig = defineConfig([
     ".claude/**",
     // Infraestrutura (compose, Caddy, Edge Functions do Deno vendidas do Supabase): nao e codigo do app.
     "infra/**",
+    // O aplicativo do Mac (Electron, CommonJS): fora do app Next.
+    "services/live-mac/**",
     ".codex/**",
     ".codex-backups/**",
     ".gemini-scratch/**",
