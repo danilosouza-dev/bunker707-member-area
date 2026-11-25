@@ -176,6 +176,8 @@ up() {
     rsh "$target" "docker info >/dev/null 2>&1" \
         || die "O Docker do $name nao responde para o $DEPLOY_USER (grupo docker?). Para investigar, rode de novo com MANTER_SE_FALHAR=1 e veja exec-jibri com 'id; sudo tail -n 30 /var/log/cloud-init-output.log'."
     rcopy "$JITSI_DIR/jibri/docker-compose.yml" "$target:$JIBRI_REMOTE_DIR/docker-compose.yml"
+    # A tela virtual a 60 Hz (docs/30 D137), montada pelo compose: precisa estar na maquina antes do `up -d`.
+    rcopy "$JITSI_DIR/jibri/xorg-video-dummy.conf" "$target:$JIBRI_REMOTE_DIR/xorg-video-dummy.conf"
     rcopy "$JITSI_DIR/jibri/finalize.sh" "$target:$JIBRI_REMOTE_DIR/finalize.sh"
     rcopy "$JITSI_DIR/scripts/jibri-status.sh" "$target:$JIBRI_REMOTE_DIR/jibri-status.sh"
     rcopy "$JITSI_DIR/jibri/cpu-amostras.sh" "$target:$JIBRI_REMOTE_DIR/cpu-amostras.sh"
@@ -235,6 +237,9 @@ up() {
     # Daqui em diante o gravador esta pronto: uma falha (o aviso ao app) nao apaga mais a maquina.
     JIBRI_HEALTHY=1
     echo "  saude: $(printf '%s' "$out" | tr -d '\n' | cut -c1-140)"
+    # A tela virtual (docs/30 D137): o modo que o Xorg registrou para o tamanho da gravacao; o numero depois do x e a taxa
+    # em Hz (60 com o nosso xorg-video-dummy.conf; 10 era o defeito de 24/11/2026). So informa, nunca para o preparo.
+    echo "  tela virtual: $(rsh "$target" "grep -h -o 'Modeline \"${resolution}\"x[0-9.]*' '$JIBRI_REMOTE_DIR/volumes/storage/jibri/logs/xorg.log' 2>/dev/null | sort -u | tr '\n' ' '" 2>/dev/null || true)"
 
     log "6/6 Avisando o app (state=ready)"
     local code; code=$(recorder_request POST "" "{\"sessionId\":\"$SESSAO\",\"state\":\"ready\"}")
