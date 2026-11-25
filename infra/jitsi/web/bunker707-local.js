@@ -2,7 +2,8 @@
  * Bunker707: a gravacao no computador de quem apresenta (docs/30 D141). Carregado pelo custom-config.js (stable-11248) so
  * no iframe do nosso app; so faz alguma coisa no iframe de quem modera, e nunca no gravador. Grava direto da camera, da
  * tela compartilhada e do microfone deste navegador, antes de a imagem ser comprimida para a sala e passar pela internet:
- * - o video: so a camera; ou a tela inteira com a camera num canto (bunker707-local-worker.js, papel "compor");
+ * - o video: a camera; ou a tela a esquerda e as cameras numa coluna a direita, nunca por cima, com quem mais estiver de
+ *   camera ligada (bunker707-local-worker.js, papel "compor");
  * - o audio: o microfone (com o tratamento que a sala ja pediu; mudo na sala e mudo aqui) e as vozes que chegam da sala;
  * - o arquivo: MP4 (H.264) quando o navegador sabe, senao WebM, escrito no disco a cada 2 s (papel "gravar"). Sem a pasta
  *   privada do navegador, os pedacos ficam na memoria, com o aviso. Uma gravacao que ficou de uma aba fechada aparece
@@ -22,9 +23,9 @@
     try { framed = Boolean(window.parent && window.parent !== window); } catch (e) { framed = true; }
     if (!framed || !window.MediaRecorder || !window.MediaStreamTrackProcessor || !window.MediaStreamTrackGenerator || !window.Worker) { return; }
 
-    var WORKER = '/libs/bunker707-local-worker.js?v=24c92e3d';
+    var WORKER = '/libs/bunker707-local-worker.js?v=43341991';
     var PREFIX = 'gravacao-local-';
-    var TYPES = ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1.4d0028,mp4a.40.2', 'video/webm;codecs=h264,opus', 'video/webm;codecs=vp8,opus'];
+    var TYPES = ['video/mp4;codecs=avc1.64002a,mp4a.40.2', 'video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1.4d0028,mp4a.40.2', 'video/webm;codecs=h264,opus', 'video/webm;codecs=vp8,opus'];
     var rec = null;
     var panel = null;
     var ui = {};
@@ -99,6 +100,28 @@
         r.composer.postMessage({ papel: 'faixa', qual: kind, readable: readable }, [readable]);
     }
 
+    /** A camera de quem mais estiver no ar (no maximo 5), com o nome que a sala mostra. */
+    function syncPeople(r, conf) {
+        var list = [];
+        var all = call(conf, 'getParticipants') || [];
+
+        for (var i = 0; i < all.length && list.length < 5; i += 1) {
+            var tracks = call(all[i], 'isHidden') === true ? [] : call(all[i], 'getTracks') || [];
+
+            for (var j = 0; j < tracks.length; j += 1) {
+                if (call(tracks[j], 'getType') !== 'video' || call(tracks[j], 'getVideoType') === 'desktop' || call(tracks[j], 'isMuted') === true) { continue; }
+                var media = call(tracks[j], 'getTrack');
+
+                if (media && media.readyState === 'live') { list.push({ id: 'p' + call(all[i], 'getId'), media: media, name: String(call(all[i], 'getDisplayName') || '') }); break; }
+            }
+        }
+        Object.keys(r.video).forEach(function (id) { if (id.charAt(0) === 'p' && !list.some(function (p) { return p.id === id; })) { setVideo(r, id, null); delete r.video[id]; } });
+        list.forEach(function (p) { setVideo(r, p.id, p.media); });
+        var key = JSON.stringify(list.map(function (p) { return [p.id, p.name]; }));
+
+        if (key !== r.people) { r.people = key; r.composer.postMessage({ papel: 'pessoas', pessoas: list.map(function (p) { return { id: p.id, name: p.name }; }) }); }
+    }
+
     function syncAudio(r, conf) {
         var mic = localTrack(conf, 'mic');
         var want = (mic ? [mic] : []).concat(remoteAudio(conf));
@@ -137,6 +160,7 @@
         try {
             setVideo(rec, 'camera', localTrack(conf, 'camera'));
             setVideo(rec, 'tela', localTrack(conf, 'tela'));
+            syncPeople(rec, conf);
             syncAudio(rec, conf);
         } catch (e) { rec.notes.push('erro: ' + (e && e.name)); }
     }
