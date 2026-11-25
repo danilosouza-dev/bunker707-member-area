@@ -36,7 +36,13 @@ chmod 777 "$ffdir"
 echo "==> Compilando o ffmpeg da gravacao do codigo oficial"
 bash "$jibri_dir/ffmpeg-gravacao.sh" "$ffdir" 2>&1 | tail -n 2
 [ -x "$ffdir/ffmpeg" ] || { echo "ERRO: o ffmpeg da gravacao nao compilou"; tail -n 30 "$ffdir/make.log" 2>/dev/null; exit 1; }
-mounts+=(-v "$ffdir/ffmpeg:/usr/local/bin/ffmpeg:ro" -v "$jibri_dir/custom-jibri.conf:/config/custom-jibri.conf:ro")
+mounts+=(-v "$ffdir/ffmpeg:/usr/local/bin/ffmpeg:ro" -v "$jibri_dir/custom-jibri.conf:/config/custom-jibri.conf:ro" -v "$jibri_dir/ffmpeg-jibri.sh:/usr/local/bin/ffmpeg-jibri:ro")
+
+# O capturador de verdade do Jibri (captura/Captura.java), compilado com o Java da maquina.
+capdir=$(mktemp -d)
+chmod 755 "$capdir"
+javac --release 11 -d "$capdir" "$here/captura/Captura.java"
+mounts+=(-v "$capdir:/captura:ro")
 
 trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
 # As mesmas opcoes do docker-compose.yml do gravador: raiz so de leitura, /run e /tmp em memoria (o /tmp sem execucao),
@@ -61,11 +67,14 @@ done
 docker exec "$name" test -S /tmp/.X11-unix/X0 || { echo "ERRO: o Xorg do container nao subiu"; docker logs --tail 40 "$name"; exit 1; }
 sleep 5
 
+# As chaves do comando de gravacao no reference.conf do Jibri que a imagem traz: o que o custom-jibri.conf pode mudar.
+docker exec "$name" sh -c 'unzip -p /opt/jitsi/jibri/jibri.jar reference.conf 2>/dev/null | grep -n -E "ffmpeg-binary|input-linux|audio-params|video-params|command-linux-recording|audio-source|audio-device|queue-size" | cut -c1-170 | sed "s/^/  jibri: /"' || true
+
 # O ffmpeg que o Jibri do container acha pelo PATH dele (o da gravacao tem de vir antes do da imagem).
 docker exec "$name" sh -c 'pid=$(pgrep -f jibri.jar | head -n1); [ -n "$pid" ] || exit 0; p=$(tr "\0" "\n" < "/proc/$pid/environ" | sed -n "s/^PATH=//p"); echo "  PATH do Jibri: $p"; echo "  o ffmpeg que o Jibri acha: $(PATH="$p" command -v ffmpeg) ($(PATH="$p" ffmpeg -version 2>/dev/null | head -n1 | cut -d" " -f1-3))"' || true
 
 docker exec \
     -e DISPLAY=:0 -e HOME=/home/s6 -e JIBRI_RECORDING_RESOLUTION="$res" \
     -e FONTE_TAMANHO="${FONTE_TAMANHO:-1920x1080}" -e FONTE_FPS="${FONTE_FPS:-30}" -e SEGUNDOS="${SEGUNDOS:-20}" \
-    -e CHROMIUM_FLAGS_EXTRA="${CHROMIUM_FLAGS_EXTRA:-}" -e PAGINA_MODO="${PAGINA_MODO:-arquivo}" -e BANCADA_MINIMO="${BANCADA_MINIMO:-}" ${GRAVACOES:+-e GRAVACOES="$GRAVACOES"} \
+    -e CHROMIUM_FLAGS_EXTRA="${CHROMIUM_FLAGS_EXTRA:-}" -e PAGINA_MODO="${PAGINA_MODO:-arquivo}" -e BANCADA_MINIMO="${BANCADA_MINIMO:-}" ${GRAVACOES:+-e GRAVACOES="$GRAVACOES"} -e SAIDA_NO_CANO="${SAIDA_NO_CANO:-}" \
     "$name" bash /bancada/medir.sh

@@ -62,6 +62,9 @@ export function DropdownMenuItem({ children, disabled }) { return createElement(
   // O replay que vira aula (13/11/2026, docs/30 §6.8): o Publicar replay do menu, os modulos do produto e o cartao do console.
   "@/server/webinars/replay-lesson-actions": `const fail = async () => ({ error: "Falhou.", ok: false, status: 500 });
 export const publishWebinarReplay = fail; export const listReplayLessonModules = async () => ({ data: { modules: [] }, ok: true }); export const getReplayLessonSetup = fail; export const saveReplayLessonTarget = fail;`,
+  // A gravacao neste computador (docs/30 D142).
+  "@/server/webinars/local-recording-actions": `${fail}
+export const prepareLocalUpload = fail; export const finishLocalUpload = fail;`,
   "@/server/webinars/live-actions": `${fail}
 export const openLiveRoom = fail; export const startLiveSession = fail; export const endLiveSession = fail; export const setRoomLock = fail; export const prepareRecorder = fail; export const releaseRecorder = fail; export const requestRecording = fail; export const markRecordingAnchor = fail; export const muteInChat = fail; export const kickFromSession = fail; export const undoSessionBan = fail; export const banStudent = fail; export const unbanStudent = fail; export const attachRecording = fail; export const alignChat = fail; export const setBrowserRecording = fail; export const setSelfUnmute = fail;`,
   // As pessoas que comentam (11/11/2026, D75): a lista do Roteiro grava pela propria Server Action.

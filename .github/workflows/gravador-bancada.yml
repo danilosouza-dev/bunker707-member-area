@@ -17,6 +17,7 @@ on:
       - infra/jitsi/jibri/xorg-video-dummy.conf
       - infra/jitsi/jibri/ffmpeg-gravacao.sh
       - infra/jitsi/jibri/custom-jibri.conf
+      - infra/jitsi/jibri/ffmpeg-jibri.sh
   # Uma variacao avulsa, sem commit: a tela, o tamanho e os parametros a mais do Chrome.
   workflow_dispatch:
     inputs:
@@ -47,7 +48,7 @@ on:
         description: "arquivo (o video direto), stream (por MediaStream), sala (o palco com a tela compartilhada e o fundo desfocado do Jitsi) ou sala-sem-fundo"
         type: choice
         default: arquivo
-        options: [arquivo, stream, sala, sala-sem-fundo]
+        options: [arquivo, stream, sala, sala-sem-fundo, av]
       gravacoes:
         description: "Variacoes do comando de gravacao: nome|entrada da tela|entrada do audio|variaveis|opcoes da saida; ... (vazio = as do medir.sh)"
         type: string
@@ -82,6 +83,7 @@ jobs:
           SEGUNDOS: ${{ inputs.segundos }}
           PAGINA_MODO: ${{ inputs.pagina }}
           GRAVACOES: ${{ inputs.gravacoes }}
+          SAIDA_NO_CANO: "1"
         run: bash infra/jitsi/jibri/bancada/rodar.sh
 
   bancada:
@@ -128,6 +130,26 @@ jobs:
             extra: ""
             pagina: sala-sem-fundo
             minimo: "28"
+          # Com som, 2 minutos (docs/30 A65): se a gravacao e cortada e o desvio entre o audio e a imagem, com o comando do
+          # Jibri e com o audio alinhado pela tela (-isync 0).
+          - nome: nossa-1080-som
+            tela: nossa
+            tamanho: 1920x1080
+            extra: ""
+            pagina: av
+            minimo: ""
+            segundos: "120"
+            gravacoes: "gravador|-r 30|-f pulse -thread_queue_size 4096 -i default|PATH=/usr/local/bin:/usr/bin:/bin|;gravador-alinhado|-r 30|-isync 0 -f pulse -thread_queue_size 4096 -i default|PATH=/usr/local/bin:/usr/bin:/bin|"
+          # O capturador de verdade do Jibri, com o ffmpeg da gravacao e com o da imagem: se o Jibri reconhece que esta gravando
+          # (sem isso o Jicofo manda parar em 90 s) e o arquivo depois da parada por SIGINT.
+          - nome: nossa-1080-jibri
+            tela: nossa
+            tamanho: 1920x1080
+            extra: ""
+            pagina: av
+            minimo: ""
+            segundos: "120"
+            gravacoes: "jibri-gravador|JIBRI|||;jibri-sem-espera|JIBRI||JIBRI_FF=/bancada/captura/direto-61.sh|;jibri-71|JIBRI||JIBRI_FF=/usr/bin/ffmpeg|"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -140,4 +162,6 @@ jobs:
           CHROMIUM_FLAGS_EXTRA: ${{ matrix.extra }}
           PAGINA_MODO: ${{ matrix.pagina }}
           BANCADA_MINIMO: ${{ matrix.minimo }}
+          GRAVACOES: ${{ matrix.gravacoes }}
+          SEGUNDOS: ${{ matrix.segundos }}
         run: bash infra/jitsi/jibri/bancada/rodar.sh

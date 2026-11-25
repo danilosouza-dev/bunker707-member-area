@@ -177,6 +177,42 @@ export async function publishReplayLesson(
 }
 
 /**
+ * A aula do replay que ainda toca o video de uma gravacao do gravador passa a tocar o da gravacao do computador (docs/30
+ * D142). Com outro video na aula (a equipe trocou), nada muda. Devolve se trocou.
+ */
+export async function swapReplayLessonVideo(db: WebinarsDb, input: { from: readonly RecordingRow[]; to: RecordingRow; webinarId: string }): Promise<boolean> {
+  const video = replayLessonVideo(input.to);
+  const old = input.from.map((row) => row.bunny_video_id).filter((id): id is string => Boolean(id));
+
+  if (!video || old.length === 0) {
+    return false;
+  }
+
+  const lessonId = replayLessonIdFor(input.webinarId);
+  const { data, error } = await db.from("lessons").select("id,status,video_config").eq("id", lessonId).maybeSingle();
+  assertNoDbError(error, "Webinarios: ler o video da aula do replay");
+  const lesson = (data ?? null) as { id: string; status: string; video_config: unknown } | null;
+  const current = JSON.stringify(lesson?.video_config ?? null);
+
+  if (!lesson || lesson.status === "deleted" || !old.some((id) => current.includes(id))) {
+    return false;
+  }
+
+  const { error: updateError } = await db.from("lessons").update({ duration: replayLessonDuration(input.to.duration_seconds), video_config: video }).eq("id", lessonId);
+  assertNoDbError(updateError, "Webinarios: trocar o video da aula do replay");
+  await recordAudit(db, {
+    action: "webinar.replay_lesson_video_swapped",
+    actorId: null,
+    entityId: input.webinarId,
+    entityType: "webinar",
+    metadata: { lesson_id: lessonId, recording_id: input.to.id }
+  });
+  invalidateCatalog({ from: "route" });
+
+  return true;
+}
+
+/**
  * O automatico: chamado quando o replay do webinario acaba de nascer. Nunca lanca (o fim da live, o Enviar gravação e
  * o tick das gravacoes nao podem falhar por causa da aula): a falha vira log e a equipe usa o botao Publicar replay.
  */

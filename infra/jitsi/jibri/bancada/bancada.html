@@ -34,6 +34,12 @@
       fonte.setAttribute('style', 'position:fixed;left:-4000px;top:0;width:1920px;height:1080px');
       document.body.appendChild(fonte);
       fonte.play().then(function () { v.srcObject = fonte.captureStream(); return v.play(); }).catch(function (e) { document.title = 'bancada erro ' + e; });
+    } else if (/[?&]modo=av\b/.test(location.search)) {
+      // ?modo=av: o video com som (um clarao e um bipe a cada segundo, juntos), para medir no arquivo gravado o desvio
+      // entre o audio e a imagem e se a gravacao e cortada. O som sai pelo pulse do container, como o da sala.
+      v.muted = false;
+      v.volume = 1;
+      v.src = 'fonte.webm';
     } else if (/[?&]modo=sala(-sem-fundo)?\b/.test(location.search)) {
       document.body.className = /modo=sala-sem-fundo/.test(location.search) ? 'sala sem-fundo' : 'sala';
       v.src = 'fonte.webm';

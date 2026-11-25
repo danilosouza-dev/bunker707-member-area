@@ -308,7 +308,7 @@ test("custom-config.js e custom-interface_config.js, avaliados como o navegador 
   const generated = "config.toolbarButtons = ['microphone', 'desktop', 'recording'];\n";
   assert.match(toolbarCheck(`${generated}${customConfig}`), /cfg_ok=1/, "a nossa barra minima no fim passa");
   assert.match(toolbarCheck(generated), /FALHA config\.js barra padrao com 'desktop'/, "a barra do host no config.js servido falha");
-  // Os dois arquivos so atribuem: nada de fetch, script ou acesso a window. As unicas excecoes sao os tres carregadores
+  // Os dois arquivos so atribuem: nada de fetch, script ou acesso a window. As unicas excecoes sao os quatro carregadores
   // nossos, cada um entre as suas marcas (uma vez so): o do CSS (docs/31 §3), que so le o hash e cria um <link> para um
   // caminho desta origem, o dos participantes simulados (docs/30 D120) e o do modo da gravacao (docs/30 D125), que so
   // leem o hash e criam a tag de script para um caminho desta origem.
@@ -321,12 +321,20 @@ test("custom-config.js e custom-interface_config.js, avaliados como o navegador 
   assert.equal(customConfig.split("bunker707:gravacao-loader:inicio").length, 2, "uma marca de inicio so no carregador do modo da gravacao");
   const recordingLoader = /\/\/ bunker707:gravacao-loader:inicio\n([\s\S]*?)\/\/ bunker707:gravacao-loader:fim\n/.exec(customConfig);
   assert.ok(recordingLoader, "o carregador do modo da gravacao fica entre as marcas bunker707:gravacao-loader");
+  assert.equal(customConfig.split("bunker707:local-loader:inicio").length, 2, "uma marca de inicio so no carregador da gravacao no computador");
+  const localLoader = /\/\/ bunker707:local-loader:inicio\n([\s\S]*?)\/\/ bunker707:local-loader:fim\n/.exec(customConfig);
+  assert.ok(localLoader, "o carregador da gravacao no computador fica entre as marcas bunker707:local-loader");
+  assert.doesNotMatch(
+    localLoader[1],
+    /\b(fetch|XMLHttpRequest|import|require|eval|innerHTML|WebSocket|EventSource|sendBeacon|navigator|Function|setTimeout|setInterval|postMessage|localStorage)\b|location\.(href|replace|assign)|https?:|wss?:|['"]\/\//,
+    "o carregador da gravacao no computador so liga o arquivo, desta origem"
+  );
   // O custom-interface_config.js so le o endereco da pagina, e so no trecho do fundo do palco no gravador (D139), entre as
   // marcas; o resto dos dois arquivos nao le nada.
   assert.equal(customInterface.split("bunker707:gravador-fundo:inicio").length, 2, "uma marca de inicio so no trecho do fundo do palco");
   const stageBackground = /\/\/ bunker707:gravador-fundo:inicio\n([\s\S]*?)\/\/ bunker707:gravador-fundo:fim\n/.exec(customInterface);
   assert.ok(stageBackground, "o trecho do fundo do palco fica entre as marcas bunker707:gravador-fundo");
-  for (const source of [customConfig.replace(loader[0], "").replace(audienceLoader[0], "").replace(recordingLoader[0], ""), customInterface.replace(stageBackground[0], "")]) assert.doesNotMatch(source, /\b(fetch|XMLHttpRequest|document|window|location|import|require)\b/);
+  for (const source of [customConfig.replace(loader[0], "").replace(audienceLoader[0], "").replace(recordingLoader[0], "").replace(localLoader[0], ""), customInterface.replace(stageBackground[0], "")]) assert.doesNotMatch(source, /\b(fetch|XMLHttpRequest|document|window|location|import|require)\b/);
   assert.doesNotMatch(
     stageBackground[1],
     /\b(fetch|XMLHttpRequest|document|window|import|require|eval|innerHTML|src|WebSocket|EventSource|sendBeacon|navigator|Function|setTimeout|setInterval|postMessage|localStorage)\b|location\.(href|replace|assign)|https?:|wss?:/,

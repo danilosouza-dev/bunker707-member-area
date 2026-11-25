@@ -6,6 +6,7 @@ import { z } from "zod";
 
 export const LIVE_MESSAGES = {
   invalid: "Pedido inválido.",
+  localFile: "Arquivo de gravação inválido.",
   reason: "O motivo pode ter até 200 caracteres.",
   session: "Sessão inválida.",
   tooManyEvents: "No máximo 20 sinais por lote."
@@ -114,6 +115,25 @@ export const attachRecordingSchema = z
       context.addIssue({ code: "custom", message: "Cole o endereço do player ou informe biblioteca e vídeo.", path: ["embedUrl"] });
     }
   });
+
+/** O nome do arquivo da gravacao no computador: o prefixo, a sessao e a hora (o do navegador de quem apresenta). */
+const localFileSchema = z.string().regex(/^gravacao-local-[0-9a-f-]{36}-\d{4}-\d{2}-\d{2}-\d{6}\.(mp4|webm)$/, { error: LIVE_MESSAGES.localFile });
+
+/** O pedido do envio da gravacao no computador para a Bunny (docs/30 D142); 60 GB cobre 16 h a 8 Mbps. */
+export const prepareLocalUploadSchema = z
+  .object({
+    durationSeconds: z.number().int().min(1).max(86_400),
+    fileName: localFileSchema,
+    /** A retomada nao achou mais o envio na Bunny: pede um video novo. */
+    fresh: z.boolean().optional(),
+    sessionId: sessionIdSchema,
+    sizeBytes: z.number().int().min(1).max(60_000_000_000),
+    /** Quando o arquivo comecou, pelo relogio do servidor que a pagina conhece (para alinhar o chat). */
+    startedAtMs: z.number().int().positive()
+  })
+  .refine((input) => input.fileName.includes(input.sessionId.toLowerCase()), { error: LIVE_MESSAGES.localFile, path: ["fileName"] });
+
+export const finishLocalUploadSchema = z.object({ fileName: localFileSchema, sessionId: sessionIdSchema });
 
 /** "Alinhar chat": o ajuste fino ± segundos da gravacao (nenhum offset de mensagem e reescrito). */
 export const alignChatSchema = z.object({

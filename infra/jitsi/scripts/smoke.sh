@@ -63,6 +63,12 @@ if [ "$served_sha" = "$plateia_sha" ]; then ok "libs/bunker707-plateia.js (conte
 check "libs/bunker707-gravacao.js (o modo da gravacao)" 200 "$public_url/libs/bunker707-gravacao.js"
 served_sha=$(curl -sS "${insecure[@]}" --max-time 20 "$public_url/libs/bunker707-gravacao.js?v=$gravacao_v" 2>/dev/null | sha256sum | cut -c1-64)
 if [ "$served_sha" = "$gravacao_sha" ]; then ok "libs/bunker707-gravacao.js (conteudo)" "sha256 $gravacao_v"; else falha "libs/bunker707-gravacao.js (conteudo)" "o servido nao e o do commit (esperado $gravacao_v, veio ${served_sha:0:8}): o web foi recriado?"; fi
+# A gravacao no computador de quem apresenta (docs/30 D141): os dois arquivos servidos sao os do commit.
+for local_name in bunker707-local.js bunker707-local-worker.js; do
+    local_sha=$(sha256sum "$(dirname -- "$0")/../web/$local_name" | cut -c1-64)
+    served_sha=$(curl -sS "${insecure[@]}" --max-time 20 "$public_url/libs/$local_name?v=${local_sha:0:8}" 2>/dev/null | sha256sum | cut -c1-64)
+    if [ "$served_sha" = "$local_sha" ]; then ok "libs/$local_name (conteudo)" "sha256 ${local_sha:0:8}"; else falha "libs/$local_name (conteudo)" "o servido nao e o do commit (esperado ${local_sha:0:8}, veio ${served_sha:0:8}): o web foi recriado?"; fi
+done
 # Sem o upgrade do websocket o prosody responde com texto ou 4xx; 502/503 seria o nginx sem chegar nele.
 check "websocket (caminho ate o prosody)" "200|400|404|426" "$public_url/xmpp-websocket"
 

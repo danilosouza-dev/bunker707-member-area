@@ -51,6 +51,8 @@ services:
       # captura da tela e o arquivo sai com 3 a 6 imagens por segundo. O ffprobe e o ffmpeg de /usr/bin continuam os da
       # imagem (o finalize.sh conta as imagens do arquivo com eles).
       - ./ffmpeg:/usr/local/bin/ffmpeg:ro
+      # O que o Jibri chama: espera 2 s e vira o ffmpeg acima (D140).
+      - ./ffmpeg-jibri.sh:/usr/local/bin/ffmpeg-jibri:ro
       - ./custom-jibri.conf:/config/custom-jibri.conf:ro
     environment:
       DISPLAY: ":0"

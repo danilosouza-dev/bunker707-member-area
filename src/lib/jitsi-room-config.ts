@@ -484,6 +484,80 @@ export function appliedRecordingModeOf(data: unknown): RecordingMode | null | un
   return mode === "sala" || mode === "tela" ? mode : mode === null ? null : undefined;
 }
 
+/**
+ * A gravacao no computador de quem apresenta, mandada pelo console (docs/30 D142): o console manda os pedidos ao iframe
+ * (LOCAL_RECORDING_MESSAGE, aceitos pelo infra/jitsi/web/bunker707-local.js so de quem montou o iframe) e recebe o estado
+ * e os pedacos do arquivo. O tipo e o mesmo do arquivo da instancia (a guarda confere).
+ */
+export const LOCAL_RECORDING_MESSAGE = "bunker707:gravacao-local";
+export type LocalRecordingRequest = "comecar" | "guardado" | "ola" | "parar" | "sem-disco";
+
+export function localRecordingMessage(pedido: LocalRecordingRequest, nome?: string): { nome?: string; pedido: LocalRecordingRequest; type: string } {
+  return nome === undefined ? { pedido, type: LOCAL_RECORDING_MESSAGE } : { nome, pedido, type: LOCAL_RECORDING_MESSAGE };
+}
+
+export type LocalRecordingFrameState = {
+  bytes: number;
+  /** O microfone em uso e o tratamento que o navegador aplicou, em texto; nulo com o microfone desligado. */
+  mic: string | null;
+  /** Quem esta no iframe modera e o navegador grava. */
+  ready: boolean;
+  recording: boolean;
+  fps: number | null;
+  lost: number;
+  seconds: number;
+};
+
+export type LocalRecordingFrameEvent =
+  | { kind: "chunk"; bytes: ArrayBuffer; name: string }
+  | { kind: "end"; name: string; report: string; seconds: number }
+  | { kind: "failed"; name: string | null; reason: string }
+  | { kind: "open"; name: string; type: string }
+  | { kind: "started"; name: string }
+  | { kind: "state"; state: LocalRecordingFrameState };
+
+const LOCAL_RECORDING_FRAME_NAME = /^gravacao-local-\d{4}-\d{2}-\d{2}-\d{6}\.(mp4|webm)$/;
+
+function countOf(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+/** O aviso do iframe sobre a gravacao no computador; undefined quando a mensagem nao e esse aviso (ou veio torta). */
+export function localRecordingEventOf(data: unknown): LocalRecordingFrameEvent | undefined {
+  if (!data || typeof data !== "object" || (data as { type?: unknown }).type !== LOCAL_RECORDING_MESSAGE) {
+    return undefined;
+  }
+  const raw = data as Record<string, unknown>;
+  const name = typeof raw.nome === "string" && LOCAL_RECORDING_FRAME_NAME.test(raw.nome) ? raw.nome : null;
+  switch (raw.tipo) {
+    case "estado":
+      return {
+        kind: "state",
+        state: {
+          bytes: countOf(raw.bytes),
+          fps: typeof raw.quadros === "number" && Number.isFinite(raw.quadros) ? raw.quadros : null,
+          lost: countOf(raw.perdidos),
+          mic: typeof raw.microfone === "string" ? raw.microfone.slice(0, 400) : null,
+          ready: raw.pode === true,
+          recording: raw.gravando === true,
+          seconds: countOf(raw.segundos)
+        }
+      };
+    case "abrir":
+      return name ? { kind: "open", name, type: typeof raw.formato === "string" ? raw.formato.slice(0, 80) : "" } : undefined;
+    case "comecou":
+      return name ? { kind: "started", name } : undefined;
+    case "pedaco":
+      return name && raw.bytes instanceof ArrayBuffer ? { bytes: raw.bytes, kind: "chunk", name } : undefined;
+    case "fim":
+      return name ? { kind: "end", name, report: typeof raw.relatorio === "string" ? raw.relatorio.slice(0, 20_000) : "", seconds: countOf(raw.segundos) } : undefined;
+    case "falhou":
+      return { kind: "failed", name, reason: typeof raw.motivo === "string" ? raw.motivo.slice(0, 200) : "" };
+    default:
+      return undefined;
+  }
+}
+
 /** Os nomes que POST .../room-events aceita (o mesmo ROOM_EVENT_NAMES de src/server/webinars/live-schemas.ts). */
 export type RoomEventSignal =
   | "audioMuteStatusChanged"
