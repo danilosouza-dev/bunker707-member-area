@@ -138,6 +138,65 @@ test("finalize.sh: a versao do ffmpeg que gravou sai do registro do Jibri, e as 
   } finally {
     rmSync(dir, { force: true, recursive: true });
   }
+  // O fim dos registros do Jibri e do ffmpeg (docs/30 A65): a maquina e apagada depois da live, e o motivo de uma
+  // gravacao que parou sozinha ia junto.
+  const logs = mkdtempSync(join(tmpdir(), "bunker707-registro-"));
+  try {
+    const andamento = Array.from({ length: 40 }, (_, i) => `2026-11-25 06:40:${String(i).padStart(2, "0")}.000 INFO: [60] ffmpeg.call() frame= ${i * 30} fps= 30 q=22.0 size=   ${i * 500}kB time=00:00:${String(i).padStart(2, "0")}.00 bitrate=4000.0kbits/s speed=0.93x`);
+    writeFileSync(
+      join(logs, "ffmpeg.0.txt"),
+      [
+        "2026-11-25 06:39:32.000 INFO: [60] ffmpeg.call() ffmpeg version 6.1.6 Copyright (c) 2000-2026 the FFmpeg developers",
+        "2026-11-25 06:39:33.000 INFO: [60] ffmpeg.call() Output #0, mp4, to '/storage/recordings/abc/w-6e0b699c-f66c-42fc-8b10-ae0706fc2af7-abcdefghijklmnop_2026-11-25-06-39-32.mp4':",
+        ...andamento,
+        "2026-11-25 06:41:00.000 INFO: [60] ffmpeg.call() [x11grab @ 0x55d0] Thread message queue blocking; consider raising the thread_queue_size option (current value: 4096)",
+        "2026-11-25 06:41:04.000 INFO: [60] ffmpeg.call() Exiting normally, received signal 2.",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(logs, "log.0.txt"),
+      [
+        "2026-11-25 06:39:19.000 INFO: [45] XmppApi.handleStartJibriIq#262: Received start request",
+        "2026-11-25 06:39:20.000 SEVERE: [45] JibriSelenium.joinCall: Error joining https://meet.exemplo.com.br/w-6e0b699c-f66c-42fc-8b10-ae0706fc2af7-abcdefghijklmnop?jwt=aaa.bbb.ccc",
+        "2026-11-25 06:39:21.000 FINE: [45] JibriSelenium.joinCall: login com password=segredo-do-gravador",
+        "2026-11-25 06:39:25.000 INFO: [45] JibriSelenium.joinCall: Joined call",
+        "2026-11-25 06:41:03.000 INFO: [70] JibriSelenium.run#742: Call status check EmptyCallStatusCheck: call is empty, stopping",
+        "2026-11-25 06:41:04.000 INFO: [70] FfmpegCapturer.stop: Stopping ffmpeg",
+        "",
+      ].join("\n"),
+    );
+    const registro = /\nregistro_json\(\) \{\n[\s\S]*?\nPY\n\}\n/.exec(finalize);
+    assert.ok(registro, "a funcao do registro fica no finalize.sh");
+    const run = (dir) => spawnSync("sh", ["-c", `set -u\n${registro[0]}\nregistro_json`], { encoding: "utf8", env: { ...process.env, FFMPEG_LOGS: dir } });
+    const out = run(logs);
+    assert.equal(out.status, 0, out.stderr);
+    const doc = JSON.parse(out.stdout);
+    assert.equal(doc.ffmpeg.length, 6, "as 4 linhas que nao sao andamento e as 2 ultimas de andamento");
+    assert.match(doc.ffmpeg[2], /Thread message queue blocking/);
+    assert.match(doc.ffmpeg[3], /Exiting normally, received signal 2\./);
+    assert.match(doc.ffmpeg[5], /frame= 1170 .* speed=0\.93x$/, "a ultima linha de andamento: a velocidade com que o ffmpeg acompanhou");
+    assert.deepEqual(doc.jibri.map((l) => l.replace(/^\S+ \S+ /, "")), [
+      "SEVERE: [45] JibriSelenium.joinCall: Error joining <endereco>",
+      "INFO: [70] JibriSelenium.run#742: Call status check EmptyCallStatusCheck: call is empty, stopping",
+      "INFO: [70] FfmpegCapturer.stop: Stopping ffmpeg",
+    ]);
+    const tudo = out.stdout;
+    assert.doesNotMatch(tudo, /meet\.exemplo|jwt=aaa|segredo-do-gravador|w-6e0b699c/, "nem endereco, nem token, nem senha, nem o nome da sala");
+    assert.match(tudo, /<sala>_2026-11-25-06-39-32\.mp4/, "o nome da sala some do nome do arquivo");
+
+    // Registro enorme: o conjunto fica dentro do limite, e fica o fim.
+    writeFileSync(join(logs, "log.0.txt"), Array.from({ length: 400 }, (_, i) => `linha ${i} error ${"x".repeat(300)}`).join("\n"));
+    const grande = run(logs);
+    assert.ok(grande.stdout.length <= 9100, `o conjunto ate 9 KB (deu ${grande.stdout.length})`);
+    assert.match(JSON.parse(grande.stdout).jibri.at(-1), /^linha 399 error/);
+
+    assert.equal(run(join(logs, "nao-existe")).stdout, "", "sem registro, nada");
+  } finally {
+    rmSync(logs, { force: true, recursive: true });
+  }
+  assert.ok(finalize.includes(`[ -n "$registro" ] && body="$body,\\"registro\\":$registro"`));
+
   // As duas medidas entram no corpo do aviso so quando existem (o app guarda o corpo cru).
   assert.ok(finalize.includes(`[ -n "$gravou" ] && body="$body,\\"ffmpeg\\":\\"$(json_str "$gravou")\\""`));
   assert.ok(finalize.includes(`[ -n "$imagens" ] && body="$body,\\"imagens\\":$imagens"`));
