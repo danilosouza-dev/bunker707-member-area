@@ -285,6 +285,10 @@ export function liveConfigOverwrite(
     tileView: { numberOfVisibleTiles: CHANNEL_LAST_N },
     constraints: { video: { height: { ideal: height, max: height, min: 180 } } },
     desktopSharingFrameRate: { max: settings.screenFps, min: 5 },
+    // Quem apresenta fala sem o ganho automatico e sem a reducao de ruido do navegador (docs/30 D144; pedido do produtor de
+    // 25/11/2026): o ganho subia o som entre as falas (a respiracao saia 18 dB mais alta, com a fala quase igual) e a
+    // reducao estraga a voz de quem usa um bom microfone. O cancelamento de eco fica. O aluno fica como estava.
+    ...(presents(role) ? { disableAGC: true, disableNS: true } : {}),
     disableChat: true,
     disableDeepLinking: true,
     disableInviteFunctions: true,

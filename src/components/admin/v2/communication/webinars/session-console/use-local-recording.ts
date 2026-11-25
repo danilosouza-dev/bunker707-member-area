@@ -17,7 +17,8 @@ import { LOCAL_RECORDING_WORKER, listLocalFiles, localFile, localFileName, local
 const copy = WEBINAR_COPY.consoleAoVivo.gravacaoLocal;
 const HELLO_EVERY_MS = 3_000;
 const META_EVERY_S = 5;
-const OPEN_STALE_MS = 12_000;
+// A sala mede a camera e acorda o codificador antes de comecar (ate uns 10 s na primeira vez).
+const OPEN_STALE_MS = 25_000;
 const STOP_WAIT_MS = 6_000;
 
 type Recording = { bytes: number; closing: boolean; fileName: string; frameName: string; openedAt: number; seconds: number; startedAtMs: number | null; worker: Worker };

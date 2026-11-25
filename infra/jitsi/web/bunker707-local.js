@@ -5,7 +5,8 @@
  * - o video: a camera; ou a tela a esquerda e as cameras numa coluna a direita, nunca por cima, com quem mais estiver de
  *   camera ligada (bunker707-local-worker.js, papel "compor");
  * - o audio: o microfone (com o tratamento que a sala ja pediu; mudo na sala e mudo aqui) e as vozes que chegam da sala;
- * - o arquivo: MP4 (H.264) quando o navegador sabe, senao WebM, escrito no disco a cada 2 s (papel "gravar"). Sem a pasta
+ * - o arquivo: MP4 (H.264 e AAC) em ritmo fixo, pelos codificadores do navegador (papel "compor"), escrito no disco a
+ *   cada 2 s (papel "gravar"). Sem a pasta
  *   privada do navegador, os pedacos ficam na memoria, com o aviso. Uma gravacao que ficou de uma aba fechada aparece
  *   para baixar ou apagar.
  * Usa as faixas do proprio motor, nunca uma copia: desligou a camera ou a tela na sala, ela some daqui e o aparelho apaga.
@@ -24,11 +25,10 @@
     var framed = false;
 
     try { framed = Boolean(window.parent && window.parent !== window); } catch (e) { framed = true; }
-    if (!framed || !window.MediaRecorder || !window.MediaStreamTrackProcessor || !window.MediaStreamTrackGenerator || !window.Worker) { return; }
+    if (!framed || !window.VideoEncoder || !window.AudioEncoder || !window.MediaStreamTrackProcessor || !window.Worker) { return; }
 
-    var WORKER = '/libs/bunker707-local-worker.js?v=43341991';
+    var WORKER = '/libs/bunker707-local-worker.js?v=870a29e8';
     var PREFIX = 'gravacao-local-';
-    var TYPES = ['video/mp4;codecs=avc1.64002a,mp4a.40.2', 'video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1.4d0028,mp4a.40.2', 'video/webm;codecs=h264,opus', 'video/webm;codecs=vp8,opus'];
     var MESSAGE = 'bunker707:gravacao-local';
     // A origem da pagina que montou o iframe e mandou o "ola" (o console novo); nula, vale o painel daqui.
     var host = null;
@@ -175,15 +175,11 @@
         var conf = conference();
 
         if (rec || !conf) { return; }
-        var type = TYPES.filter(function (t) { return window.MediaRecorder.isTypeSupported(t); })[0];
-
-        if (!type) { say('Este navegador não grava vídeo. Use o Chrome.'); return; }
-        var r = { audio: new Map(), bytes: 0, chunks: [], counts: [], mic: null, name: PREFIX + stampName() + (type.indexOf('mp4') > 0 ? '.mp4' : '.webm'), notes: ['formato: ' + type], pending: Promise.resolve(), startedAt: Date.now(), type: type, video: { camera: null, tela: null } };
+        var r = { audio: new Map(), bytes: 0, chunks: [], counts: [], mic: null, name: PREFIX + stampName() + '.mp4', notes: [], startedAt: Date.now(), video: { camera: null, tela: null } };
 
         r.composer = new window.Worker(WORKER);
         r.remote = host !== null;
         r.disk = r.remote ? null : new window.Worker(WORKER);
-        r.generator = new window.MediaStreamTrackGenerator({ kind: 'video' });
         r.ctx = new window.AudioContext({ latencyHint: 'playback', sampleRate: 48000 });
         r.mix = r.ctx.createMediaStreamDestination();
         // Uma fonte muda sempre ligada: com todos em silencio o audio do arquivo continua andando.
@@ -194,8 +190,18 @@
         quiet.connect(zero).connect(r.mix);
         quiet.start();
         r.ctx.resume().catch(function () {});
-        r.composer.postMessage({ papel: 'compor', writable: r.generator.writable }, [r.generator.writable]);
-        r.composer.onmessage = function (e) { if (e.data.tipo === 'contas') { r.counts.push(e.data.contas); r.last = e.data.contas; } };
+        r.composer.postMessage({ papel: 'compor' });
+        r.composer.onmessage = function (e) {
+            if (e.data.tipo === 'contas') { r.counts.push(e.data.contas); r.last = e.data.contas; }
+            else if (e.data.tipo === 'ritmo') { r.notes.push('ritmo da câmera ' + e.data.medido.toFixed(3) + ', gravado ' + e.data.ritmo.toFixed(3)); }
+            else if (e.data.tipo === 'pronto') { running(r); }
+            else if (e.data.tipo === 'parte') { part(r, e.data.bytes); }
+            else if (e.data.tipo === 'acabou') { if (r.onDisk) { r.disk.postMessage({ papel: 'fechar' }); } else { finish(r); } }
+            else if (e.data.tipo === 'quebrou') {
+                r.notes.push('erro do gravador: ' + e.data.erro);
+                if (r.started) { stop(); } else { say('A gravação não começou: ' + e.data.erro); refuse(r, e.data.erro); }
+            }
+        };
         if (r.disk) { r.disk.onmessage = function (e) {
             if (e.data.tipo === 'aberto') { r.onDisk = true; begin(r); }
             else if (e.data.tipo === 'escrito') { r.bytes = e.data.bytes; }
@@ -205,39 +211,50 @@
         }; }
         rec = r;
         if (r.remote) {
-            tell({ formato: r.type, nome: r.name, tipo: 'abrir' });
-            window.setTimeout(function () { if (rec === r && !r.started) { refuse(r, 'o console não abriu o arquivo'); } }, 8000);
+            tell({ formato: 'video/mp4', nome: r.name, tipo: 'abrir' });
+            window.setTimeout(function () { if (rec === r && !r.began) { refuse(r, 'o console não abriu o arquivo'); } }, 8000);
         } else { r.disk.postMessage({ nome: r.name, papel: 'gravar' }); }
         sync();
     }
 
+    /** O arquivo esta aberto: os codificadores comecam com o som da mistura. */
     function begin(r) {
+        if (r.began) { return; }
+        r.began = true;
+        var readable = new window.MediaStreamTrackProcessor({ maxBufferSize: 200, track: r.mix.stream.getAudioTracks()[0] }).readable;
+
+        var camera = localTrack(conference(), 'camera');
+        var rate = 0;
+        // Uma placa de captura HDMI entrega a imagem cerca de 107 ms depois do som (Cam Link 4K); uma webcam, quase junto.
+        var late = camera && /cam link|capture|hd60|hdmi/i.test(camera.label || '') ? 107 : 0;
+
+        r.notes.push('camera: ' + (camera ? camera.label : 'nenhuma') + ', som atrasado ' + late + ' ms');
+
+        try { rate = camera ? camera.getSettings().frameRate || 0 : 0; } catch (e) { /* sem o ritmo do aparelho */ }
+        r.composer.postMessage({ aparelho: rate, atraso: late, audio: readable, papel: 'comecar' }, [readable]);
+    }
+
+    function running(r) {
         r.started = true;
         r.startedAt = Date.now();
-        r.recorder = new window.MediaRecorder(new window.MediaStream([r.generator, r.mix.stream.getAudioTracks()[0]]), { audioBitsPerSecond: 160000, mimeType: r.type, videoBitsPerSecond: 8000000, videoKeyFrameIntervalDuration: 2000 });
-        r.recorder.ondataavailable = function (e) {
-            if (!e.data || !e.data.size) { return; }
-            if (!r.remote && !r.onDisk) { r.chunks.push(e.data); r.bytes += e.data.size; return; }
-            // Na ordem: cada pedaco so depois do anterior.
-            r.pending = r.pending.then(function () { return e.data.arrayBuffer(); }).then(function (bytes) {
-                if (!r.remote) { r.disk.postMessage({ bytes: bytes, papel: 'pedaco' }, [bytes]); return; }
-                r.bytes += bytes.byteLength;
-                tell({ bytes: bytes, nome: r.name, tipo: 'pedaco' }, [bytes]);
-            });
-        };
-        r.recorder.onstop = function () { r.pending.then(function () { if (r.onDisk) { r.disk.postMessage({ papel: 'fechar' }); } else { finish(r); } }); };
-        r.recorder.onstart = function () { if (r.remote) { tell({ nome: r.name, tipo: 'comecou' }); } };
-        r.recorder.onerror = function (e) { r.notes.push('erro do gravador: ' + (e.error && e.error.name)); };
-        r.recorder.start(2000);
+        if (r.remote) { tell({ nome: r.name, tipo: 'comecou' }); }
         render();
+    }
+
+    /** Um pedaco do arquivo, na ordem: para o console, para o disco daqui ou, sem os dois, na memoria. */
+    function part(r, bytes) {
+        if (r.remote) { r.bytes += bytes.byteLength; tell({ bytes: bytes, nome: r.name, tipo: 'pedaco' }, [bytes]); return; }
+        if (r.onDisk) { r.disk.postMessage({ bytes: bytes, papel: 'pedaco' }, [bytes]); return; }
+        r.bytes += bytes.byteLength;
+        r.chunks.push(bytes);
     }
 
     function stop() {
         var r = rec;
 
-        if (!r || !r.recorder || r.recorder.state === 'inactive') { return; }
+        if (!r || !r.started || r.ending) { return; }
+        r.ending = true;
         r.seconds = Math.round((Date.now() - r.startedAt) / 1000);
-        r.recorder.stop();
         r.composer.postMessage({ papel: 'fim' });
     }
 
@@ -251,7 +268,7 @@
             .concat(r.notes, ['quadros: câmera ' + totals.camera + ', tela ' + totals.tela + ', gravados ' + totals.saiu + ', perdidos ' + totals.perdeu,
                 'por 5 s (câmera/tela/gravados/perdidos): ' + r.counts.map(function (c) { return [c.camera, c.tela, c.saiu, c.perdeu].join('/'); }).join(' ')]).join('\n');
         if (r.remote) { tell({ nome: r.name, relatorio: r.report, segundos: r.seconds, tipo: 'fim' }); tellState(); return; }
-        var ready = r.onDisk ? directory().then(function (d) { return d.getFileHandle(r.name); }).then(function (h) { return h.getFile(); }) : Promise.resolve(new window.Blob(r.chunks, { type: r.type }));
+        var ready = r.onDisk ? directory().then(function (d) { return d.getFileHandle(r.name); }).then(function (h) { return h.getFile(); }) : Promise.resolve(new window.Blob(r.chunks, { type: 'video/mp4' }));
 
         ready.then(function (blob) { var item = { blob: blob, name: r.name, report: r.report, size: blob.size };
 
@@ -316,7 +333,7 @@
                 if (!rec) { tell({ motivo: 'este navegador não grava a sala', nome: null, tipo: 'falhou' }); }
             } else if (data.pedido === 'parar') {
                 if (rec && !rec.started) { refuse(rec, 'parada antes de começar'); } else { stop(); }
-            } else if (rec && rec.remote && data.nome === rec.name && data.pedido === 'guardado' && !rec.started) { begin(rec); }
+            } else if (rec && rec.remote && data.nome === rec.name && data.pedido === 'guardado') { begin(rec); }
             else if (rec && rec.remote && data.nome === rec.name && data.pedido === 'sem-disco') {
                 if (rec.started) { rec.notes.push('o console não conseguiu guardar'); stop(); } else { refuse(rec, 'sem espaço no disco'); }
             }
@@ -388,7 +405,7 @@
         if (!panel) { return; }
         ui.row.textContent = '';
         if (!rec) { ui.row.appendChild(button('Gravar no meu computador', start)); }
-        else if (rec.recorder) { ui.row.appendChild(button('Parar a gravação no computador', stop)); }
+        else if (rec.started) { ui.row.appendChild(button('Parar a gravação no computador', stop)); }
         ui.files.textContent = '';
         left.forEach(function (item) {
             var line = make('div', 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px');
@@ -430,7 +447,7 @@
             var mic = localTrack(conf, 'mic');
 
             ui.mic.textContent = mic ? 'Microfone: ' + micText(mic) : 'Microfone desligado na sala.';
-            if (rec && rec.recorder) {
+            if (rec && rec.started) {
                 var s = Math.round((Date.now() - rec.startedAt) / 1000);
 
                 say('Gravando ' + Math.floor(s / 60) + ':' + pad(s % 60) + ', ' + Math.round(rec.bytes / 1e6) + ' MB' + (rec.last ? ', ' + (rec.last.saiu / 5).toFixed(0) + ' quadros por segundo' + (rec.last.perdeu ? ', ' + rec.last.perdeu + ' perdidos' : '') : '') + (rec.onDisk ? '' : ' (na memória)'));

@@ -23,7 +23,7 @@ const INTERFACE_WHITELIST = new Set(
 // dialogo da live encerrada, na 192). Uma entrada com ponto (`prejoinConfig.enabled`)
 // libera so aquele campo do objeto; o app descarta o resto e qualquer chave fora da lista, sem avisar.
 const CONFIG_WHITELIST = new Set(
-  "breakoutRooms channelLastN conferenceInfo connectionIndicators constraints desktopSharingFrameRate disableChat disableDeepLinking disableInitialGUM disableInviteFunctions disableLocalVideoFlip disablePolls disableReactions disableRemoteMute disableSelfView disableShortcuts disableTileView disabledNotifications disabledSounds filmstrip hideConferenceSubject hideConferenceTimer hideDisplayName hideDominantSpeakerBadge lobby notifications notifyOnConferenceDestruction participantMenuButtonsWithNotifyClick prejoinConfig.enabled readOnlyName remoteVideoMenu resolution startWithAudioMuted startWithVideoMuted tileView toolbarButtons toolbarConfig".split(
+  "breakoutRooms channelLastN conferenceInfo connectionIndicators constraints desktopSharingFrameRate disableAGC disableChat disableDeepLinking disableInitialGUM disableInviteFunctions disableLocalVideoFlip disableNS disablePolls disableReactions disableRemoteMute disableSelfView disableShortcuts disableTileView disabledNotifications disabledSounds filmstrip hideConferenceSubject hideConferenceTimer hideDisplayName hideDominantSpeakerBadge lobby notifications notifyOnConferenceDestruction participantMenuButtonsWithNotifyClick prejoinConfig.enabled readOnlyName remoteVideoMenu resolution startWithAudioMuted startWithVideoMuted tileView toolbarButtons toolbarConfig".split(
     " "
   )
 );
