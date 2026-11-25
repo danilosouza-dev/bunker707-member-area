@@ -34,10 +34,20 @@ rm -rf "$out"; mkdir -p "$out/perfil"; cp "$here/bancada.html" "$out/bancada.htm
 screen_hz=$(grep -h -o "Modeline \"$res\"x[0-9.]*" /storage/logs/xorg.log 2>/dev/null | tail -n1 | sed 's/.*x//')
 echo "==> Tela virtual (xorg.log): $res a ${screen_hz:-?} Hz"
 
-echo "==> Video de teste: $src_size a $src_fps quadros, VP8"
-"$FF" -v error -y -f lavfi -i "testsrc2=size=$src_size:rate=$src_fps" -t 90 \
-    -c:v libvpx -b:v 6M -deadline realtime -cpu-used 8 -g 60 -an "$out/fonte.webm" \
-    || { echo "ERRO: o ffmpeg da imagem nao gerou o video de teste"; exit 1; }
+if [ "$mode" = "av" ]; then
+    # Com som (docs/30 A65): a cada segundo, um clarao branco na tela inteira e um bipe, os dois nos primeiros 100 ms.
+    # Comprido o bastante para duas gravacoes seguidas sem o video voltar ao comeco no meio de uma delas.
+    echo "==> Video de teste com som: $src_size a $src_fps quadros, um clarao e um bipe por segundo, $((seconds * 2 + 60)) s"
+    "$FF" -v error -y -f lavfi -i "testsrc2=size=$src_size:rate=$src_fps,drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:enable='lt(mod(t,1),0.1)'" \
+        -f lavfi -i "sine=frequency=1000:sample_rate=48000,volume=volume=0:enable='gte(mod(t,1),0.1)'" -t "$((seconds * 2 + 60))" \
+        -c:v libvpx -b:v 6M -deadline realtime -cpu-used 8 -g 60 -c:a libvorbis -ac 2 "$out/fonte.webm" \
+        || { echo "ERRO: o ffmpeg da imagem nao gerou o video de teste com som"; exit 1; }
+else
+    echo "==> Video de teste: $src_size a $src_fps quadros, VP8"
+    "$FF" -v error -y -f lavfi -i "testsrc2=size=$src_size:rate=$src_fps" -t 90 \
+        -c:v libvpx -b:v 6M -deadline realtime -cpu-used 8 -g 60 -an "$out/fonte.webm" \
+        || { echo "ERRO: o ffmpeg da imagem nao gerou o video de teste"; exit 1; }
+fi
 
 chrome=$(command -v google-chrome || command -v chromium) || { echo "ERRO: sem Chrome na imagem"; exit 1; }
 echo "==> $("$chrome" --version 2>/dev/null) com os parametros do Jibri${extra:+ e mais: $extra}"
@@ -113,6 +123,14 @@ record() {  # record <nome> <opcoes da entrada da tela> <entrada do audio> <vari
         -t "$seconds" -f mp4 "$out/$name.mp4" > "$out/$name.log" 2>&1
 }
 
+# O desvio entre o audio e a imagem no arquivo (so no modo av): os instantes em que a tela fica branca e os instantes em
+# que o bipe comeca vao para o desvio-av.py, que casa cada clarao com o bipe mais perto. Negativo = o audio vem antes.
+av_offsets() {  # av_offsets <arquivo>
+    "$FF" -nostdin -v error -i "$1" -vf "scale=64:36,signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=$out/claroes.txt" -an -f null - 2>/dev/null
+    "$FF" -nostdin -v info -i "$1" -vn -af "silencedetect=noise=-35dB:d=0.3" -f null - 2> "$out/bipes.txt"
+    python3 "$here/desvio-av.py" "$out/claroes.txt" "$out/bipes.txt"
+}
+
 status=0
 while IFS='|' read -r name vin ain vars more; do
     [ -n "$name" ] || continue
@@ -136,6 +154,9 @@ while IFS='|' read -r name vin ain vars more; do
     late=$(awk -v k="${kept_late:-0}" -v d="${duration:-0}" 'BEGIN { printf "%.1f", (d > 4 ? k / (d - 4) : 0) }')
     cpu=$(awk -v a="$cpu_a" -v b="$cpu_b" -v ia="$idle_a" -v ib="$idle_b" 'BEGIN { d = b - a; printf "%d", (d > 0 ? (1 - (ib - ia) / d) * 100 : 0) }')
     echo "RESULTADO gravacao=$name arquivo_imagens_por_s=$unique depois_de_4s=$late tela_imagens_por_s=$screen_fps tela=${screen_hz:-?}Hz pagina=$mode tamanho=$res fonte=${src_size}@${src_fps} extra=[${extra}] quadros_do_arquivo=${total:-?} duracao=${duration:-?}s audio=${audio_s:-sem}s cpu=${cpu}% nucleos=$(nproc) | $page_now"
+    # O que o ffmpeg avisou alem do andamento (filas cheias, relogio, erro): as mensagens mais repetidas.
+    echo "  avisos do ffmpeg: $(tr '\r' '\n' < "$out/$name.log" | grep -v 'frame=' | grep -i -E 'queue|error|overrun|underrun|past duration|adjusted ts|backward|buffer|failed|exiting|conversion' | sed 's/0x[0-9a-f]*//g' | sort | uniq -c | sort -rn | head -n 6 | tr -s ' ' | tr '\n' ';' | cut -c1-700)"
+    [ "$mode" = "av" ] && echo "RESULTADO-AV gravacao=$name pedido=${seconds}s arquivo=${duration:-?}s audio=${audio_s:-sem}s $(av_offsets "$out/$name.mp4")"
     # A regua: a gravacao "gravador" tem de passar do minimo depois do arranque (BANCADA_MINIMO, imagens por segundo).
     if [ -n "$minimum" ] && [ "$name" = "gravador" ] && ! awk -v l="$late" -v m="$minimum" 'BEGIN { exit !(l >= m) }'; then
         echo "ERRO: o gravador ficou em $late imagens por segundo depois do arranque, abaixo de $minimum"; status=1
