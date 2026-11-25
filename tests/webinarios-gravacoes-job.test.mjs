@@ -519,6 +519,63 @@ test("aviso de 6 h sem Apresentador nem co-apresentador: vai para quem criou o w
  * 5. Retencao
  * ---------------------------------------------------------------------------------------------- */
 
+test("gravacao do computador (D142): pronta depois da do gravador, toma o lugar dela na sessao, no replay e na aula; o video que a equipe escolheu nao muda", async () => {
+  const RESERVA = "acacacac-0000-4000-8000-0000000000a1";
+  const LOCAL = "acacacac-0000-4000-8000-0000000000a2";
+  const DA_EQUIPE = "acacacac-0000-4000-8000-0000000000a3";
+  const REPLAY = "acacacac-0000-4000-8000-0000000000a4";
+  const VIDEO_LOCAL = "0aaaaaaa-1111-4222-8333-444444444444";
+  const local = () => gravacaoRow({ bunny_video_id: VIDEO_LOCAL, duration_seconds: 10, file_name: `gravacao-local-${SESSION}-2026-11-05-230210.mp4`, id: LOCAL, source: "upload" });
+  const cena = (ligada) =>
+    Object.assign(
+      escola({
+        gravacoes: [
+          gravacaoRow({ embed_url: `https://iframe.mediadelivery.net/embed/42/${VIDEO}`, id: RESERVA, status: "ready" }),
+          gravacaoRow({ bunny_video_id: "0ccccccc-1111-4222-8333-444444444444", file_name: null, id: DA_EQUIPE, source: "upload", status: "ready" }),
+          local()
+        ],
+        sessoes: [
+          sessaoRow(SESSION, { ended_at: iso(HORA_MARCADA + HOUR), recording_id: ligada, started_at: iso(HORA_MARCADA), status: "ended" }),
+          sessaoRow(REPLAY, { kind: "replay", recording_id: ligada, source_session_id: SESSION, status: "live" })
+        ]
+      })
+    );
+  const bunny = bunnyFalsa({ [VIDEO_LOCAL]: { lengthSeconds: 3600, status: BUNNY_VIDEO_STATUS.finished } });
+  const { replayLessonIdFor } = await import("../src/server/webinars/replay-lesson-model.ts");
+
+  const trocada = cena(RESERVA);
+  trocada.tables.lessons = [{ duration: "1:02:34", id: replayLessonIdFor(WEBINAR), status: "published", video_config: { embedUrl: `https://iframe.mediadelivery.net/embed/42/${VIDEO}`, provider: "bunny" } }];
+  trocada.tables.admin_audit_logs = [];
+  const result = await rodar(trocada, HORA_MARCADA + 2 * HOUR, { bunny });
+  assert.equal(result.ready, 1);
+  assert.deepEqual(trocada.tables.webinar_sessions.map((row) => row.recording_id), [LOCAL, LOCAL]);
+  const aula = trocada.tables.lessons[0];
+  assert.ok(JSON.stringify(aula.video_config).includes(VIDEO_LOCAL), "a aula toca o video do computador");
+  assert.equal(aula.duration, "1:00:00");
+  assert.equal(trocada.tables.webinar_recordings.find((row) => row.id === RESERVA).status, "ready", "a do gravador fica de reserva");
+
+  const daEquipe = cena(DA_EQUIPE);
+  daEquipe.tables.lessons = [{ duration: "10:00", id: replayLessonIdFor(WEBINAR), status: "published", video_config: { embedUrl: "https://outro.test/v", provider: "bunny" } }];
+  await rodar(daEquipe, HORA_MARCADA + 2 * HOUR, { bunny });
+  assert.deepEqual(daEquipe.tables.webinar_sessions.map((row) => row.recording_id), [DA_EQUIPE, DA_EQUIPE]);
+  assert.equal(daEquipe.tables.lessons[0].duration, "10:00");
+});
+
+test("a gravacao que vale: a do computador pronta antes da do gravador; a que ainda sobe ou falhou nunca esconde a do gravador", async () => {
+  const { preferredRecording } = await import("../src/server/webinars/recorder-model.ts");
+  const { replayRecordingOf } = await import("../src/server/webinars/session-lifecycle.ts");
+  const jibri = gravacaoRow({ created_at: iso(HORA_MARCADA + 80 * MIN), id: "jibri", status: "ready" });
+  const local = (status) => gravacaoRow({ bunny_video_id: "outro-video", created_at: iso(HORA_MARCADA + 90 * MIN), file_name: `gravacao-local-${SESSION}-2026-11-05-230210.mp4`, id: "local", source: "upload", status });
+  assert.equal(preferredRecording([local("ready"), jibri]).id, "local");
+  assert.equal(preferredRecording([jibri, local("ready")]).id, "local");
+  for (const status of ["uploading", "processing", "failed"]) {
+    assert.equal(preferredRecording([local(status), jibri]).id, "jibri", status);
+  }
+  assert.equal(preferredRecording([local("uploading")]).id, "local");
+  assert.equal(preferredRecording([]), null);
+  assert.equal(replayRecordingOf([local("ready"), { ...jibri, created_at: iso(HORA_MARCADA + 95 * MIN) }], { id: SESSION, recording_id: null }).id, "local");
+});
+
 test("retencao: no minuto da hora, apaga na Bunny (404 conta como apagado) e marca purged_at; com a Bunny fora, tenta na hora seguinte", async () => {
   const vencida = gravacaoRow({ purge_due_at: iso(HORA_MARCADA - HOUR), status: "ready" });
   const sumida = gravacaoRow({ bunny_video_id: "22222222-aaaa-bbbb-cccc-000000000001", purge_due_at: iso(HORA_MARCADA - HOUR), status: "ready" });

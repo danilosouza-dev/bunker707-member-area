@@ -107,7 +107,8 @@ function createContentSecurityPolicy(nonce: string, upgradeInsecureRequests: boo
   const directives = [
     "default-src 'self'",
     "base-uri 'self'",
-    `connect-src 'self' ${[...getSupabaseConnectionSources(), ...observabilityConnectionSources].join(" ")}`.trim(),
+    // video.bunnycdn.com: o console envia a gravacao do computador direto para a Bunny (docs/30 D142).
+    `connect-src 'self' https://video.bunnycdn.com ${[...getSupabaseConnectionSources(), ...observabilityConnectionSources].join(" ")}`.trim(),
     // Fontes enviadas para o design dos pop-ups (bucket communication-fonts, docs/26): so a origem do nosso
     // Supabase (o FontFace do aluno baixa de la); nada de Google Fonts na hora.
     `font-src 'self' data: ${getSupabaseConnectionSources().filter((source) => source.startsWith("http")).join(" ")}`.trim(),

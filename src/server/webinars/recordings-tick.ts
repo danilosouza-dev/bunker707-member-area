@@ -47,7 +47,7 @@ import { RECORDER_RULES, RECORDER_STATUSES, canReleaseRecorder, recorderMachineA
 import type { RecorderDispatcher } from "./recorder-dispatch";
 import { parseBunnyEmbed } from "./room-model";
 import { RECORDING_COLUMNS, recorderStatusOf, type RecordingRow, type SessionRow, type WebinarRow } from "./rows";
-import { createReplayForSession } from "./session-lifecycle";
+import { createReplayForSession, promoteLocalRecording } from "./session-lifecycle";
 import { fetchSessionRow, fetchWebinarRow, listPresenterRows, listSessionRowsBetween } from "./store";
 
 const MINUTE_MS = 60_000;
@@ -297,6 +297,8 @@ async function checkRecording(ctx: TickContext, bunny: BunnyStreamClient, record
       // So com a sessao encerrada: ligar uma live ainda no ar faria o encerramento medir a duracao pelo video.
       if (session && (session.status === "ended" || session.status === "cancelled")) {
         await linkSessionRecording(ctx.db, recording.session_id, recording.id);
+        // A gravacao do computador de quem apresenta vale mais que a do gravador, que pode ter ficado pronta antes.
+        await promoteLocalRecording(ctx.db, ready);
 
         if (await createReplayForSession(ctx.db, recording.session_id, ctx.now)) {
           ctx.result.replays += 1;

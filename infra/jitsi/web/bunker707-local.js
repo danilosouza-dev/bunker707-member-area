@@ -9,7 +9,10 @@
  *   privada do navegador, os pedacos ficam na memoria, com o aviso. Uma gravacao que ficou de uma aba fechada aparece
  *   para baixar ou apagar.
  * Usa as faixas do proprio motor, nunca uma copia: desligou a camera ou a tela na sala, ela some daqui e o aparelho apaga.
- * Nada e enviado pela rede. O painel mostra tambem o microfone em uso e o tratamento que o navegador aplicou.
+ * - com o console novo (docs/30 D142): a pagina que montou o iframe manda "ola" e passa a mandar: o painel daqui some, o
+ *   console comeca e para, e cada pedaco vai para ela (window.postMessage, so para a origem que mandou o "ola"), que guarda
+ *   no disco dela e envia para a Bunny. Quem pode montar este iframe e o frame-ancestors do Caddy: so as nossas origens.
+ * Nada daqui fala com a rede. O estado mostra tambem o microfone em uso e o tratamento que o navegador aplicou.
  * Tudo em try/catch: um erro aqui nunca derruba a sala.
  */
 (function () {
@@ -26,6 +29,9 @@
     var WORKER = '/libs/bunker707-local-worker.js?v=43341991';
     var PREFIX = 'gravacao-local-';
     var TYPES = ['video/mp4;codecs=avc1.64002a,mp4a.40.2', 'video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1.4d0028,mp4a.40.2', 'video/webm;codecs=h264,opus', 'video/webm;codecs=vp8,opus'];
+    var MESSAGE = 'bunker707:gravacao-local';
+    // A origem da pagina que montou o iframe e mandou o "ola" (o console novo); nula, vale o painel daqui.
+    var host = null;
     var rec = null;
     var panel = null;
     var ui = {};
@@ -175,7 +181,8 @@
         var r = { audio: new Map(), bytes: 0, chunks: [], counts: [], mic: null, name: PREFIX + stampName() + (type.indexOf('mp4') > 0 ? '.mp4' : '.webm'), notes: ['formato: ' + type], pending: Promise.resolve(), startedAt: Date.now(), type: type, video: { camera: null, tela: null } };
 
         r.composer = new window.Worker(WORKER);
-        r.disk = new window.Worker(WORKER);
+        r.remote = host !== null;
+        r.disk = r.remote ? null : new window.Worker(WORKER);
         r.generator = new window.MediaStreamTrackGenerator({ kind: 'video' });
         r.ctx = new window.AudioContext({ latencyHint: 'playback', sampleRate: 48000 });
         r.mix = r.ctx.createMediaStreamDestination();
@@ -189,15 +196,18 @@
         r.ctx.resume().catch(function () {});
         r.composer.postMessage({ papel: 'compor', writable: r.generator.writable }, [r.generator.writable]);
         r.composer.onmessage = function (e) { if (e.data.tipo === 'contas') { r.counts.push(e.data.contas); r.last = e.data.contas; } };
-        r.disk.onmessage = function (e) {
+        if (r.disk) { r.disk.onmessage = function (e) {
             if (e.data.tipo === 'aberto') { r.onDisk = true; begin(r); }
             else if (e.data.tipo === 'escrito') { r.bytes = e.data.bytes; }
             else if (e.data.tipo === 'fechado') { finish(r); }
             else if (e.data.tipo === 'erro' && !r.started) { r.notes.push('sem a pasta do navegador (' + e.data.erro + '): na memória'); begin(r); }
             else if (e.data.tipo === 'erro') { r.notes.push('erro ao escrever: ' + e.data.erro); say('Erro ao salvar no disco: pare a gravação e baixe o arquivo.'); }
-        };
+        }; }
         rec = r;
-        r.disk.postMessage({ nome: r.name, papel: 'gravar' });
+        if (r.remote) {
+            tell({ formato: r.type, nome: r.name, tipo: 'abrir' });
+            window.setTimeout(function () { if (rec === r && !r.started) { refuse(r, 'o console não abriu o arquivo'); } }, 8000);
+        } else { r.disk.postMessage({ nome: r.name, papel: 'gravar' }); }
         sync();
     }
 
@@ -207,11 +217,16 @@
         r.recorder = new window.MediaRecorder(new window.MediaStream([r.generator, r.mix.stream.getAudioTracks()[0]]), { audioBitsPerSecond: 160000, mimeType: r.type, videoBitsPerSecond: 8000000, videoKeyFrameIntervalDuration: 2000 });
         r.recorder.ondataavailable = function (e) {
             if (!e.data || !e.data.size) { return; }
-            if (!r.onDisk) { r.chunks.push(e.data); r.bytes += e.data.size; return; }
+            if (!r.remote && !r.onDisk) { r.chunks.push(e.data); r.bytes += e.data.size; return; }
             // Na ordem: cada pedaco so depois do anterior.
-            r.pending = r.pending.then(function () { return e.data.arrayBuffer(); }).then(function (bytes) { r.disk.postMessage({ bytes: bytes, papel: 'pedaco' }, [bytes]); });
+            r.pending = r.pending.then(function () { return e.data.arrayBuffer(); }).then(function (bytes) {
+                if (!r.remote) { r.disk.postMessage({ bytes: bytes, papel: 'pedaco' }, [bytes]); return; }
+                r.bytes += bytes.byteLength;
+                tell({ bytes: bytes, nome: r.name, tipo: 'pedaco' }, [bytes]);
+            });
         };
         r.recorder.onstop = function () { r.pending.then(function () { if (r.onDisk) { r.disk.postMessage({ papel: 'fechar' }); } else { finish(r); } }); };
+        r.recorder.onstart = function () { if (r.remote) { tell({ nome: r.name, tipo: 'comecou' }); } };
         r.recorder.onerror = function (e) { r.notes.push('erro do gravador: ' + (e.error && e.error.name)); };
         r.recorder.start(2000);
         render();
@@ -228,13 +243,14 @@
 
     function finish(r) {
         rec = null;
-        try { r.composer.terminate(); r.disk.terminate(); r.ctx.close(); } catch (e) { /* ja fechado */ }
+        release(r);
         var totals = { camera: 0, perdeu: 0, saiu: 0, tela: 0 };
 
         r.counts.forEach(function (c) { Object.keys(totals).forEach(function (k) { totals[k] += c[k]; }); });
         r.report = ['gravação no computador', r.name, 'duração ' + r.seconds + ' s, ' + Math.round(r.bytes / 1e6) + ' MB']
             .concat(r.notes, ['quadros: câmera ' + totals.camera + ', tela ' + totals.tela + ', gravados ' + totals.saiu + ', perdidos ' + totals.perdeu,
                 'por 5 s (câmera/tela/gravados/perdidos): ' + r.counts.map(function (c) { return [c.camera, c.tela, c.saiu, c.perdeu].join('/'); }).join(' ')]).join('\n');
+        if (r.remote) { tell({ nome: r.name, relatorio: r.report, segundos: r.seconds, tipo: 'fim' }); tellState(); return; }
         var ready = r.onDisk ? directory().then(function (d) { return d.getFileHandle(r.name); }).then(function (h) { return h.getFile(); }) : Promise.resolve(new window.Blob(r.chunks, { type: r.type }));
 
         ready.then(function (blob) { var item = { blob: blob, name: r.name, report: r.report, size: blob.size };
@@ -242,6 +258,70 @@
             left.unshift(item); render(); download(item); say('Gravação pronta: o arquivo foi para a pasta Downloads. Se não foi, clique em Baixar.'); }).catch(function () { say('Não consegui abrir o arquivo. Recarregue a sala: ele aparece aqui.'); });
         render();
     }
+
+    function release(r) {
+        try { r.composer.terminate(); if (r.disk) { r.disk.terminate(); } r.ctx.close(); } catch (e) { /* ja fechado */ }
+    }
+
+    /* ---- o console (docs/30 D142) ---- */
+
+    /** So para a origem que mandou o "ola", nunca para qualquer uma. */
+    function tell(message, transfer) {
+        if (!host) { return; }
+        message.type = MESSAGE;
+        try { window.parent.postMessage(message, host, transfer || []); } catch (e) { /* a pagina saiu */ }
+    }
+
+    function tellState() {
+        var conf = conference();
+        var mic = localTrack(conf, 'mic');
+
+        tell({
+            bytes: rec ? rec.bytes : 0,
+            gravando: Boolean(rec && rec.started),
+            microfone: mic ? micText(mic) : null,
+            nome: rec ? rec.name : null,
+            perdidos: rec && rec.last ? rec.last.perdeu : 0,
+            pode: call(conf, 'isModerator') === true,
+            quadros: rec && rec.last ? Math.round(rec.last.saiu / 5) : null,
+            segundos: rec && rec.started ? Math.round((Date.now() - rec.startedAt) / 1000) : 0,
+            tipo: 'estado'
+        });
+    }
+
+    /** Nao deu para comecar: solta tudo e conta o motivo. */
+    function refuse(r, why) {
+        if (rec === r) { rec = null; }
+        release(r);
+        tell({ motivo: why, nome: r.name, tipo: 'falhou' });
+        tellState();
+    }
+
+    window.addEventListener('message', function (event) {
+        var data = event.data;
+
+        if (event.source !== window.parent || !data || typeof data !== 'object' || data.type !== MESSAGE) { return; }
+        try {
+            if (data.pedido === 'ola') {
+                // Com uma gravacao do painel em curso, o painel segue ate ela acabar.
+                if (rec && !rec.remote) { return; }
+                host = event.origin;
+                tellState();
+
+                return;
+            }
+            if (event.origin !== host) { return; }
+            if (data.pedido === 'comecar') {
+                if (!rec && call(conference(), 'isModerator') === true) { start(); }
+                if (!rec) { tell({ motivo: 'este navegador não grava a sala', nome: null, tipo: 'falhou' }); }
+            } else if (data.pedido === 'parar') {
+                if (rec && !rec.started) { refuse(rec, 'parada antes de começar'); } else { stop(); }
+            } else if (rec && rec.remote && data.nome === rec.name && data.pedido === 'guardado' && !rec.started) { begin(rec); }
+            else if (rec && rec.remote && data.nome === rec.name && data.pedido === 'sem-disco') {
+                if (rec.started) { rec.notes.push('o console não conseguiu guardar'); stop(); } else { refuse(rec, 'sem espaço no disco'); }
+            }
+        } catch (e) { /* a sala segue */ }
+    });
 
     /* ---- os arquivos que ficaram ---- */
 
@@ -343,7 +423,10 @@
                 listOld();
             }
             if (!panel) { return; }
-            panel.style.display = mod || rec ? 'block' : 'none';
+            // Com o console mandando, o painel so aparece para os arquivos que ficaram aqui de antes.
+            panel.style.display = host ? (left.length ? 'block' : 'none') : mod || rec ? 'block' : 'none';
+            if (ui.row) { ui.row.style.display = host ? 'none' : 'flex'; }
+            if (host) { tellState(); }
             var mic = localTrack(conf, 'mic');
 
             ui.mic.textContent = mic ? 'Microfone: ' + micText(mic) : 'Microfone desligado na sala.';

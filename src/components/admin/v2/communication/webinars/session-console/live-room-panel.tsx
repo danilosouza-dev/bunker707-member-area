@@ -52,6 +52,7 @@ import {
 import type { JoinTokenReply } from "@/server/webinars/live-model";
 import type { WebinarSession } from "@/server/webinars/model";
 import { adminToast } from "../../../toast";
+import { useLocalRecording, type LocalRecordingState } from "./use-local-recording";
 import { useRecordingMode, type RecordingModeState } from "./use-recording-mode";
 
 // A sala da Live ao vivo no console (docs/30 §1.4, §2.4, §6.3, §6.4 e §8.1; fase 3): o hook useLiveRoom pede o token
@@ -212,6 +213,8 @@ export type LiveRoomHandle = {
   /** A propria camera no ar (videoMuteStatusChanged), dentro da sala. */
   videoOn: boolean;
   /** O modo da gravacao (docs/30 D125): o que este console pediu, o que o gravador aplicou e o pedido ao iframe. */
+  /** A gravacao neste computador e o envio dela (docs/30 D142). */
+  localRecording: LocalRecordingState;
   recordingMode: RecordingModeState;
   startTesting: () => void;
   /**
@@ -253,7 +256,11 @@ type UseLiveRoomInput = {
   onBrowserRecording?: (on: boolean) => void;
   /** O Remover do ⋮ da miniatura com o aluno ligado a linha: o nosso Remover (o registro da sessao, depois o motor). */
   onKickPerson?: (person: LiveConsolePerson, participantId: string) => void;
+  /** Pode enviar a gravacao deste computador (messaging.write). */
+  canWrite?: boolean;
   session: WebinarSession | null;
+  /** Hora do servidor menos a do aparelho, medida na carga. */
+  skewMs?: number;
   webinar: Pick<ConsoleWebinar, "allowStudentCamera" | "hostUserId" | "id" | "practiceSession" | "waitingRoom">;
 };
 
@@ -851,6 +858,17 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
     sessionId: input.session?.id ?? null
   });
 
+  const localRecording = useLocalRecording({
+    canWrite: input.canWrite === true,
+    domain: token.reply?.domain ?? null,
+    frame: frameWindow,
+    joined,
+    post: meet.postToFrame,
+    sessionId: input.session?.id ?? null,
+    sessionOpen: input.session?.status === "waiting" || input.session?.status === "live",
+    skewMs: input.skewMs ?? 0
+  });
+
   const escolher = devices.escolher;
   const chooseDevice = (kind: DeviceKind, option: DeviceOption) => presenter && deviceSectionReady(deviceSettings, kind) && escolher(kind, option);
 
@@ -868,6 +886,7 @@ export function useLiveRoom(input: UseLiveRoomInput): LiveRoomHandle {
     frameStatus: meet.status,
     joined,
     lobby: wantedLobby,
+    localRecording,
     meetConfigured,
     recordingMode,
     retry,

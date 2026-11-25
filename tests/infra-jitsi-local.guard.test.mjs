@@ -24,7 +24,8 @@ test("nenhum dos dois fala com a rede, roda texto como codigo ou copia a faixa d
     assert.doesNotMatch(code, /https?:\/\/|wss?:\/\//);
   }
   assert.doesNotMatch(main, /\.clone\(/, "a faixa e a do motor: desligou na sala, o aparelho apaga");
-  assert.doesNotMatch(main, /window\.parent\.postMessage/, "nada sai para a pagina que montou o iframe");
+  assert.deepEqual(main.match(/window\.parent\.postMessage\([^)]*\)/g), ["window.parent.postMessage(message, host, transfer || [])"], "um so lugar manda a pagina, e so para a origem que mandou o ola");
+  assert.doesNotMatch(worker, /window\.parent/);
 });
 
 test("o ?v= do carregador e o do worker sao o comeco do sha256 de cada arquivo", () => {
@@ -70,6 +71,107 @@ test("o painel so aparece no iframe de quem modera: aluno, gravador e sala fora 
   assert.equal(run({ moderator: false }), 0);
   assert.equal(run({ recorder: true }), 0);
   assert.equal(run({ framed: false }), 0);
+});
+
+test("o console manda (D142): o ola so da pagina que montou o iframe; os pedidos so da mesma origem; comecar abre o arquivo no console e so grava depois do guardado", async () => {
+  const sent = [];
+  const listeners = {};
+  const intervals = [];
+  const recorders = [];
+  const workers = [];
+  const made = [];
+  const element = () => ({ appendChild() {}, setAttribute() {}, style: {} });
+  const node = { connect: () => node, disconnect() {}, gain: {}, start() {} };
+  const track = { getSettings: () => ({}), readyState: "live" };
+  const parent = { postMessage: (message, origin) => sent.push({ message, origin }) };
+  let moderator = true;
+  class Recorder {
+    static isTypeSupported = (type) => type.startsWith("video/mp4");
+    constructor() { this.state = "inactive"; recorders.push(this); }
+    start() { this.state = "recording"; this.onstart(); }
+    stop() { this.state = "inactive"; this.onstop(); }
+  }
+  const window = {
+    addEventListener: (name, fn) => { listeners[name] = fn; },
+    APP: { store: { getState: () => ({ "features/base/conference": { conference: { getLocalTracks: () => [], getParticipants: () => [], isModerator: () => moderator } }, "features/base/config": {} }) } },
+    AudioContext: class { createConstantSource() { return node; } createGain() { return node; } createMediaStreamDestination() { return { stream: { getAudioTracks: () => [track] } }; } close() {} resume() { return Promise.resolve(); } },
+    document: { body: { appendChild: (el) => made.push(el) }, createElement: element },
+    MediaRecorder: Recorder,
+    MediaStream: class {},
+    MediaStreamTrackGenerator: class { writable = {}; },
+    MediaStreamTrackProcessor: class {},
+    navigator: { storage: { getDirectory: () => Promise.reject(new Error("sem")) } },
+    parent,
+    setInterval: (fn) => intervals.push(fn),
+    setTimeout: () => 0,
+    Worker: class { constructor() { workers.push(this); } postMessage() {} terminate() { this.over = true; } },
+  };
+  vm.runInNewContext(read("bunker707-local.js"), { window });
+  for (const fn of intervals) fn();
+  const type = "bunker707:gravacao-local";
+  const say = (data, { origin = "https://console.test", source = parent } = {}) => listeners.message({ data: { type, ...data }, origin, source });
+  const heard = () => sent.splice(0).map((item) => item.message);
+
+  say({ pedido: "comecar" });
+  say({ pedido: "ola" }, { source: {} });
+  assert.deepEqual(sent, [], "sem o ola da pagina que montou o iframe, nada");
+  say({ pedido: "ola" });
+  assert.equal(sent[0].origin, "https://console.test");
+  const { localRecordingEventOf } = await import("../src/lib/jitsi-room-config.ts");
+  assert.deepEqual([localRecordingEventOf(sent[0].message).kind, localRecordingEventOf(sent[0].message).state.ready], ["state", true], "o app entende o estado");
+  heard();
+  for (const fn of intervals) fn();
+  assert.ok(made.every((panel) => panel.style.display === "none"), "com o console mandando, o painel de dentro da sala some");
+  heard();
+
+  say({ pedido: "comecar" }, { origin: "https://outro.test" });
+  assert.deepEqual(heard(), [], "pedido de outra origem nao vale");
+  moderator = false;
+  say({ pedido: "comecar" });
+  assert.deepEqual(heard().map((m) => m.tipo), ["falhou"], "quem nao modera nao grava");
+  moderator = true;
+
+  say({ pedido: "comecar" });
+  const [open] = heard();
+  assert.equal(open.tipo, "abrir");
+  assert.equal(localRecordingEventOf(open).name, open.nome);
+  assert.equal(recorders.length, 0, "sem o arquivo aberto no console, nada grava");
+  assert.equal(workers.length, 1, "o disco e do console: aqui so a linha que compoe");
+  say({ nome: "gravacao-local-2026-01-01-000000.mp4", pedido: "guardado" });
+  assert.equal(recorders.length, 0);
+  say({ nome: open.nome, pedido: "guardado" });
+  assert.deepEqual(heard().map((m) => [m.tipo, m.nome]), [["comecou", open.nome]]);
+
+  const bytes = new ArrayBuffer(4);
+  recorders[0].ondataavailable({ data: { arrayBuffer: async () => bytes, size: 4 } });
+  await new Promise((resolve) => setImmediate(resolve));
+  const [chunk] = heard();
+  assert.deepEqual([chunk.tipo, chunk.nome, chunk.bytes === bytes], ["pedaco", open.nome, true]);
+
+  say({ pedido: "parar" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const ending = heard();
+  assert.deepEqual(ending.map((m) => m.tipo), ["fim", "estado"]);
+  assert.match(ending[0].relatorio, /gravação no computador/);
+  assert.equal(ending[1].gravando, false);
+  assert.ok(workers[0].over);
+});
+
+test("o console: os avisos so do proprio iframe, o arquivo fecha antes de encerrar a live, o envio so com a live fora do ar e apagar so pelo botao", () => {
+  const base = join(web, "..", "..", "..", "src", "components", "admin", "v2", "communication", "webinars", "session-console");
+  const hook = readFileSync(join(base, "use-local-recording.ts"), "utf8");
+  assert.match(hook, /if \(event\.origin !== origin \|\| !source \|\| event\.source !== source\) \{\s*return;/);
+  assert.match(hook, /if \(!canWrite \|\| sessionOpen \|\| current !== null \|\| upload !== null\) \{\s*return;/, "nunca disputa a internet com a live no ar");
+  const sent = hook.slice(hook.indexOf("const sendFile"), hook.indexOf("const start = "));
+  assert.doesNotMatch(sent, /removeLocalFile/, "enviar nunca apaga");
+  const main = readFileSync(join(base, "session-console.tsx"), "utf8");
+  assert.match(main, /await local\.stop\(\);[\s\S]*?endLiveSession\(\{ sessionId \}\)/);
+  assert.match(main, /if \(mode === "sala" && followLocal && local\.available && permissions\.canWrite\) \{\s*local\.start\(\);/);
+  const proxy = readFileSync(join(web, "..", "..", "..", "src", "proxy.ts"), "utf8");
+  assert.match(proxy, /connect-src 'self' https:\/\/video\.bunnycdn\.com /);
+  const disk = readFileSync(join(web, "..", "..", "..", "public", "workers", "gravacao-local.js"), "utf8");
+  assert.doesNotMatch(disk, /\b(fetch|XMLHttpRequest|WebSocket|importScripts|eval)\b/);
+  assert.match(disk, /handle\.write\(bytes, \{ at: offset \}\) !== bytes\.byteLength/, "o disco cheio nunca conta como guardado");
 });
 
 test("o painel fica abaixo do selo Ao vivo do palco (25/11/2026: o selo cobriu o botao) e o arquivo baixa sozinho ao parar", () => {

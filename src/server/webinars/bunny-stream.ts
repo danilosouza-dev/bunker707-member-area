@@ -8,6 +8,8 @@
 
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 export const BUNNY_STREAM_API = "https://video.bunnycdn.com";
 export const BUNNY_TIMEOUT_MS = 10_000;
 
@@ -43,11 +45,20 @@ export class BunnyStreamError extends Error {
 }
 
 type FetchResponse = { json(): Promise<unknown>; ok: boolean; status: number };
-export type BunnyFetch = (url: string, init: { headers: Record<string, string>; method: string; signal?: AbortSignal }) => Promise<FetchResponse>;
+export type BunnyFetch = (url: string, init: { body?: string; headers: Record<string, string>; method: string; signal?: AbortSignal }) => Promise<FetchResponse>;
 
 export type BunnyRequestOptions = { signal?: AbortSignal };
 
+/** O endereco do envio com retomada (TUS) da Bunny; o mesmo da politica da pagina (src/proxy.ts). */
+export const BUNNY_TUS_ENDPOINT = `${BUNNY_STREAM_API}/tusupload`;
+
+export type BunnyUploadTicket = { endpoint: string; expiresAtSeconds: number; libraryId: string; signature: string; videoId: string };
+
 export type BunnyStreamClient = {
+  /** Cria o video vazio na biblioteca e devolve o id dele (o arquivo chega depois, pelo envio com retomada). */
+  createVideo(title: string, options?: BunnyRequestOptions): Promise<string>;
+  /** A autorizacao do envio com retomada (TUS) de um video, para o navegador: assinatura, nunca a chave. */
+  uploadTicket(videoId: string, expiresAtSeconds: number): BunnyUploadTicket;
   /** A biblioteca configurada: a gravacao sem biblioteca anotada usa esta. */
   libraryId: string;
   /** Apaga o video; `missing` quando ele ja nao existia (404 conta como apagado). */
@@ -95,6 +106,38 @@ export function bunnyStreamClient(input: { apiKey: string; fetchImpl?: BunnyFetc
   }
 
   return {
+    async createVideo(title, options) {
+      if (!LIBRARY_ID.test(input.libraryId)) {
+        throw new BunnyStreamError("Bunny: biblioteca invalida.");
+      }
+      let response: FetchResponse;
+      try {
+        response = await fetchImpl(`${BUNNY_STREAM_API}/library/${input.libraryId}/videos`, {
+          body: JSON.stringify({ title: title.slice(0, 200) }),
+          headers: { ...headers, "content-type": "application/json" },
+          method: "POST",
+          signal: signalFor(timeoutMs, options?.signal)
+        });
+      } catch {
+        throw new BunnyStreamError("Bunny: criar o video falhou na rede.");
+      }
+      if (!response.ok) {
+        throw new BunnyStreamError(`Bunny: criar o video respondeu ${response.status}.`, response.status);
+      }
+      const body = (await response.json().catch(() => null)) as { guid?: unknown } | null;
+      const guid = typeof body?.guid === "string" ? body.guid.toLowerCase() : "";
+      if (!VIDEO_ID.test(guid)) {
+        throw new BunnyStreamError("Bunny: criar o video respondeu sem o id.", response.status);
+      }
+      return guid;
+    },
+    uploadTicket(videoId, expiresAtSeconds) {
+      if (!VIDEO_ID.test(videoId) || !Number.isInteger(expiresAtSeconds)) {
+        throw new BunnyStreamError("Bunny: video ou prazo do envio invalidos.");
+      }
+      const signature = createHash("sha256").update(`${input.libraryId}${input.apiKey}${expiresAtSeconds}${videoId}`).digest("hex");
+      return { endpoint: BUNNY_TUS_ENDPOINT, expiresAtSeconds, libraryId: input.libraryId, signature, videoId };
+    },
     async deleteVideo(libraryId, videoId, options) {
       const response = await call("DELETE", libraryId, videoId, options);
       if (response.status === 404) {

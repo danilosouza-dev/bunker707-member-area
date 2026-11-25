@@ -11,7 +11,8 @@ import "server-only";
 import { WebinarError, assertNoDbError, type WebinarsDb } from "./db";
 import type { PresenceSummary } from "./model";
 import { queueWebinarStartedNotices } from "./notify";
-import { autoPublishReplayLesson } from "./replay-lesson";
+import { isLocalRecording, preferredRecording } from "./recorder-model";
+import { autoPublishReplayLesson, swapReplayLessonVideo } from "./replay-lesson";
 import { SESSION_COLUMNS, presenceSummaryOf, type RecordingRow, type SessionRow } from "./rows";
 import { closeSessionRpc, openSessionRpc } from "./chat-store";
 import { fetchSessionRow, listRecordingRows, listSessionRows } from "./store";
@@ -32,9 +33,11 @@ export function replayRecordingOf(recordings: readonly RecordingRow[], session: 
   const own = session.recording_id ? recordings.find((recording) => recording.id === session.recording_id) : null;
   const bySession = own
     ? null
-    : (recordings
-        .filter((recording) => session.id !== undefined && recording.session_id === session.id && recording.status === "ready")
-        .sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")))[0] ?? null);
+    : preferredRecording(
+        recordings
+          .filter((recording) => session.id !== undefined && recording.session_id === session.id && recording.status === "ready")
+          .sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")))
+      );
   const base =
     recordings.find((recording) => recording.session_id === null && recording.source === "bunny") ??
     recordings.find((recording) => recording.session_id === null) ??
@@ -148,6 +151,38 @@ export async function createReplayForSession(db: WebinarsDb, sessionId: string, 
   }
 
   return created;
+}
+
+/**
+ * A gravacao do computador de quem apresenta ficou pronta com a sessao ja encerrada (docs/30 D142): ela toma o lugar da
+ * do gravador (a reserva) na sessao, no replay que ja nasceu dela e na aula do replay. So troca o que aponta para uma
+ * gravacao do gravador desta sessao: o video que a equipe escolheu nunca muda. Devolve se trocou alguma coisa.
+ */
+export async function promoteLocalRecording(db: WebinarsDb, recording: RecordingRow): Promise<boolean> {
+  if (!isLocalRecording(recording) || recording.status !== "ready" || !recording.session_id) {
+    return false;
+  }
+
+  const session = await fetchSessionRow(db, recording.session_id);
+
+  if (!session || session.kind !== "live" || session.status !== "ended") {
+    return false;
+  }
+
+  const backups = (await listRecordingRows(db, [session.webinar_id])).filter((row) => row.session_id === session.id && row.source === "jibri");
+  const ids = new Set(backups.map((row) => row.id));
+  const targets = (await listSessionRows(db, [session.webinar_id])).filter(
+    (row) => (row.id === session.id || (row.kind === "replay" && row.source_session_id === session.id)) && row.recording_id !== null && ids.has(row.recording_id)
+  );
+
+  for (const target of targets) {
+    const { error } = await db.from("webinar_sessions").update({ recording_id: recording.id }).eq("id", target.id).eq("recording_id", target.recording_id);
+    assertNoDbError(error, "Webinarios: trocar a gravacao do gravador pela do computador");
+  }
+
+  const lesson = await swapReplayLessonVideo(db, { from: backups, to: recording, webinarId: session.webinar_id });
+
+  return targets.length > 0 || lesson;
 }
 
 /**

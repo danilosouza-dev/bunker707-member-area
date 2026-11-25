@@ -318,6 +318,7 @@ Os cabecalhos fixos ficam em `next.config.ts` (`Permissions-Policy`, `Referrer-P
 
 O `src/proxy.ts` so acrescenta hosts quando a variavel correspondente existe:
 
+- `connect-src`: `https://video.bunnycdn.com` (o console envia a gravação do computador direto para a Bunny, `docs/30` D142; a chave fica no servidor, o navegador recebe só a assinatura de um vídeo, com prazo);
 - `connect-src`: origem de `NEXT_PUBLIC_POSTHOG_HOST` (padrao `https://us.i.posthog.com`) e, nas regioes gerenciadas, o host de assets (`https://us-assets.i.posthog.com` ou `https://eu-assets.i.posthog.com`); origem de ingestao derivada do `NEXT_PUBLIC_SENTRY_DSN` (por exemplo `https://o123.ingest.us.sentry.io`, sem a chave);
 - `script-src`: host de assets do PostHog. Com `'strict-dynamic'`, navegadores modernos ignoram a lista de hosts e confiam nos scripts carregados pelo bundle com nonce; o host fica listado para navegadores sem CSP 3;
 - Speed Insights usa o proprio dominio (`/_vercel/speed-insights`) em producao; em desenvolvimento o script de debug vem de `va.vercel-scripts.com`, liberado pelo `'strict-dynamic'`;
