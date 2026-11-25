@@ -16,6 +16,11 @@ prosody/plugins/mod_token_affiliation.lua
   (originalmente importado de https://github.com/jitsi-contrib/prosody-plugins, token_affiliation), sob a
   mesma Apache License, Version 2.0. Da ao host a afiliacao de dono da sala a partir do JWT.
 
+FFmpeg (o ffmpeg da gravacao, jibri/ffmpeg-gravacao.sh)
+  Compilado do codigo oficial (https://ffmpeg.org/releases/, versao e sha256 fixados no script), com libx264:
+  GNU General Public License, versao 2 ou posterior. O binario e compilado no runner e usado so nas maquinas do
+  gravador da propria Bunker707; nao e distribuido por este repositorio nem publicado.
+
 Caddy (imagem caddy:2.11.7-alpine): Apache License, Version 2.0, https://github.com/caddyserver/caddy
 
 Modificacoes da Bunker707 neste diretorio (docker-compose.yml, caddy/Caddyfile, web/custom-config.js,

@@ -169,9 +169,39 @@ if out:
     print(json.dumps(list(reversed(out)), ensure_ascii=True, separators=(",", ":")))
 PY
 }
+# O ffmpeg que gravou (docs/30 D138): a versao que o proprio Jibri registrou no arranque da gravacao
+# (/storage/logs/ffmpeg.*.txt). Para conferir que o gravador usou o 6.1 e nao o 7.1 da imagem.
+ffmpeg_gravou() {
+    grep -h -o 'ffmpeg version [^ ]*' "${FFMPEG_LOGS:-/storage/logs}"/ffmpeg.*.txt 2>/dev/null | tail -n1 | sed 's/^ffmpeg version //' | tr -cd 'A-Za-z0-9.+~_-' | cut -c1-40
+}
+# As imagens diferentes por segundo do arquivo (docs/30 A65), a medida que vale: em tres janelas de 20 s (a 10%, 50% e
+# 85% da duracao), quantos quadros o mpdecimate mantem, isto e, quantos mudaram em relacao ao anterior. [[segundo, imagens
+# por segundo], ...]. Pessoa parada conta menos: e estimativa. Com o ffmpeg da imagem (/usr/bin), que le H.264 e tem o
+# filtro; o da gravacao so tem o que a gravacao usa. Sem ffmpeg, sem a duracao ou com erro, nada.
+imagens_json() {
+    bin="${FFMPEG_CONTAGEM:-/usr/bin/ffmpeg}"
+    [ -x "$bin" ] || return 0
+    case "$duration" in ''|null) return 0 ;; esac
+    [ "$duration" -ge 12 ] || return 0
+    win=20; [ "$duration" -ge 40 ] || win=$((duration / 2))
+    out=""
+    for pct in 10 50 85; do
+        off=$((duration * pct / 100)); [ $((off + win)) -le "$duration" ] || off=$((duration - win))
+        kept=$("$bin" -nostdin -v info -ss "$off" -t "$win" -i "$file" -vf mpdecimate -an -f null - 2>&1 | tr '\r' '\n' | grep -o 'frame= *[0-9]*' | tail -n1 | grep -o '[0-9]*$')
+        case "$kept" in ''|*[!0-9]*) continue ;; esac
+        fps=$(awk -v k="$kept" -v w="$win" 'BEGIN { printf "%.1f", (w > 0 ? k / w : 0) }')
+        out="$out${out:+,}[$off,$fps]"
+    done
+    [ -n "$out" ] && printf '[%s]' "$out"
+    return 0
+}
 sign() { printf '%s.%s' "$1" "$2" | openssl dgst -sha256 -hmac "$WEBINAR_RECORDER_WEBHOOK_SECRET" -r | cut -d' ' -f1; }
 body="{\"sessionId\":\"$(json_str "${SESSAO:-}")\",\"state\":\"$state\",\"room\":\"$(json_str "$room")\",\"fileName\":\"$(json_str "$name")\",\"startedAt\":$(json_opt "$started_at"),\"durationSeconds\":$duration,\"sizeBytes\":$size,\"sha256\":\"$sha\",\"bunnyLibraryId\":$(json_opt "${BUNNY_LIBRARY_ID:-}"),\"bunnyVideoId\":$(json_opt "$guid")"
 [ -n "$error" ] && body="$body,\"error\":\"$(json_str "$error")\""
+gravou=$(ffmpeg_gravou)
+[ -n "$gravou" ] && body="$body,\"ffmpeg\":\"$(json_str "$gravou")\""
+imagens=$(imagens_json 2>/dev/null || true)
+[ -n "$imagens" ] && body="$body,\"imagens\":$imagens"
 cpu=$(cpu_json "${CPU_LOG:-/storage/cpu.log}")
 [ -n "$cpu" ] && body="$body,\"cpu\":$cpu"
 fluidez=$(fluidez_json)

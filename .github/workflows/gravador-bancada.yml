@@ -15,6 +15,8 @@ on:
       - .github/workflows/gravador-bancada.yml
       - infra/jitsi/jibri/bancada/**
       - infra/jitsi/jibri/xorg-video-dummy.conf
+      - infra/jitsi/jibri/ffmpeg-gravacao.sh
+      - infra/jitsi/jibri/custom-jibri.conf
   # Uma variacao avulsa, sem commit: a tela, o tamanho e os parametros a mais do Chrome.
   workflow_dispatch:
     inputs:
@@ -46,10 +48,6 @@ on:
         type: choice
         default: arquivo
         options: [arquivo, stream]
-      ffmpeg_antigo:
-        description: "Compilar e testar tambem o ffmpeg 6.1 (a geracao anterior a 7)"
-        type: boolean
-        default: true
       gravacoes:
         description: "Variacoes do comando de gravacao: nome|entrada da tela|entrada do audio|variaveis|opcoes da saida; ... (vazio = as do medir.sh)"
         type: string
@@ -84,7 +82,6 @@ jobs:
           SEGUNDOS: ${{ inputs.segundos }}
           PAGINA_MODO: ${{ inputs.pagina }}
           GRAVACOES: ${{ inputs.gravacoes }}
-          FFMPEG_ANTIGO: ${{ inputs.ffmpeg_antigo && '1' || '' }}
         run: bash infra/jitsi/jibri/bancada/rodar.sh
 
   bancada:
@@ -104,16 +101,19 @@ jobs:
             tamanho: 1920x1080
             extra: ""
             pagina: arquivo
+            minimo: ""
           - nome: nossa-1080
             tela: nossa
             tamanho: 1920x1080
             extra: ""
             pagina: arquivo
+            minimo: "28"
           - nome: nossa-720
             tela: nossa
             tamanho: 1280x720
             extra: ""
             pagina: arquivo
+            minimo: "28"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -125,5 +125,5 @@ jobs:
           JIBRI_RECORDING_RESOLUTION: ${{ matrix.tamanho }}
           CHROMIUM_FLAGS_EXTRA: ${{ matrix.extra }}
           PAGINA_MODO: ${{ matrix.pagina }}
-          FFMPEG_ANTIGO: "1"
+          BANCADA_MINIMO: ${{ matrix.minimo }}
         run: bash infra/jitsi/jibri/bancada/rodar.sh

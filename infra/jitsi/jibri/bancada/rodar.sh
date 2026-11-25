@@ -2,12 +2,12 @@
 # A bancada do gravador (docs/30 A65), a parte de fora: sobe um container da imagem do Jibri na tag fixada, como o
 # gravador de verdade sobe (2 GB de /dev/shm, o mesmo tamanho de tela), espera o Xorg e roda o medir.sh dentro dele.
 # Nao precisa de sala, de live nem de servidor nosso: o Jibri do container fica tentando um XMPP que nao existe, e a
-# bancada usa so o Xorg, o audio, o Chrome e o ffmpeg da imagem. Roda no workflow gravador-bancada.yml ou em qualquer
+# bancada usa so o Xorg, o audio e o Chrome da imagem, com o ffmpeg da gravacao montado como no gravador. Roda no workflow gravador-bancada.yml ou em qualquer
 # maquina com Docker:
 #   TELA=nossa JIBRI_RECORDING_RESOLUTION=1920x1080 bash infra/jitsi/jibri/bancada/rodar.sh
 # Variaveis: TELA (nossa = o xorg-video-dummy.conf deste repositorio, a 60 Hz; imagem = o que vem na imagem, o controle
 # do defeito de 10 Hz), JIBRI_RECORDING_RESOLUTION, e as do medir.sh (FONTE_TAMANHO, FONTE_FPS, SEGUNDOS,
-# GRAVACOES, CHROMIUM_FLAGS_EXTRA, PAGINA_MODO), repassadas, e FFMPEG_ANTIGO=1 (compila e testa o ffmpeg 6.1).
+# GRAVACOES, CHROMIUM_FLAGS_EXTRA, PAGINA_MODO, BANCADA_MINIMO), repassadas.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -euo pipefail
 
@@ -29,16 +29,15 @@ esac
 
 echo "==> $image, tela $screen, $res, $(nproc) nucleos"
 
-# FFMPEG_ANTIGO=1: compila o ffmpeg da geracao anterior a 7 (ffmpeg-antigo.sh, num container da mesma base da imagem) e o
-# monta em /ffmpeg-antigo; o medir.sh grava uma vez a mais com ele, o mesmo comando.
-if [ "${FFMPEG_ANTIGO:-}" = "1" ]; then
-    old_dir=$(mktemp -d)
-    chmod 777 "$old_dir"
-    echo "==> Compilando o ffmpeg antigo do codigo oficial"
-    docker run --rm -v "$here/ffmpeg-antigo.sh:/ffmpeg-antigo.sh:ro" -v "$old_dir:/saida" debian:trixie-slim bash /ffmpeg-antigo.sh | tail -n 3 || true
-    [ -x "$old_dir/ffmpeg" ] || { echo "ERRO: o ffmpeg antigo nao compilou"; tail -n 30 "$old_dir/make.log" 2>/dev/null; exit 1; }
-    mounts+=(-v "$old_dir:/ffmpeg-antigo:ro")
-fi
+# O ffmpeg da gravacao (docs/30 D138), como no gravador de verdade: compilado por ffmpeg-gravacao.sh e montado a frente do
+# ffmpeg da imagem, com o custom-jibri.conf que aponta o Jibri para ele.
+ffdir=$(mktemp -d)
+chmod 777 "$ffdir"
+echo "==> Compilando o ffmpeg da gravacao do codigo oficial"
+bash "$jibri_dir/ffmpeg-gravacao.sh" "$ffdir" 2>&1 | tail -n 2
+[ -x "$ffdir/ffmpeg" ] || { echo "ERRO: o ffmpeg da gravacao nao compilou"; tail -n 30 "$ffdir/make.log" 2>/dev/null; exit 1; }
+mounts+=(-v "$ffdir/ffmpeg:/usr/local/bin/ffmpeg:ro" -v "$jibri_dir/custom-jibri.conf:/config/custom-jibri.conf:ro")
+
 trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
 # As mesmas opcoes do docker-compose.yml do gravador: raiz so de leitura, /run e /tmp em memoria (o /tmp sem execucao),
 # 2 GB de /dev/shm e o /storage numa pasta do disco, do usuario 1000 da imagem.
@@ -62,8 +61,11 @@ done
 docker exec "$name" test -S /tmp/.X11-unix/X0 || { echo "ERRO: o Xorg do container nao subiu"; docker logs --tail 40 "$name"; exit 1; }
 sleep 5
 
+# O ffmpeg que o Jibri do container acha pelo PATH dele (o da gravacao tem de vir antes do da imagem).
+docker exec "$name" sh -c 'pid=$(pgrep -f jibri.jar | head -n1); [ -n "$pid" ] || exit 0; p=$(tr "\0" "\n" < "/proc/$pid/environ" | sed -n "s/^PATH=//p"); echo "  PATH do Jibri: $p"; echo "  o ffmpeg que o Jibri acha: $(PATH="$p" command -v ffmpeg) ($(PATH="$p" ffmpeg -version 2>/dev/null | head -n1 | cut -d" " -f1-3))"' || true
+
 docker exec \
     -e DISPLAY=:0 -e HOME=/home/s6 -e JIBRI_RECORDING_RESOLUTION="$res" \
     -e FONTE_TAMANHO="${FONTE_TAMANHO:-1920x1080}" -e FONTE_FPS="${FONTE_FPS:-30}" -e SEGUNDOS="${SEGUNDOS:-20}" \
-    -e CHROMIUM_FLAGS_EXTRA="${CHROMIUM_FLAGS_EXTRA:-}" -e PAGINA_MODO="${PAGINA_MODO:-arquivo}" ${GRAVACOES:+-e GRAVACOES="$GRAVACOES"} \
+    -e CHROMIUM_FLAGS_EXTRA="${CHROMIUM_FLAGS_EXTRA:-}" -e PAGINA_MODO="${PAGINA_MODO:-arquivo}" -e BANCADA_MINIMO="${BANCADA_MINIMO:-}" ${GRAVACOES:+-e GRAVACOES="$GRAVACOES"} \
     "$name" bash /bancada/medir.sh

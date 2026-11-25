@@ -25,13 +25,17 @@ src_fps="${FONTE_FPS:-30}"
 seconds="${SEGUNDOS:-20}"
 extra="${CHROMIUM_FLAGS_EXTRA:-}"
 
+# O ffmpeg e o ffprobe da imagem (/usr/bin) geram o video, leem a tela e contam o arquivo: o da gravacao
+# (/usr/local/bin/ffmpeg, D138) so tem o que a gravacao usa.
+FF=/usr/bin/ffmpeg; FP=/usr/bin/ffprobe
+minimum="${BANCADA_MINIMO:-}"
 rm -rf "$out"; mkdir -p "$out/perfil"; cp "$here/bancada.html" "$out/bancada.html"
 
 screen_hz=$(grep -h -o "Modeline \"$res\"x[0-9.]*" /storage/logs/xorg.log 2>/dev/null | tail -n1 | sed 's/.*x//')
 echo "==> Tela virtual (xorg.log): $res a ${screen_hz:-?} Hz"
 
 echo "==> Video de teste: $src_size a $src_fps quadros, VP8"
-ffmpeg -v error -y -f lavfi -i "testsrc2=size=$src_size:rate=$src_fps" -t 90 \
+"$FF" -v error -y -f lavfi -i "testsrc2=size=$src_size:rate=$src_fps" -t 90 \
     -c:v libvpx -b:v 6M -deadline realtime -cpu-used 8 -g 60 -an "$out/fonte.webm" \
     || { echo "ERRO: o ffmpeg da imagem nao gerou o video de teste"; exit 1; }
 
@@ -52,11 +56,11 @@ echo "  pagina antes da gravacao: $(page)"
 # Como o Chrome desenha: os parametros do processo de GPU dizem se a pagina e montada por GL em software ou sem GPU.
 echo "  processo de GPU: $(ps -eo args 2>/dev/null | grep -- '--type=gpu-process' | grep -v grep | head -n1 | grep -o -- '--use-[a-z-]*=[a-z0-9-]*\|--disable-gpu[a-z-]*\|--enable-unsafe-[a-z-]*' | tr '\n' ' ')"
 
-echo "==> $(ffmpeg -version 2>/dev/null | head -n1 | cut -d' ' -f1-3)"
+echo "==> da imagem: $("$FF" -version 2>/dev/null | head -n1 | cut -d' ' -f1-3); da gravacao: $(/usr/local/bin/ffmpeg -version 2>/dev/null | head -n1 | cut -d' ' -f1-3)"
 echo "==> A tela, lida 60 vezes por segundo sem gravar (quantas imagens diferentes por segundo ela mostra)"
 # O -t antes do -i (limite da leitura): depois dele o limite seria da saida, e com a tela parada o mpdecimate descarta
 # tudo, a saida nunca anda e o ffmpeg nao termina.
-screen_kept=$(ffmpeg -v info -f x11grab -draw_mouse 0 -framerate 60 -video_size "$res" -t 8 -i :0.0+0,0 -vf mpdecimate -an -f null - 2>&1 \
+screen_kept=$("$FF" -v info -f x11grab -draw_mouse 0 -framerate 60 -video_size "$res" -t 8 -i :0.0+0,0 -vf mpdecimate -an -f null - 2>&1 \
     | tr '\r' '\n' | grep -o 'frame= *[0-9]*' | tail -n1 | grep -o '[0-9]*$')
 screen_fps=$(awk -v k="${screen_kept:-0}" 'BEGIN { printf "%.1f", k / 8 }')
 echo "  $screen_fps por segundo"
@@ -65,7 +69,7 @@ echo "  $screen_fps por segundo"
 # audio anda; a rajada do audio vira a taxa de imagens do arquivo).
 audio_probe() {  # audio_probe <rotulo> [VAR=valor...]
     local label="$1"; shift
-    env "$@" ffmpeg -nostdin -v info -f pulse -t 6 -i default -af ashowinfo -f null - 2>&1 | python3 -u -c '
+    env "$@" "$FF" -nostdin -v info -f pulse -t 6 -i default -af ashowinfo -f null - 2>&1 | python3 -u -c '
 import sys, time
 t, n = [], []
 for line in iter(sys.stdin.readline, ""):
@@ -86,8 +90,6 @@ print("%d pedacos em %.1f s, %d amostras cada (mediana); espera entre pedacos: m
 }
 echo "==> O audio que o ffmpeg recebe do pulse"
 audio_probe "padrao"
-audio_probe "com PULSE_LATENCY_MSEC=20" PULSE_LATENCY_MSEC=20
-command -v pactl >/dev/null 2>&1 && pactl list sources 2>/dev/null | grep -E "Name:|Latency:" | tr -s ' \t' ' ' | sed 's/^/  pactl: /' || true
 
 # As gravacoes: cada uma e "nome|opcoes da entrada da tela|entrada do audio|variaveis de ambiente|opcoes a mais da
 # saida", separadas por ponto e virgula. A primeira e o comando de gravacao do Jibri como a imagem o monta (reference.conf
@@ -95,13 +97,11 @@ command -v pactl >/dev/null 2>&1 && pactl list sources 2>/dev/null | grep -E "Na
 # arquivo. Achado de 25/11/2026: com o ffmpeg 7.1 da imagem, a entrada de audio segura a captura da tela (4 imagens por
 # segundo com o audio, 30 sem ele).
 pulse="-f pulse -thread_queue_size 4096 -i default"
-default_recordings="jibri|-r 30|$pulse||;sem-audio|-r 30|||;silencio-gerado|-r 30|-f lavfi -i anullsrc=r=44100:cl=stereo||"
-# O ffmpeg da geracao anterior (ffmpeg-antigo.sh), se o rodar.sh o montou: o MESMO comando do Jibri, com o audio do pulse.
-if [ -x /ffmpeg-antigo/ffmpeg ]; then
-    echo "==> ffmpeg antigo: $(/ffmpeg-antigo/ffmpeg -version 2>/dev/null | head -n1 | cut -d' ' -f1-3)"
-    default_recordings="$default_recordings;ffmpeg-antigo|-r 30|$pulse|PATH=/ffmpeg-antigo:/usr/local/bin:/usr/bin:/bin|"
-fi
-recordings="${GRAVACOES:-$default_recordings}"
+gravador_path="PATH=/usr/local/bin:/usr/bin:/bin"
+imagem_path="PATH=/usr/bin:/bin"
+# gravador: o comando do Jibri com o ffmpeg que o gravador acha primeiro (o da gravacao, se montado). imagem: o mesmo
+# comando com o ffmpeg 7.1 da imagem, o defeito. sem-audio: o teto, so a tela.
+recordings="${GRAVACOES:-gravador|-r 30|$pulse|$gravador_path|;imagem|-r 30|$pulse|$imagem_path|;sem-audio|-r 30||$imagem_path|}"
 
 record() {  # record <nome> <opcoes da entrada da tela> <entrada do audio> <variaveis> <opcoes a mais da saida>
     local name="$1" vin="$2" ain="$3" vars="$4" more="$5" aenc=()
@@ -124,14 +124,22 @@ while IFS='|' read -r name vin ain vars more; do
     read -r cpu_b idle_b <<< "$(cpu_total)"
     page_now=$(page)
     echo "  ffmpeg: $(tr '\r' '\n' < "$out/$name.log" | grep 'frame=' | tail -n1 | tr -s ' ')"
-    total=$(ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -of csv=p=0 "$out/$name.mp4" 2>/dev/null | head -n1)
-    duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$out/$name.mp4" 2>/dev/null | head -n1)
-    audio_s=$(ffprobe -v error -select_streams a:0 -show_entries stream=duration -of csv=p=0 "$out/$name.mp4" 2>/dev/null | head -n1)
-    kept=$(ffmpeg -nostdin -v info -i "$out/$name.mp4" -vf mpdecimate -an -f null - 2>&1 | tr '\r' '\n' | grep -o 'frame= *[0-9]*' | tail -n1 | grep -o '[0-9]*$')
+    total=$("$FP" -v error -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -of csv=p=0 "$out/$name.mp4" 2>/dev/null | head -n1)
+    duration=$("$FP" -v error -show_entries format=duration -of csv=p=0 "$out/$name.mp4" 2>/dev/null | head -n1)
+    audio_s=$("$FP" -v error -select_streams a:0 -show_entries stream=duration -of csv=p=0 "$out/$name.mp4" 2>/dev/null | head -n1)
+    kept=$("$FF" -nostdin -v info -i "$out/$name.mp4" -vf mpdecimate -an -f null - 2>&1 | tr '\r' '\n' | grep -o 'frame= *[0-9]*' | tail -n1 | grep -o '[0-9]*$')
     # Os parenteses em volta da conta: no awk, um > solto depois de printf manda a saida para um arquivo.
     unique=$(awk -v k="${kept:-0}" -v d="${duration:-0}" 'BEGIN { printf "%.1f", (d > 0 ? k / d : 0) }')
+    # Depois do arranque: nos primeiros segundos o ffmpeg abre o audio com a captura da tela ja contando, e recupera o
+    # atraso com quadros repetidos; a taxa que vale para uma gravacao longa e a de depois disso.
+    kept_late=$("$FF" -nostdin -v info -ss 4 -i "$out/$name.mp4" -vf mpdecimate -an -f null - 2>&1 | tr '\r' '\n' | grep -o 'frame= *[0-9]*' | tail -n1 | grep -o '[0-9]*$')
+    late=$(awk -v k="${kept_late:-0}" -v d="${duration:-0}" 'BEGIN { printf "%.1f", (d > 4 ? k / (d - 4) : 0) }')
     cpu=$(awk -v a="$cpu_a" -v b="$cpu_b" -v ia="$idle_a" -v ib="$idle_b" 'BEGIN { d = b - a; printf "%d", (d > 0 ? (1 - (ib - ia) / d) * 100 : 0) }')
-    echo "RESULTADO gravacao=$name arquivo_imagens_por_s=$unique tela_imagens_por_s=$screen_fps tela=${screen_hz:-?}Hz pagina=$mode tamanho=$res fonte=${src_size}@${src_fps} extra=[${extra}] quadros_do_arquivo=${total:-?} duracao=${duration:-?}s audio=${audio_s:-sem}s cpu=${cpu}% nucleos=$(nproc) | $page_now"
+    echo "RESULTADO gravacao=$name arquivo_imagens_por_s=$unique depois_de_4s=$late tela_imagens_por_s=$screen_fps tela=${screen_hz:-?}Hz pagina=$mode tamanho=$res fonte=${src_size}@${src_fps} extra=[${extra}] quadros_do_arquivo=${total:-?} duracao=${duration:-?}s audio=${audio_s:-sem}s cpu=${cpu}% nucleos=$(nproc) | $page_now"
+    # A regua: a gravacao "gravador" tem de passar do minimo depois do arranque (BANCADA_MINIMO, imagens por segundo).
+    if [ -n "$minimum" ] && [ "$name" = "gravador" ] && ! awk -v l="$late" -v m="$minimum" 'BEGIN { exit !(l >= m) }'; then
+        echo "ERRO: o gravador ficou em $late imagens por segundo depois do arranque, abaixo de $minimum"; status=1
+    fi
 done <<< "$(printf '%s' "$recordings" | tr ';' '\n')"
 echo "  as linhas de execucao que mais usaram CPU: $(ps -eLo pcpu,comm --sort=-pcpu 2>/dev/null | sed -n '2,9p' | tr -s ' ' | tr '\n' ';')"
 exit "$status"

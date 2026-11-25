@@ -206,6 +206,15 @@ if (sub === "pull") process.exit(process.env.SHIM_DOCKER_PULL_FALHA ? 1 : 0);
 // O build da imagem do app no runner (deploy-membros): so anotado.
 if (sub === "buildx") process.exit(0);
 if (sub === "run") {
+  // A compilacao do ffmpeg da gravacao (infra/jitsi/jibri/ffmpeg-gravacao.sh, docs/30 D138): deixa um binario de mentira
+  // na pasta de saida, ou falha com SHIM_FFMPEG_FALHA.
+  if (args.some((a) => a.endsWith(":/ffmpeg-gravacao.sh:ro"))) {
+    if (process.env.SHIM_FFMPEG_FALHA) { process.stderr.write("docker de mentira: a compilacao do ffmpeg falhou\n"); process.exit(1); }
+    const saida = args.find((a) => a.endsWith(":/saida"));
+    fs.writeFileSync(saida.slice(0, -":/saida".length) + "/ffmpeg", "#!/bin/sh\necho ffmpeg version 6.1.6 de mentira\n", { mode: 0o755 });
+    process.stdout.write("ffmpeg version 6.1.6 de mentira\n");
+    process.exit(0);
+  }
   const mount = args.find((a) => a.endsWith(":/cerimonia/cerimonia.mjs:ro"));
   if (!mount) { process.stderr.write("docker de mentira: run sem a cerimonia\n"); process.exit(125); }
   const env = { PATH: process.env.PATH, CERIMONIA_MODULOS: process.env.SHIM_CERIMONIA_MODULOS, CERIMONIA_EXTENSAO: ".mjs" };
