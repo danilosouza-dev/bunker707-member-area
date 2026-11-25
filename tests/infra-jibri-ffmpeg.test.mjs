@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -83,8 +83,12 @@ test("ffmpeg-gravacao.sh fora do container: entrega o binario, nao repete quando
 test("o binario chega ao Jibri: o compose o monta a frente do ffmpeg da imagem, o custom-jibri.conf aponta para ele e o jibri-up copia os dois antes de subir", () => {
   assert.match(compose, /^\s+- \.\/ffmpeg:\/usr\/local\/bin\/ffmpeg:ro$/m, "/usr/local/bin vem antes de /usr/bin no PATH do Jibri");
   assert.match(compose, /^\s+- \.\/custom-jibri\.conf:\/config\/custom-jibri\.conf:ro$/m, "a imagem inclui o /config/custom-jibri.conf no fim do jibri.conf dela");
-  assert.match(custom, /^jibri\.ffmpeg\.ffmpeg-binary = "\/usr\/local\/bin\/ffmpeg"$/m, "o mesmo caminho da montagem");
-  assert.doesNotMatch(custom.replace(/^\/\/.*$/gm, ""), /\{\{|\$\{/, "so a chave: nada que o HOCON ou o tpl tente resolver");
+  assert.match(custom, /^jibri\.ffmpeg\.ffmpeg-binary = "\/usr\/local\/bin\/ffmpeg-jibri"$/m, "o mesmo caminho da montagem");
+  assert.match(compose, /^\s+- \.\/ffmpeg-jibri\.sh:\/usr\/local\/bin\/ffmpeg-jibri:ro$/m);
+  assert.doesNotMatch(custom, /\{\{/, "nada que o tpl tente resolver");
+  // O audio alinhado pela tela: a opcao e da entrada do pulse, entao vem depois do -i da tela e antes do -f do audio.
+  const input = /input-linux = \[\n([\s\S]*?)\n\]/.exec(custom)[1].split("\n").map((l) => l.trim().replaceAll('"', "").replace(", ", " "));
+  assert.deepEqual(input, ["-f x11grab", "-draw_mouse 0", "-r ${jibri.ffmpeg.framerate}", "-s ${jibri.ffmpeg.resolution}", "-thread_queue_size ${jibri.ffmpeg.queue-size}", "-i :0.0+0,0", "-isync 0", "-f ${jibri.ffmpeg.audio-source}", "-thread_queue_size ${jibri.ffmpeg.queue-size}", "-i ${jibri.ffmpeg.audio-device}"]);
 
   const comeca = jibriSh.indexOf('bash "$JITSI_DIR/jibri/ffmpeg-gravacao.sh" "$ffdir" > "$ffdir/build.log" 2>&1 &');
   const espera = jibriSh.indexOf('if wait "$ffpid" && [ -x "$ffdir/ffmpeg" ]; then');
@@ -200,4 +204,33 @@ test("finalize.sh: a versao do ffmpeg que gravou sai do registro do Jibri, e as 
   // As duas medidas entram no corpo do aviso so quando existem (o app guarda o corpo cru).
   assert.ok(finalize.includes(`[ -n "$gravou" ] && body="$body,\\"ffmpeg\\":\\"$(json_str "$gravou")\\""`));
   assert.ok(finalize.includes(`[ -n "$imagens" ] && body="$body,\\"imagens\\":$imagens"`));
+});
+
+test("ffmpeg-jibri.sh (D140): espera antes de o ffmpeg escrever, repassa os argumentos e vira o proprio ffmpeg, que recebe o SIGINT da parada", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "bunker707-ffmpeg-jibri-"));
+  try {
+    const script = join(root, "infra/jitsi/jibri/ffmpeg-jibri.sh");
+    writeFileSync(join(dir, "ffmpeg"), '#!/usr/bin/env node\nprocess.on("SIGINT", () => { console.log("parei"); process.exit(255); });\nconsole.log(JSON.stringify(process.argv.slice(2)));\nsetTimeout(() => {}, 20000);\n');
+    chmodSync(join(dir, "ffmpeg"), 0o755);
+    const start = Date.now();
+    const child = spawn(script, ["-i", ":0.0+0,0", "a b"], { env: { ...process.env, FFMPEG_JIBRI_BIN: join(dir, "ffmpeg"), FFMPEG_JIBRI_ESPERA: "1" } });
+    let out = "";
+    let first = 0;
+    const code = await new Promise((resolve) => {
+      child.stdout.on("data", (d) => {
+        out += d;
+        if (!first) {
+          first = Date.now() - start;
+          child.kill("SIGINT");
+        }
+      });
+      child.on("close", resolve);
+    });
+    assert.ok(first >= 1000, `nada antes da espera (${first} ms)`);
+    assert.equal(out, '["-i",":0.0+0,0","a b"]\nparei\n');
+    assert.equal(code, 255);
+    assert.match(readFileSync(script, "utf8"), /^sleep "\$\{FFMPEG_JIBRI_ESPERA:-2\}"$/m, "2 s no gravador");
+  } finally {
+    rmSync(dir, { force: true, recursive: true });
+  }
 });

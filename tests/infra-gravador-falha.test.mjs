@@ -67,7 +67,7 @@ test("jibri-up leva o ffmpeg da gravacao e o custom-jibri.conf para a maquina an
   const compila = calls.findIndex((c) => c.tool === "docker" && c.args[0] === "run" && c.args.some((a) => a.endsWith(":/ffmpeg-gravacao.sh:ro")));
   assert.ok(compila >= 0, "a compilacao do ffmpeg roda no runner");
   const copias = calls.filter((c) => c.tool === "scp").map((c) => c.args[1].replace(/^.*:/, ""));
-  for (const arquivo of ["/opt/jibri/ffmpeg", "/opt/jibri/custom-jibri.conf", "/opt/jibri/xorg-video-dummy.conf", "/opt/jibri/docker-compose.yml"]) assert.ok(copias.includes(arquivo), `${arquivo} copiado (${copias.join(", ")})`);
+  for (const arquivo of ["/opt/jibri/ffmpeg", "/opt/jibri/custom-jibri.conf", "/opt/jibri/ffmpeg-jibri.sh", "/opt/jibri/xorg-video-dummy.conf", "/opt/jibri/docker-compose.yml"]) assert.ok(copias.includes(arquivo), `${arquivo} copiado (${copias.join(", ")})`);
   const copiaFfmpeg = calls.findIndex((c) => c.tool === "scp" && c.args[1].endsWith(":/opt/jibri/ffmpeg"));
   const sobe = sshIndex(calls, (c) => c.command.includes("docker compose up -d"));
   assert.ok(copiaFfmpeg >= 0 && copiaFfmpeg < sobe, "o ffmpeg chega antes do up -d: sem o arquivo, o Docker cria uma pasta no lugar");

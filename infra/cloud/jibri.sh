@@ -193,12 +193,13 @@ up() {
     fi
     rcopy "$ffdir/ffmpeg" "$target:$JIBRI_REMOTE_DIR/ffmpeg"
     rcopy "$JITSI_DIR/jibri/custom-jibri.conf" "$target:$JIBRI_REMOTE_DIR/custom-jibri.conf"
+    rcopy "$JITSI_DIR/jibri/ffmpeg-jibri.sh" "$target:$JIBRI_REMOTE_DIR/ffmpeg-jibri.sh"
     # A tela virtual a 60 Hz (docs/30 D137), montada pelo compose: precisa estar na maquina antes do `up -d`.
     rcopy "$JITSI_DIR/jibri/xorg-video-dummy.conf" "$target:$JIBRI_REMOTE_DIR/xorg-video-dummy.conf"
     rcopy "$JITSI_DIR/jibri/finalize.sh" "$target:$JIBRI_REMOTE_DIR/finalize.sh"
     rcopy "$JITSI_DIR/scripts/jibri-status.sh" "$target:$JIBRI_REMOTE_DIR/jibri-status.sh"
     rcopy "$JITSI_DIR/jibri/cpu-amostras.sh" "$target:$JIBRI_REMOTE_DIR/cpu-amostras.sh"
-    rsh "$target" "chmod 755 '$JIBRI_REMOTE_DIR/finalize.sh' '$JIBRI_REMOTE_DIR/jibri-status.sh' '$JIBRI_REMOTE_DIR/cpu-amostras.sh' '$JIBRI_REMOTE_DIR/ffmpeg'; [ -f '$envj' ] || { umask 077; cat > '$envj'; }" < "$JITSI_DIR/jibri/.env.example"
+    rsh "$target" "chmod 755 '$JIBRI_REMOTE_DIR/finalize.sh' '$JIBRI_REMOTE_DIR/jibri-status.sh' '$JIBRI_REMOTE_DIR/cpu-amostras.sh' '$JIBRI_REMOTE_DIR/ffmpeg' '$JIBRI_REMOTE_DIR/ffmpeg-jibri.sh'; [ -f '$envj' ] || { umask 077; cat > '$envj'; }" < "$JITSI_DIR/jibri/.env.example"
     set_env "$target" "$envj" JITSI_IMAGE_REPO "$image_repo"
     set_env "$target" "$envj" JITSI_IMAGE_VERSION "$image_version"
     set_env "$target" "$envj" TZ UTC

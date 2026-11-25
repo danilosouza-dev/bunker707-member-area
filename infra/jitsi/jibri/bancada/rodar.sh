@@ -36,7 +36,7 @@ chmod 777 "$ffdir"
 echo "==> Compilando o ffmpeg da gravacao do codigo oficial"
 bash "$jibri_dir/ffmpeg-gravacao.sh" "$ffdir" 2>&1 | tail -n 2
 [ -x "$ffdir/ffmpeg" ] || { echo "ERRO: o ffmpeg da gravacao nao compilou"; tail -n 30 "$ffdir/make.log" 2>/dev/null; exit 1; }
-mounts+=(-v "$ffdir/ffmpeg:/usr/local/bin/ffmpeg:ro" -v "$jibri_dir/custom-jibri.conf:/config/custom-jibri.conf:ro")
+mounts+=(-v "$ffdir/ffmpeg:/usr/local/bin/ffmpeg:ro" -v "$jibri_dir/custom-jibri.conf:/config/custom-jibri.conf:ro" -v "$jibri_dir/ffmpeg-jibri.sh:/usr/local/bin/ffmpeg-jibri:ro")
 
 # O capturador de verdade do Jibri (captura/Captura.java), compilado com o Java da maquina.
 capdir=$(mktemp -d)

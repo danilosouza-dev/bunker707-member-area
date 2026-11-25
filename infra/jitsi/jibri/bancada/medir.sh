@@ -121,12 +121,16 @@ record() {  # record <nome> <opcoes da entrada da tela> <entrada do audio> <vari
         mkdir -p "$dir"
         java -cp /opt/jitsi/jibri/jibri.jar:/captura -Dconfig.file=/run/jibri/config/jibri.conf \
             -Djava.util.logging.config.file=/bancada/captura/logging.properties -Djava.io.tmpdir=/run/jibri/tmp \
-            "-Djibri.ffmpeg.ffmpeg-binary=$bin" Captura "$dir" "$seconds" > "$out/$name.log" 2>&1
+            ${bin:+"-Djibri.ffmpeg.ffmpeg-binary=$bin"} Captura "$dir" "$seconds" > "$out/$name.log" 2>&1
         echo "  capturador: $(grep -h -E 'Starting ffmpeg with|transitioning|exited with|Timed out|forcibly|CAPTURA|PILHA|Exception' "$out/$name.log" | cut -c1-900 | head -n 14)"
         echo "  quantas vezes o Jibri ficou 2 s sem ler nada do ffmpeg: $(grep -c "hasn't written" "$out/$name.log")"
         echo "  o que o Jibri leu do ffmpeg:"
         grep -h . "$out"/ffmpeg-jibri.*.txt 2>/dev/null | sed 's/^/    /' | cut -c1-220 | { head -n 34; echo "    ..."; tail -n 6; }
         rm -f "$out"/ffmpeg-jibri.*
+        # A regua: com a configuracao do gravador, o Jibri tem de reconhecer que esta gravando (o Jicofo para em 90 s sem isso).
+        if [ "$name" = "jibri-gravador" ] && ! grep -q "to Running" "$out/$name.log"; then
+            echo "ERRO: o Jibri nao reconheceu que o ffmpeg esta gravando (o Jicofo mandaria parar em 90 s)"; status=1
+        fi
         mv "$(find "$dir" -name '*.mp4' | head -n1)" "$out/$name.mp4"
         return
     fi

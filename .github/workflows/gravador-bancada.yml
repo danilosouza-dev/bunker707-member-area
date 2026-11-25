@@ -17,6 +17,7 @@ on:
       - infra/jitsi/jibri/xorg-video-dummy.conf
       - infra/jitsi/jibri/ffmpeg-gravacao.sh
       - infra/jitsi/jibri/custom-jibri.conf
+      - infra/jitsi/jibri/ffmpeg-jibri.sh
   # Uma variacao avulsa, sem commit: a tela, o tamanho e os parametros a mais do Chrome.
   workflow_dispatch:
     inputs:
@@ -147,8 +148,8 @@ jobs:
             extra: ""
             pagina: av
             minimo: ""
-            segundos: "40"
-            gravacoes: "jibri-61|JIBRI||JIBRI_FF=/usr/local/bin/ffmpeg|;jibri-71|JIBRI||JIBRI_FF=/usr/bin/ffmpeg|"
+            segundos: "120"
+            gravacoes: "jibri-gravador|JIBRI|||;jibri-sem-espera|JIBRI||JIBRI_FF=/bancada/captura/direto-61.sh|;jibri-71|JIBRI||JIBRI_FF=/usr/bin/ffmpeg|"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
