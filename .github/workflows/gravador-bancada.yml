@@ -46,6 +46,10 @@ on:
         type: choice
         default: arquivo
         options: [arquivo, stream]
+      ffmpeg_antigo:
+        description: "Compilar e testar tambem o ffmpeg 6.1 (a geracao anterior a 7)"
+        type: boolean
+        default: true
       gravacoes:
         description: "Variacoes do comando de gravacao: nome|entrada da tela|entrada do audio|variaveis|opcoes da saida; ... (vazio = as do medir.sh)"
         type: string
@@ -80,6 +84,7 @@ jobs:
           SEGUNDOS: ${{ inputs.segundos }}
           PAGINA_MODO: ${{ inputs.pagina }}
           GRAVACOES: ${{ inputs.gravacoes }}
+          FFMPEG_ANTIGO: ${{ inputs.ffmpeg_antigo && '1' || '' }}
         run: bash infra/jitsi/jibri/bancada/rodar.sh
 
   bancada:
@@ -120,4 +125,5 @@ jobs:
           JIBRI_RECORDING_RESOLUTION: ${{ matrix.tamanho }}
           CHROMIUM_FLAGS_EXTRA: ${{ matrix.extra }}
           PAGINA_MODO: ${{ matrix.pagina }}
+          FFMPEG_ANTIGO: "1"
         run: bash infra/jitsi/jibri/bancada/rodar.sh

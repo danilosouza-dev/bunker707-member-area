@@ -61,13 +61,47 @@ screen_kept=$(ffmpeg -v info -f x11grab -draw_mouse 0 -framerate 60 -video_size 
 screen_fps=$(awk -v k="${screen_kept:-0}" 'BEGIN { printf "%.1f", k / 8 }')
 echo "  $screen_fps por segundo"
 
+# O audio do gravador: de quanto em quanto tempo chega um pedaco (o ffmpeg 7 so deixa a captura da tela andar quando o
+# audio anda; a rajada do audio vira a taxa de imagens do arquivo).
+audio_probe() {  # audio_probe <rotulo> [VAR=valor...]
+    local label="$1"; shift
+    env "$@" ffmpeg -nostdin -v info -f pulse -t 6 -i default -af ashowinfo -f null - 2>&1 | python3 -u -c '
+import sys, time
+t, n = [], []
+for line in iter(sys.stdin.readline, ""):
+    if "nb_samples:" in line:
+        t.append(time.monotonic())
+        try:
+            n.append(int(line.split("nb_samples:")[1].split()[0]))
+        except Exception:
+            pass
+if len(t) < 3:
+    print("sem pedacos de audio")
+    sys.exit()
+d = sorted((b - a) * 1000 for a, b in zip(t, t[1:]))
+span = max(0.001, t[-1] - t[0])
+print("%d pedacos em %.1f s, %d amostras cada (mediana); espera entre pedacos: mediana %.0f ms, 95%% %.0f ms, maior %.0f ms; esperas acima de 20 ms: %.1f por segundo"
+      % (len(t), span, sorted(n)[len(n) // 2] if n else 0, d[len(d) // 2], d[int(len(d) * 0.95)], d[-1], len([x for x in d if x > 20]) / span))
+' | sed "s/^/  $label: /"
+}
+echo "==> O audio que o ffmpeg recebe do pulse"
+audio_probe "padrao"
+audio_probe "com PULSE_LATENCY_MSEC=20" PULSE_LATENCY_MSEC=20
+command -v pactl >/dev/null 2>&1 && pactl list sources 2>/dev/null | grep -E "Name:|Latency:" | tr -s ' \t' ' ' | sed 's/^/  pactl: /' || true
+
 # As gravacoes: cada uma e "nome|opcoes da entrada da tela|entrada do audio|variaveis de ambiente|opcoes a mais da
 # saida", separadas por ponto e virgula. A primeira e o comando de gravacao do Jibri como a imagem o monta (reference.conf
 # do Jibri com o audio do jibri.conf da imagem); as outras mudam uma coisa so, para achar o que derruba as imagens do
 # arquivo. Achado de 25/11/2026: com o ffmpeg 7.1 da imagem, a entrada de audio segura a captura da tela (4 imagens por
 # segundo com o audio, 30 sem ele).
 pulse="-f pulse -thread_queue_size 4096 -i default"
-recordings="${GRAVACOES:-jibri|-r 30|$pulse||;sem-audio|-r 30|||;latencia-30|-r 30|$pulse|PULSE_LATENCY_MSEC=30|;zerolatency|-r 30|$pulse||-tune zerolatency;latencia-30-zerolatency|-r 30|$pulse|PULSE_LATENCY_MSEC=30|-tune zerolatency}"
+default_recordings="jibri|-r 30|$pulse||;sem-audio|-r 30|||;silencio-gerado|-r 30|-f lavfi -i anullsrc=r=44100:cl=stereo||"
+# O ffmpeg da geracao anterior (ffmpeg-antigo.sh), se o rodar.sh o montou: o MESMO comando do Jibri, com o audio do pulse.
+if [ -x /ffmpeg-antigo/ffmpeg ]; then
+    echo "==> ffmpeg antigo: $(/ffmpeg-antigo/ffmpeg -version 2>/dev/null | head -n1 | cut -d' ' -f1-3)"
+    default_recordings="$default_recordings;ffmpeg-antigo|-r 30|$pulse|PATH=/ffmpeg-antigo:/usr/local/bin:/usr/bin:/bin|"
+fi
+recordings="${GRAVACOES:-$default_recordings}"
 
 record() {  # record <nome> <opcoes da entrada da tela> <entrada do audio> <variaveis> <opcoes a mais da saida>
     local name="$1" vin="$2" ain="$3" vars="$4" more="$5" aenc=()

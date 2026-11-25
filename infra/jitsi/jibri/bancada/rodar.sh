@@ -7,7 +7,7 @@
 #   TELA=nossa JIBRI_RECORDING_RESOLUTION=1920x1080 bash infra/jitsi/jibri/bancada/rodar.sh
 # Variaveis: TELA (nossa = o xorg-video-dummy.conf deste repositorio, a 60 Hz; imagem = o que vem na imagem, o controle
 # do defeito de 10 Hz), JIBRI_RECORDING_RESOLUTION, e as do medir.sh (FONTE_TAMANHO, FONTE_FPS, SEGUNDOS,
-# GRAVACOES, CHROMIUM_FLAGS_EXTRA, PAGINA_MODO), repassadas.
+# GRAVACOES, CHROMIUM_FLAGS_EXTRA, PAGINA_MODO), repassadas, e FFMPEG_ANTIGO=1 (compila e testa o ffmpeg 6.1).
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -euo pipefail
 
@@ -28,6 +28,17 @@ case "$screen" in
 esac
 
 echo "==> $image, tela $screen, $res, $(nproc) nucleos"
+
+# FFMPEG_ANTIGO=1: compila o ffmpeg da geracao anterior a 7 (ffmpeg-antigo.sh, num container da mesma base da imagem) e o
+# monta em /ffmpeg-antigo; o medir.sh grava uma vez a mais com ele, o mesmo comando.
+if [ "${FFMPEG_ANTIGO:-}" = "1" ]; then
+    old_dir=$(mktemp -d)
+    chmod 777 "$old_dir"
+    echo "==> Compilando o ffmpeg antigo do codigo oficial"
+    docker run --rm -v "$here/ffmpeg-antigo.sh:/ffmpeg-antigo.sh:ro" -v "$old_dir:/saida" debian:trixie-slim bash /ffmpeg-antigo.sh | tail -n 3 || true
+    [ -x "$old_dir/ffmpeg" ] || { echo "ERRO: o ffmpeg antigo nao compilou"; tail -n 30 "$old_dir/make.log" 2>/dev/null; exit 1; }
+    mounts+=(-v "$old_dir:/ffmpeg-antigo:ro")
+fi
 trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
 # As mesmas opcoes do docker-compose.yml do gravador: raiz so de leitura, /run e /tmp em memoria (o /tmp sem execucao),
 # 2 GB de /dev/shm e o /storage numa pasta do disco, do usuario 1000 da imagem.
