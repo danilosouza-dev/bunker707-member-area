@@ -7,7 +7,7 @@
 #   TELA=nossa JIBRI_RECORDING_RESOLUTION=1920x1080 bash infra/jitsi/jibri/bancada/rodar.sh
 # Variaveis: TELA (nossa = o xorg-video-dummy.conf deste repositorio, a 60 Hz; imagem = o que vem na imagem, o controle
 # do defeito de 10 Hz), JIBRI_RECORDING_RESOLUTION, e as do medir.sh (FONTE_TAMANHO, FONTE_FPS, SEGUNDOS,
-# CHROMIUM_FLAGS_EXTRA), repassadas.
+# CHROMIUM_FLAGS_EXTRA, PAGINA_MODO), repassadas.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -euo pipefail
 
@@ -29,7 +29,13 @@ esac
 
 echo "==> $image, tela $screen, $res, $(nproc) nucleos"
 trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
-docker run -d --name "$name" --shm-size 2g "${mounts[@]}" \
+# As mesmas opcoes do docker-compose.yml do gravador: raiz so de leitura, /run e /tmp em memoria (o /tmp sem execucao),
+# 2 GB de /dev/shm e o /storage numa pasta do disco, do usuario 1000 da imagem.
+storage=$(mktemp -d)
+chmod 777 "$storage"
+docker run -d --name "$name" --shm-size 2g --read-only \
+    --tmpfs /run:size=256M,mode=1750,exec --tmpfs /tmp:size=256M,mode=1777,noexec \
+    -v "$storage:/storage" "${mounts[@]}" \
     -e DISPLAY=:0 -e TZ=UTC -e JIBRI_RECORDING_RESOLUTION="$res" \
     -e XMPP_SERVER=127.0.0.1 -e XMPP_DOMAIN=meet.jitsi -e XMPP_AUTH_DOMAIN=auth.meet.jitsi \
     -e XMPP_INTERNAL_MUC_DOMAIN=internal-muc.meet.jitsi -e XMPP_MUC_DOMAIN=muc.meet.jitsi \
@@ -48,5 +54,5 @@ sleep 5
 docker exec \
     -e DISPLAY=:0 -e HOME=/home/s6 -e JIBRI_RECORDING_RESOLUTION="$res" \
     -e FONTE_TAMANHO="${FONTE_TAMANHO:-1920x1080}" -e FONTE_FPS="${FONTE_FPS:-30}" -e SEGUNDOS="${SEGUNDOS:-20}" \
-    -e CHROMIUM_FLAGS_EXTRA="${CHROMIUM_FLAGS_EXTRA:-}" \
+    -e CHROMIUM_FLAGS_EXTRA="${CHROMIUM_FLAGS_EXTRA:-}" -e PAGINA_MODO="${PAGINA_MODO:-arquivo}" \
     "$name" bash /bancada/medir.sh

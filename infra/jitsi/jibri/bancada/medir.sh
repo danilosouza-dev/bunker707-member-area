@@ -9,12 +9,15 @@
 #
 # Variaveis: JIBRI_RECORDING_RESOLUTION (o tamanho da tela, o mesmo do container), FONTE_TAMANHO (1920x1080) e FONTE_FPS
 # (30) do video tocado, SEGUNDOS (20) de gravacao, CHROMIUM_FLAGS_EXTRA (parametros a mais do Chrome, separados por
-# espaco) e BANCADA_SAIDA (/tmp/bancada). Imprime uma linha RESULTADO com os numeros. Nunca fala com a rede.
+# espaco), PAGINA_MODO (arquivo, ou stream: o video entregue por um MediaStream, como na sala) e BANCADA_SAIDA
+# (/storage/bancada). Imprime uma linha RESULTADO com os numeros. Nunca fala com a rede.
 set -u
 
 export DISPLAY="${DISPLAY:-:0}" HOME="${HOME:-/home/s6}"
 here=$(cd -- "$(dirname -- "$0")" && pwd)
-out="${BANCADA_SAIDA:-/tmp/bancada}"
+# No /storage, como a gravacao de verdade: no container do gravador o /tmp e um tmpfs pequeno e sem execucao.
+out="${BANCADA_SAIDA:-/storage/bancada}"
+mode="${PAGINA_MODO:-arquivo}"
 res="${JIBRI_RECORDING_RESOLUTION:-1920x1080}"
 src_size="${FONTE_TAMANHO:-1920x1080}"
 src_fps="${FONTE_FPS:-30}"
@@ -23,9 +26,8 @@ extra="${CHROMIUM_FLAGS_EXTRA:-}"
 
 rm -rf "$out"; mkdir -p "$out/perfil"; cp "$here/bancada.html" "$out/bancada.html"
 
-echo "==> Tela virtual (xorg.log)"
-grep -h -o 'Modeline "[0-9]*x[0-9]*"x[0-9.]*' /storage/logs/xorg.log 2>/dev/null | sort -u | sed 's/^/  /' || true
 screen_hz=$(grep -h -o "Modeline \"$res\"x[0-9.]*" /storage/logs/xorg.log 2>/dev/null | tail -n1 | sed 's/.*x//')
+echo "==> Tela virtual (xorg.log): $res a ${screen_hz:-?} Hz"
 
 echo "==> Video de teste: $src_size a $src_fps quadros, VP8"
 ffmpeg -v error -y -f lavfi -i "testsrc2=size=$src_size:rate=$src_fps" -t "$((seconds + 30))" \
@@ -38,7 +40,7 @@ echo "==> $("$chrome" --version 2>/dev/null) com os parametros do Jibri${extra:+
 # shellcheck disable=SC2086
 "$chrome" --use-fake-ui-for-media-stream --start-maximized --kiosk --enabled --autoplay-policy=no-user-gesture-required \
     --no-sandbox --disable-infobars --user-data-dir="$out/perfil" --remote-debugging-port=9222 --no-first-run \
-    --no-default-browser-check $extra "file://$out/bancada.html" > "$out/chrome.log" 2>&1 &
+    --no-default-browser-check $extra "file://$out/bancada.html?modo=$mode" > "$out/chrome.log" 2>&1 &
 chrome_pid=$!
 trap 'kill "$chrome_pid" 2>/dev/null; sleep 1; kill -9 "$chrome_pid" 2>/dev/null' EXIT
 sleep 12
@@ -46,6 +48,8 @@ sleep 12
 page() { curl -fsS --max-time 5 http://127.0.0.1:9222/json/list 2>/dev/null | tr ',' '\n' | sed -n 's/.*"title": *"\(bancada[^"]*\)".*/\1/p' | head -n1; }
 cpu_total() { awk '$1 == "cpu" { t = 0; for (i = 2; i <= 9; i++) t += $i; print t, $5 + $6 }' /proc/stat; }
 echo "  pagina antes da gravacao: $(page)"
+# Como o Chrome desenha: os parametros do processo de GPU dizem se a pagina e montada por GL em software ou sem GPU.
+echo "  processo de GPU: $(ps -eo args 2>/dev/null | grep -- '--type=gpu-process' | grep -v grep | head -n1 | grep -o -- '--use-[a-z-]*=[a-z0-9-]*\|--disable-gpu[a-z-]*\|--enable-unsafe-[a-z-]*' | tr '\n' ' ')"
 
 echo "==> A tela, lida 60 vezes por segundo sem gravar (quantas imagens diferentes por segundo ela mostra)"
 screen_kept=$(ffmpeg -v info -f x11grab -draw_mouse 0 -framerate 60 -video_size "$res" -i :0.0+0,0 -t 8 -vf mpdecimate -an -f null - 2>&1 \
@@ -68,12 +72,14 @@ page_during=$(page)
 echo "  pagina no fim da gravacao: $page_during"
 echo "  ffmpeg: $(tr '\r' '\n' < "$out/ffmpeg.log" | grep 'frame=' | tail -n1 | tr -s ' ')"
 echo "  os que mais usaram CPU: $(ps -eo pcpu,comm --sort=-pcpu 2>/dev/null | sed -n '2,6p' | tr -s ' ' | tr '\n' ';')"
+echo "  as linhas de execucao que mais usaram CPU: $(ps -eLo pcpu,comm --sort=-pcpu 2>/dev/null | sed -n '2,9p' | tr -s ' ' | tr '\n' ';')"
 
 echo "==> Contando as imagens diferentes do arquivo"
 total=$(ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -of csv=p=0 "$out/captura.mp4" 2>/dev/null | head -n1)
 duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$out/captura.mp4" 2>/dev/null | head -n1)
 kept=$(ffmpeg -v info -i "$out/captura.mp4" -vf mpdecimate -an -f null - 2>&1 | tr '\r' '\n' | grep -o 'frame= *[0-9]*' | tail -n1 | grep -o '[0-9]*$')
-unique=$(awk -v k="${kept:-0}" -v d="${duration:-0}" 'BEGIN { printf "%.1f", d > 0 ? k / d : 0 }')
-cpu=$(awk -v a="$cpu_a" -v b="$cpu_b" -v ia="$idle_a" -v ib="$idle_b" 'BEGIN { d = b - a; printf "%d", d > 0 ? (1 - (ib - ia) / d) * 100 : 0 }')
+# Os parenteses em volta da conta: no awk, um > solto depois de printf manda a saida para um arquivo.
+unique=$(awk -v k="${kept:-0}" -v d="${duration:-0}" 'BEGIN { printf "%.1f", (d > 0 ? k / d : 0) }')
+cpu=$(awk -v a="$cpu_a" -v b="$cpu_b" -v ia="$idle_a" -v ib="$idle_b" 'BEGIN { d = b - a; printf "%d", (d > 0 ? (1 - (ib - ia) / d) * 100 : 0) }')
 
-echo "RESULTADO tela=${screen_hz:-?}Hz tamanho=$res fonte=${src_size}@${src_fps} extra=[${extra}] audio=$audio arquivo_imagens_por_s=$unique tela_imagens_por_s=$screen_fps quadros_do_arquivo=${total:-?} duracao=${duration:-?}s cpu=${cpu}% nucleos=$(nproc) | $page_during"
+echo "RESULTADO tela=${screen_hz:-?}Hz pagina=$mode tamanho=$res fonte=${src_size}@${src_fps} extra=[${extra}] audio=$audio arquivo_imagens_por_s=$unique tela_imagens_por_s=$screen_fps quadros_do_arquivo=${total:-?} duracao=${duration:-?}s cpu=${cpu}% nucleos=$(nproc) | $page_during"

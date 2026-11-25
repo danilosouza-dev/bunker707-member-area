@@ -41,6 +41,11 @@ on:
         description: "Segundos de gravacao"
         type: string
         default: "20"
+      pagina:
+        description: "arquivo (o video direto) ou stream (por MediaStream, como na sala)"
+        type: choice
+        default: arquivo
+        options: [arquivo, stream]
 
 permissions: {}
 
@@ -69,6 +74,7 @@ jobs:
           CHROMIUM_FLAGS_EXTRA: ${{ inputs.extra }}
           FONTE_TAMANHO: ${{ inputs.fonte }}
           SEGUNDOS: ${{ inputs.segundos }}
+          PAGINA_MODO: ${{ inputs.pagina }}
         run: bash infra/jitsi/jibri/bancada/rodar.sh
 
   bancada:
@@ -87,18 +93,28 @@ jobs:
             tela: imagem
             tamanho: 1920x1080
             extra: ""
+            pagina: arquivo
           - nome: nossa-1080
             tela: nossa
             tamanho: 1920x1080
             extra: ""
+            pagina: arquivo
           - nome: nossa-720
             tela: nossa
             tamanho: 1280x720
             extra: ""
+            pagina: arquivo
           - nome: nossa-1080-sem-gpu
             tela: nossa
             tamanho: 1920x1080
             extra: "--disable-gpu"
+            pagina: arquivo
+          # O video entregue por um MediaStream, o caminho do video que chega pela rede na sala.
+          - nome: nossa-1080-stream
+            tela: nossa
+            tamanho: 1920x1080
+            extra: ""
+            pagina: stream
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -109,4 +125,5 @@ jobs:
           TELA: ${{ matrix.tela }}
           JIBRI_RECORDING_RESOLUTION: ${{ matrix.tamanho }}
           CHROMIUM_FLAGS_EXTRA: ${{ matrix.extra }}
+          PAGINA_MODO: ${{ matrix.pagina }}
         run: bash infra/jitsi/jibri/bancada/rodar.sh

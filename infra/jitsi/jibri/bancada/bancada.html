@@ -9,10 +9,21 @@
   html, body { margin: 0; background: #000; overflow: hidden; }
   video { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; background: #000; }
 </style>
-<video id="v" src="fonte.webm" autoplay muted loop playsinline></video>
+<video id="v" autoplay muted loop playsinline></video>
 <script>
   (function () {
     var v = document.getElementById('v');
+    // ?modo=stream: o arquivo toca num video fora da tela e o que aparece e o MediaStream dele, o mesmo caminho do video
+    // que chega pela rede na sala. Sem o parametro, o arquivo toca direto.
+    if (/[?&]modo=stream\b/.test(location.search)) {
+      var fonte = document.createElement('video');
+      fonte.muted = true; fonte.loop = true; fonte.playsInline = true; fonte.src = 'fonte.webm';
+      fonte.setAttribute('style', 'position:fixed;left:-4000px;top:0;width:1920px;height:1080px');
+      document.body.appendChild(fonte);
+      fonte.play().then(function () { v.srcObject = fonte.captureStream(); return v.play(); }).catch(function (e) { document.title = 'bancada erro ' + e; });
+    } else {
+      v.src = 'fonte.webm';
+    }
     var raf = 0, pintou = 0, inicio = performance.now(), antes = null;
     function volta() { raf += 1; requestAnimationFrame(volta); }
     function quadro() { pintou += 1; v.requestVideoFrameCallback(quadro); }
