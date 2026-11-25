@@ -33,7 +33,7 @@ echo "  ocupado: ${busy:-?}   saude: ${state:-?}"
 
 # A tela virtual (docs/30 D137): os modos que o Xorg registrou. O numero depois do x e a taxa de atualizacao em Hz: o
 # Chrome do gravador desenha nesse ritmo, entao menos de 30 da gravacao travada (10 era o defeito de 24/11/2026). So
-# informa; a medida que vale e o raf= das linhas bunker707-fluidez do aviso de fim (perto de 60 com a tela a 60 Hz).
+# informa; a medida que vale e o raf= e o pintou= das linhas bunker707-fluidez do aviso de fim (docs/20 §8B.5).
 echo "==> Tela virtual (xorg.log)"
 modes=$(grep -h -o 'Modeline "[0-9]*x[0-9]*"x[0-9.]*' "$base/volumes/storage/jibri/logs/xorg.log" 2>/dev/null | sort -u || true)
 if [ -n "$modes" ]; then printf '%s\n' "$modes" | sed 's/^/  /'; else echo "  (sem a linha do modo no xorg.log)"; fi
