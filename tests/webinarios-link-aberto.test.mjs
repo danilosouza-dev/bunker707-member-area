@@ -408,3 +408,33 @@ test("o card Quem pode so mostra o link depois de publicar: no rascunho o endere
   // Webinario novo, nunca salvo: a frase tambem.
   assert.match(desenhar(null), /O link aparece depois de publicar/);
 });
+
+test("o cartao do link compartilhado leva a capa, o titulo e a descricao do webinario (D136)", () => {
+  const capa = "https://exemplo.com/capa.jpg";
+  const cartao = linkModel.openLinkShareMetadata({ coverUrl: capa, description: "  Uma landing page\n\ncom IA. ", title: " Live de agentes " }, "Entre na live pelo link.");
+
+  assert.equal(cartao.title, "Live de agentes");
+  assert.equal(cartao.description, "Uma landing page com IA.");
+  assert.deepEqual(cartao.openGraph.images, [{ alt: "Live de agentes", url: capa }]);
+  assert.equal(cartao.openGraph.title, "Live de agentes");
+  assert.equal(cartao.openGraph.description, "Uma landing page com IA.");
+  assert.equal(cartao.twitter.card, "summary_large_image");
+
+  // Sem capa, nenhuma imagem; sem descricao, a frase; descricao longa, cortada.
+  const simples = linkModel.openLinkShareMetadata({ coverUrl: null, description: null, title: "Live" }, "Entre na live pelo link.");
+  assert.deepEqual(simples.openGraph.images, []);
+  assert.equal(simples.twitter.card, "summary");
+  assert.equal(simples.description, "Entre na live pelo link.");
+  const longa = linkModel.openLinkShareMetadata({ coverUrl: null, description: "a".repeat(500), title: "Live" }, "x");
+  assert.equal(longa.description.length, 200);
+  assert.ok(longa.description.endsWith("…"));
+});
+
+test("a pagina do formulario monta o cartao so do webinario publicado com o link ligado (D136)", async () => {
+  const aberto = scriptedDb(() => ({ data: webinarRow({ cover_url: "https://exemplo.com/capa.jpg", room_settings: { openLink: LIGADO }, status: "published" }), error: null }));
+  assert.equal((await guests.loadOpenLinkWebinar(aberto, "live-de-agentes")).coverUrl, "https://exemplo.com/capa.jpg");
+
+  for (const fechado of [{ room_settings: { openLink: LIGADO }, status: "draft" }, { room_settings: { openLink: { ...LIGADO, enabled: false } }, status: "published" }]) {
+    assert.equal(await guests.loadOpenLinkWebinar(scriptedDb(() => ({ data: webinarRow(fechado), error: null })), "live-de-agentes"), null);
+  }
+});

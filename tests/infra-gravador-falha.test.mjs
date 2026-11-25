@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test, { after } from "node:test";
 
 import { criarInfraDeMentira, faltamBinarios, hzCall, limparInfraDeMentira, serverFixture } from "./fixtures/infra-de-mentira.mjs";
@@ -53,6 +54,40 @@ test("jibri-up troca a conexao SSH depois do cloud-init (o grupo docker passa a 
   assert.deepEqual(avisos(calls), ["ready"]);
   assert.ok(conta.hz().servers.some((s) => s.name === GRAVADOR), "o gravador pronto fica ligado");
   assert.equal(regras5222(conta.hz()).length, 1, "a 5222 do C aberta para o gravador vivo");
+});
+
+// 25/11/2026 (docs/30 D138): a gravacao saia com 3 a 6 imagens por segundo porque o ffmpeg 7.1 da imagem do Jibri segura a
+// captura da tela enquanto o audio nao anda. O jibri-up compila o ffmpeg 6.1 no runner enquanto a maquina sobe e o poe na
+// maquina, com o custom-jibri.conf, antes de subir o gravador. Aqui o docker de mentira faz o papel da compilacao.
+test("jibri-up leva o ffmpeg da gravacao e o custom-jibri.conf para a maquina antes de subir o gravador", { skip }, () => {
+  const conta = contaComOC();
+  const result = conta.runScript("jibri.sh", envDoGravador(), ["up"]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const calls = conta.calls();
+  const compila = calls.findIndex((c) => c.tool === "docker" && c.args[0] === "run" && c.args.some((a) => a.endsWith(":/ffmpeg-gravacao.sh:ro")));
+  assert.ok(compila >= 0, "a compilacao do ffmpeg roda no runner");
+  const copias = calls.filter((c) => c.tool === "scp").map((c) => c.args[1].replace(/^.*:/, ""));
+  for (const arquivo of ["/opt/jibri/ffmpeg", "/opt/jibri/custom-jibri.conf", "/opt/jibri/xorg-video-dummy.conf", "/opt/jibri/docker-compose.yml"]) assert.ok(copias.includes(arquivo), `${arquivo} copiado (${copias.join(", ")})`);
+  const copiaFfmpeg = calls.findIndex((c) => c.tool === "scp" && c.args[1].endsWith(":/opt/jibri/ffmpeg"));
+  const sobe = sshIndex(calls, (c) => c.command.includes("docker compose up -d"));
+  assert.ok(copiaFfmpeg >= 0 && copiaFfmpeg < sobe, "o ffmpeg chega antes do up -d: sem o arquivo, o Docker cria uma pasta no lugar");
+  assert.ok(sshIndex(calls, (c) => c.command.includes("chmod 755") && c.command.includes("'/opt/jibri/ffmpeg'")) >= 0, "o ffmpeg fica executavel na maquina");
+  assert.match(result.stdout, /ffmpeg da gravacao: ffmpeg version 6\.1\.6/);
+  assert.doesNotMatch(result.stdout + result.stderr, /::warning::O ffmpeg da gravacao/);
+  assert.deepEqual(avisos(calls), ["ready"]);
+});
+
+test("jibri-up com a compilacao do ffmpeg falhando: avisa, manda um atalho para o ffmpeg da imagem e o gravador fica pronto mesmo assim", { skip }, () => {
+  const conta = contaComOC();
+  const result = conta.runScript("jibri.sh", envDoGravador({ FFMPEG_GRAVACAO_ESPERA: "0", SHIM_FFMPEG_FALHA: "1" }), ["up"]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const calls = conta.calls();
+  assert.equal(calls.filter((c) => c.tool === "docker" && c.args[0] === "run").length, 3, "tres tentativas de compilar");
+  assert.match(result.stdout, /::warning::O ffmpeg da gravacao nao compilou: o gravador sobe com o ffmpeg da imagem e a gravacao sai travada/);
+  const copia = calls.find((c) => c.tool === "scp" && c.args[1].endsWith(":/opt/jibri/ffmpeg"));
+  assert.ok(copia, "o atalho vai para a maquina no lugar do binario: o compose monta o arquivo de todo jeito");
+  assert.equal(readFileSync(copia.args[0], "utf8"), '#!/bin/sh\nexec /usr/bin/ffmpeg "$@"\n');
+  assert.deepEqual(avisos(calls), ["ready"], "uma gravacao travada ainda e melhor que nenhuma: o preparo nao para");
 });
 
 // 13/11/2026: dois jibri-up seguidos criaram a maquina, o Jibri ficou HEALTHY em 3 s (o log dele mostrava), e a espera

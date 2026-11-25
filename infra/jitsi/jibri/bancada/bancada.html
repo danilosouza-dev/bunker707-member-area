@@ -1,0 +1,67 @@
+<!doctype html>
+<!-- A pagina da bancada do gravador (docs/30 A65): um video de taxa conhecida em tela cheia, como o palco da sala, e as
+     contas da propria pagina no titulo (o medir.sh as le pelo /json do Chrome): quantas voltas de desenho a pagina deu,
+     quantos quadros do video foram para a tela e quantos o Chrome diz que perdeu, por segundo, a cada 5 s. Sao medidas
+     de dentro da pagina: a que vale e a contagem no arquivo gravado. -->
+<meta charset="utf-8">
+<title>bancada iniciando</title>
+<style>
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  video { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; background: #000; }
+  /* ?modo=sala: o palco da sala com a tela compartilhada, como o Jitsi o monta (css/_videolayout_default.scss e
+     LargeVideoBackground, na tag fixada): a tela nao enche o espaco por causa da coluna de miniaturas (213 px), e atras
+     dela fica uma copia dela mesma, pequena e esticada, numa camada desfocada do tamanho da pagina, atualizada a cada
+     200 ms. ?modo=sala-sem-fundo: o mesmo palco sem essa camada. */
+  #fundo { display: none; }
+  #mini { display: none; }
+  body.sala #fundo { display: block; position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: hidden; filter: blur(40px); }
+  body.sala #fundo canvas { min-width: 100%; min-height: 100%; }
+  body.sala.sem-fundo #fundo { display: none; }
+  body.sala #v { position: absolute; inset: auto; left: 0; top: calc((100vh - (100vw - 213px) * 9 / 16) / 2); width: calc(100vw - 213px); height: calc((100vw - 213px) * 9 / 16); background: transparent; }
+  body.sala #mini { display: block; position: absolute; inset: auto; right: 0; top: 0; width: 213px; height: 120px; }
+</style>
+<div id="fundo"><canvas id="fundo-tela"></canvas></div>
+<video id="v" autoplay muted loop playsinline></video>
+<video id="mini" autoplay muted loop playsinline></video>
+<script>
+  (function () {
+    var v = document.getElementById('v');
+    // ?modo=stream: o arquivo toca num video fora da tela e o que aparece e o MediaStream dele, o mesmo caminho do video
+    // que chega pela rede na sala. Sem o parametro, o arquivo toca direto.
+    if (/[?&]modo=stream\b/.test(location.search)) {
+      var fonte = document.createElement('video');
+      fonte.muted = true; fonte.loop = true; fonte.playsInline = true; fonte.src = 'fonte.webm';
+      fonte.setAttribute('style', 'position:fixed;left:-4000px;top:0;width:1920px;height:1080px');
+      document.body.appendChild(fonte);
+      fonte.play().then(function () { v.srcObject = fonte.captureStream(); return v.play(); }).catch(function (e) { document.title = 'bancada erro ' + e; });
+    } else if (/[?&]modo=sala(-sem-fundo)?\b/.test(location.search)) {
+      document.body.className = /modo=sala-sem-fundo/.test(location.search) ? 'sala sem-fundo' : 'sala';
+      v.src = 'fonte.webm';
+      document.getElementById('mini').src = 'fonte.webm';
+      // Como o LargeVideoBackground do Jitsi: a cada 200 ms, o quadro atual do video no canvas, esticado na largura.
+      var tela = document.getElementById('fundo-tela');
+      setInterval(function () {
+        if (!tela.offsetParent || !v.videoWidth) { return; }
+        tela.getContext('2d').drawImage(v, 0, 0, tela.width, (tela.width / v.videoWidth) * v.videoHeight);
+      }, 200);
+    } else {
+      v.src = 'fonte.webm';
+    }
+    var raf = 0, pintou = 0, inicio = performance.now(), antes = null;
+    function volta() { raf += 1; requestAnimationFrame(volta); }
+    function quadro() { pintou += 1; v.requestVideoFrameCallback(quadro); }
+    requestAnimationFrame(volta);
+    v.requestVideoFrameCallback(quadro);
+    setInterval(function () {
+      var dt = (performance.now() - inicio) / 1000;
+      var q = v.getVideoPlaybackQuality();
+      var perdeu = antes ? q.droppedVideoFrames - antes.droppedVideoFrames : 0;
+      var abriu = antes ? q.totalVideoFrames - antes.totalVideoFrames : 0;
+      antes = q;
+      document.title = 'bancada raf=' + (raf / dt).toFixed(1) + ' pintou=' + (pintou / dt).toFixed(1)
+        + ' abriu=' + (abriu / dt).toFixed(1) + ' perdeu=' + (perdeu / dt).toFixed(1)
+        + ' video=' + v.videoWidth + 'x' + v.videoHeight + ' janela=' + innerWidth + 'x' + innerHeight;
+      raf = 0; pintou = 0; inicio = performance.now();
+    }, 5000);
+  })();
+</script>

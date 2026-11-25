@@ -12,6 +12,7 @@
 //   gravada, o contador, as entradas, os avisos de venda e os participantes simulados nao aparecem para ninguem
 //   (simulationHidden).
 
+import type { Metadata } from "next";
 import { z } from "zod";
 
 export const OPEN_LINK_FIELD_MODES = ["off", "optional", "required"] as const;
@@ -97,6 +98,27 @@ export function openLinkAsksContact(settings: Pick<OpenLinkSettings, "email" | "
 /** O endereco do formulario (o link que a equipe manda). */
 export function webinarEntryPath(slug: string): string {
   return `/webinarios/${slug}/entrar`;
+}
+
+/** Ate onde vai a descricao no cartao de quem recebe o link (os mensageiros cortam perto disso). */
+const SHARE_DESCRIPTION_LIMIT = 200;
+
+/**
+ * O cartao do link nos mensageiros e nas redes (D136): a capa, o titulo e a descricao do webinario. Sem capa, sem imagem;
+ * sem descricao, a frase de `fallback`. A capa e sempre um endereco https (httpsOrNull).
+ */
+export function openLinkShareMetadata(webinar: { coverUrl: string | null; description: string | null; title: string }, fallback: string): Metadata {
+  const title = webinar.title.trim();
+  const text = (webinar.description ?? "").replace(/\s+/g, " ").trim() || fallback;
+  const description = text.length > SHARE_DESCRIPTION_LIMIT ? `${text.slice(0, SHARE_DESCRIPTION_LIMIT - 1).trimEnd()}…` : text;
+  const images = webinar.coverUrl ? [{ alt: title, url: webinar.coverUrl }] : [];
+
+  return {
+    description,
+    openGraph: { description, images, locale: "pt_BR", title, type: "website" },
+    title,
+    twitter: { card: images.length > 0 ? "summary_large_image" : "summary", description, images, title }
+  };
 }
 
 /** A frase do aceite que fica gravada com a entrada (LGPD: para que, por quem e como sair). */

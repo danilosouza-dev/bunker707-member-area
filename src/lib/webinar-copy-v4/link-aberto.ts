@@ -27,6 +27,8 @@ export const LINK_ABERTO_COPY = {
   },
   entrar: {
     tituloPagina: "Entrar na live",
+    // A descricao do cartao do link no WhatsApp e nas redes, quando o webinario nao tem descricao (D136).
+    compartilhar: "Entre na live pelo link.",
     chamada: "Preencha para entrar na live.",
     chamadaSemCampos: "A live é aberta. Clique em Entrar.",
     nome: "Seu nome",

@@ -18,3 +18,23 @@ interfaceConfig.SHOW_DEEP_LINKING_IMAGE = false;
 interfaceConfig.SHOW_CHROME_EXTENSION_BANNER = false;
 interfaceConfig.DISPLAY_WELCOME_FOOTER = false;
 interfaceConfig.HIDE_INVITE_MORE_HEADER = true;
+
+// Bunker707: no gravador, sem o fundo desfocado do palco (docs/30 D139). Quando o video do palco nao enche o espaco (a
+// tela compartilhada, por causa da coluna de miniaturas), o motor poe atras dele uma copia dele mesmo numa camada
+// desfocada do tamanho da pagina, atualizada a cada 200 ms. O Chrome do gravador desenha sem placa de video, e essa
+// camada derruba a pagina de 30 para 15 a 20 desenhos por segundo: a gravacao da tela compartilhada saia com 10 a 13
+// imagens por segundo. A chave e do proprio motor, que ja desliga o fundo nos navegadores em que ele pesa. So no
+// gravador (config.iAmRecorder=true no endereco, que o Jibri manda): alunos e quem apresenta continuam com o fundo. E a
+// unica parte deste arquivo que le alguma coisa, e so o endereco da pagina, entre as marcas.
+// bunker707:gravador-fundo:inicio
+(function () {
+    try {
+        if (typeof location === 'undefined') { return; }
+        if (/config\.iAmRecorder=(?:%22|"|%27|')?true\b/.test(String(location.hash || ''))) {
+            interfaceConfig.DISABLE_VIDEO_BACKGROUND = true;
+        }
+    } catch (e) {
+        // Sem a chave, o motor segue como sempre.
+    }
+})();
+// bunker707:gravador-fundo:fim
