@@ -213,7 +213,9 @@
                 'por 5 s (câmera/tela/gravados/perdidos): ' + r.counts.map(function (c) { return [c.camera, c.tela, c.saiu, c.perdeu].join('/'); }).join(' ')]).join('\n');
         var ready = r.onDisk ? directory().then(function (d) { return d.getFileHandle(r.name); }).then(function (h) { return h.getFile(); }) : Promise.resolve(new window.Blob(r.chunks, { type: r.type }));
 
-        ready.then(function (blob) { left.unshift({ blob: blob, name: r.name, report: r.report, size: blob.size }); render(); say('Gravação pronta. Clique em Baixar.'); }).catch(function () { say('Não consegui abrir o arquivo. Recarregue a sala: ele aparece aqui.'); });
+        ready.then(function (blob) { var item = { blob: blob, name: r.name, report: r.report, size: blob.size };
+
+            left.unshift(item); render(); download(item); say('Gravação pronta: o arquivo foi para a pasta Downloads. Se não foi, clique em Baixar.'); }).catch(function () { say('Não consegui abrir o arquivo. Recarregue a sala: ele aparece aqui.'); });
         render();
     }
 
@@ -250,6 +252,12 @@
         window.setTimeout(function () { window.URL.revokeObjectURL(url); }, 600000);
     }
 
+    /** O video e, quando ha, o relatorio da gravacao. */
+    function download(item) {
+        save(item.blob, item.name);
+        if (item.report) { window.setTimeout(function () { save(new window.Blob([item.report], { type: 'text/plain' }), item.name + '.txt'); }, 1500); }
+    }
+
     /* ---- o painel ---- */
 
     function make(tag, style, text) {
@@ -262,7 +270,7 @@
     }
 
     function button(text, onClick) {
-        var b = make('button', 'min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #555;background:#222;color:#fff;font:13px sans-serif;cursor:pointer', text);
+        var b = make('button', 'min-height:40px;padding:0 16px;border-radius:8px;border:1px solid #777;background:#222;color:#fff;font:600 14px sans-serif;cursor:pointer', text);
 
         b.type = 'button';
         b.onclick = onClick;
@@ -282,7 +290,7 @@
             var line = make('div', 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px');
 
             line.appendChild(make('span', 'font:12px sans-serif', item.name.replace(PREFIX, '') + ' (' + Math.round(item.size / 1e6) + ' MB)'));
-            line.appendChild(button('Baixar', function () { save(item.blob, item.name); if (item.report) { save(new window.Blob([item.report], { type: 'text/plain' }), item.name + '.txt'); } }));
+            line.appendChild(button('Baixar', function () { download(item); }));
             line.appendChild(button('Apagar', function () {
                 if (!window.confirm('Apagar ' + item.name + ' deste navegador? Baixe antes se ainda precisar.')) { return; }
                 left = left.filter(function (x) { return x !== item; });
@@ -299,7 +307,7 @@
             var mod = call(conf, 'isModerator') === true;
 
             if (!panel && mod && window.document.body) {
-                panel = make('div', 'position:fixed;left:12px;top:12px;z-index:2147483000;max-width:420px;padding:10px;border-radius:10px;background:rgba(0,0,0,.82);color:#fff');
+                panel = make('div', 'position:fixed;left:12px;top:60px;z-index:2147483000;max-width:420px;padding:10px;border-radius:10px;background:rgba(0,0,0,.82);color:#fff');
                 panel.id = 'bunker707-gravacao-local';
                 ui.row = make('div', 'display:flex;gap:6px');
                 ui.note = make('div', 'font:12px sans-serif;margin-top:6px;color:#ccc');

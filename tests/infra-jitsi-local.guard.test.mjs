@@ -71,3 +71,9 @@ test("o painel so aparece no iframe de quem modera: aluno, gravador e sala fora 
   assert.equal(run({ recorder: true }), 0);
   assert.equal(run({ framed: false }), 0);
 });
+
+test("o painel fica abaixo do selo Ao vivo do palco (25/11/2026: o selo cobriu o botao) e o arquivo baixa sozinho ao parar", () => {
+  const top = Number(/position:fixed;left:12px;top:(\d+)px/.exec(main)?.[1]);
+  assert.ok(top >= 56, `o selo ocupa o alto do palco (top ${top})`);
+  assert.match(main, /left\.unshift\(item\); render\(\); download\(item\);/);
+});
