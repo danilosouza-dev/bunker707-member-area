@@ -44,10 +44,10 @@ on:
         type: string
         default: "20"
       pagina:
-        description: "arquivo (o video direto) ou stream (por MediaStream, como na sala)"
+        description: "arquivo (o video direto), stream (por MediaStream), sala (o palco com a tela compartilhada e o fundo desfocado do Jitsi) ou sala-sem-fundo"
         type: choice
         default: arquivo
-        options: [arquivo, stream]
+        options: [arquivo, stream, sala, sala-sem-fundo]
       gravacoes:
         description: "Variacoes do comando de gravacao: nome|entrada da tela|entrada do audio|variaveis|opcoes da saida; ... (vazio = as do medir.sh)"
         type: string
@@ -114,6 +114,19 @@ jobs:
             extra: ""
             pagina: arquivo
             minimo: "28"
+          # O palco da sala com a tela compartilhada: com o fundo desfocado do Jitsi e sem ele (docs/30 A65).
+          - nome: nossa-1080-sala
+            tela: nossa
+            tamanho: 1920x1080
+            extra: ""
+            pagina: sala
+            minimo: ""
+          - nome: nossa-1080-sala-sem-fundo
+            tela: nossa
+            tamanho: 1920x1080
+            extra: ""
+            pagina: sala-sem-fundo
+            minimo: ""
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
