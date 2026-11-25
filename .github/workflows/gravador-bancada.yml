@@ -1,0 +1,143 @@
+name: Bancada do gravador
+
+# A bancada do gravador das lives (docs/30 A65; infra/jitsi/jibri/bancada). Sobe a imagem do Jibri na tag fixada, toca no
+# Chrome dela um video de 30 quadros conhecido, filma a tela com o comando de gravacao do Jibri e conta quantas imagens
+# diferentes por segundo o arquivo tem. Sem sala, sem live, sem segredo e sem servidor nosso: so a imagem publica e os
+# arquivos deste repositorio. Serve para achar onde a gravacao perde quadros e para conferir uma troca de tag do Jitsi.
+# A maquina do GitHub nao e a do gravador de verdade (4 nucleos, outro processador): os numeros comparam as variacoes
+# entre si; o numero final se confere numa gravacao de verdade.
+
+on:
+  # O push que muda a bancada roda a bancada (e registra o workflow para o disparo manual).
+  push:
+    branches: ["**"]
+    paths:
+      - .github/workflows/gravador-bancada.yml
+      - infra/jitsi/jibri/bancada/**
+      - infra/jitsi/jibri/xorg-video-dummy.conf
+      - infra/jitsi/jibri/ffmpeg-gravacao.sh
+      - infra/jitsi/jibri/custom-jibri.conf
+  # Uma variacao avulsa, sem commit: a tela, o tamanho e os parametros a mais do Chrome.
+  workflow_dispatch:
+    inputs:
+      tela:
+        description: "nossa (60 Hz, deste repositorio) ou imagem (a que vem na imagem)"
+        type: choice
+        default: nossa
+        options: [nossa, imagem]
+      tamanho:
+        description: "Tamanho da tela e da gravacao"
+        type: choice
+        default: 1920x1080
+        options: [1920x1080, 1280x720]
+      extra:
+        description: "Parametros a mais do Chrome, separados por espaco"
+        type: string
+        default: ""
+      fonte:
+        description: "Tamanho do video tocado"
+        type: choice
+        default: 1920x1080
+        options: [1920x1080, 1280x720]
+      segundos:
+        description: "Segundos de gravacao"
+        type: string
+        default: "20"
+      pagina:
+        description: "arquivo (o video direto), stream (por MediaStream), sala (o palco com a tela compartilhada e o fundo desfocado do Jitsi) ou sala-sem-fundo"
+        type: choice
+        default: arquivo
+        options: [arquivo, stream, sala, sala-sem-fundo]
+      gravacoes:
+        description: "Variacoes do comando de gravacao: nome|entrada da tela|entrada do audio|variaveis|opcoes da saida; ... (vazio = as do medir.sh)"
+        type: string
+        default: ""
+
+permissions: {}
+
+concurrency:
+  group: gravador-bancada-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  avulsa:
+    name: avulsa
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rodar a bancada
+        # As entradas chegam ao script por variavel de ambiente, nunca escritas dentro do comando.
+        env:
+          TELA: ${{ inputs.tela }}
+          JIBRI_RECORDING_RESOLUTION: ${{ inputs.tamanho }}
+          CHROMIUM_FLAGS_EXTRA: ${{ inputs.extra }}
+          FONTE_TAMANHO: ${{ inputs.fonte }}
+          SEGUNDOS: ${{ inputs.segundos }}
+          PAGINA_MODO: ${{ inputs.pagina }}
+          GRAVACOES: ${{ inputs.gravacoes }}
+        run: bash infra/jitsi/jibri/bancada/rodar.sh
+
+  bancada:
+    name: ${{ matrix.nome }}
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # O controle: a tela que vem na imagem (10 Hz em 1080p), o defeito de 24/11/2026.
+          - nome: imagem-1080
+            tela: imagem
+            tamanho: 1920x1080
+            extra: ""
+            pagina: arquivo
+            minimo: ""
+          - nome: nossa-1080
+            tela: nossa
+            tamanho: 1920x1080
+            extra: ""
+            pagina: arquivo
+            minimo: "28"
+          - nome: nossa-720
+            tela: nossa
+            tamanho: 1280x720
+            extra: ""
+            pagina: arquivo
+            minimo: "28"
+          # O palco da sala com a tela compartilhada: com o fundo desfocado do Jitsi (o defeito, sem regua) e sem ele, como o
+          # gravador fica com o custom-interface_config.js (docs/30 D139).
+          - nome: nossa-1080-sala
+            tela: nossa
+            tamanho: 1920x1080
+            extra: ""
+            pagina: sala
+            minimo: ""
+          - nome: nossa-1080-sala-sem-fundo
+            tela: nossa
+            tamanho: 1920x1080
+            extra: ""
+            pagina: sala-sem-fundo
+            minimo: "28"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rodar a bancada
+        env:
+          TELA: ${{ matrix.tela }}
+          JIBRI_RECORDING_RESOLUTION: ${{ matrix.tamanho }}
+          CHROMIUM_FLAGS_EXTRA: ${{ matrix.extra }}
+          PAGINA_MODO: ${{ matrix.pagina }}
+          BANCADA_MINIMO: ${{ matrix.minimo }}
+        run: bash infra/jitsi/jibri/bancada/rodar.sh

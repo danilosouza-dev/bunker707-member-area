@@ -9,6 +9,9 @@
 # volumes/storage/jibri/recordings ate subir para a Bunny).
 #   docker compose -f /opt/jibri/docker-compose.yml up -d
 #   bash /opt/jibri/jibri-status.sh
+# O xorg-video-dummy.conf (a tela virtual a 60 Hz, D137) fica ao lado deste arquivo: sem ele o Docker cria uma pasta com
+# esse nome no lugar do arquivo e o Xorg do gravador nao sobe. O mesmo vale para o ffmpeg (o da gravacao, D138) e o
+# custom-jibri.conf. O jibri-up copia todos antes de subir.
 # A imagem roda como o usuario s6 (uid 1000) com raiz somente leitura: volumes/ precisa ser do uid 1000.
 
 name: bunker707-jibri
@@ -39,6 +42,16 @@ services:
       - ./volumes/storage/jibri:/storage
       # Versionado no repositorio (755); a imagem o copia para /run/jibri/config e o Jibri o chama ao terminar.
       - ./finalize.sh:/config/finalize.sh:ro
+      # A tela virtual a 60 Hz (docs/30 D137): o arquivo da imagem da 10 Hz em 1920x1080 e 25 Hz em 1280x720, o Chrome
+      # desenha no ritmo da tela e a gravacao saia com 10 imagens por segundo. A imagem passa este arquivo pelo tpl a
+      # cada subida (o script config dela) e o Xorg sobe com o resultado.
+      - ./xorg-video-dummy.conf:/defaults/xorg-video-dummy.conf:ro
+      # O ffmpeg da gravacao (docs/30 D138): o 6.1 compilado do codigo oficial pelo jibri-up (ffmpeg-gravacao.sh), a frente
+      # do 7.1 da imagem no PATH, e o custom-jibri.conf que aponta o Jibri para ele. Com o 7.1, a entrada de audio segura a
+      # captura da tela e o arquivo sai com 3 a 6 imagens por segundo. O ffprobe e o ffmpeg de /usr/bin continuam os da
+      # imagem (o finalize.sh conta as imagens do arquivo com eles).
+      - ./ffmpeg:/usr/local/bin/ffmpeg:ro
+      - ./custom-jibri.conf:/config/custom-jibri.conf:ro
     environment:
       DISPLAY: ":0"
       TZ: "${TZ:-UTC}"

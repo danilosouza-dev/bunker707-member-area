@@ -124,6 +124,13 @@ up() {
     echo "  imagem $image_repo/jibri:$image_version; sala em $public_url; XMPP em $meet_ip:5222"
     fw_close_all
 
+    # O ffmpeg da gravacao (docs/30 D138): compila no runner, em segundo plano, enquanto a maquina sobe (1 a 2 minutos; o
+    # passo 3 espera). Do codigo oficial, conferido pelo sha256 (infra/jitsi/jibri/ffmpeg-gravacao.sh).
+    local ffdir="$WORK_DIR/ffmpeg-gravacao" ffpid
+    rm -rf "$ffdir"; mkdir -p "$ffdir"
+    bash "$JITSI_DIR/jibri/ffmpeg-gravacao.sh" "$ffdir" > "$ffdir/build.log" 2>&1 &
+    ffpid=$!
+
     log "2/6 Servidor $name"
     local pub ud type loc created="" resolution="$JIBRI_RECORDING_RESOLUTION" t l
     fw_ensure "$name"
@@ -176,10 +183,22 @@ up() {
     rsh "$target" "docker info >/dev/null 2>&1" \
         || die "O Docker do $name nao responde para o $DEPLOY_USER (grupo docker?). Para investigar, rode de novo com MANTER_SE_FALHAR=1 e veja exec-jibri com 'id; sudo tail -n 30 /var/log/cloud-init-output.log'."
     rcopy "$JITSI_DIR/jibri/docker-compose.yml" "$target:$JIBRI_REMOTE_DIR/docker-compose.yml"
+    # O ffmpeg da gravacao (D138), montado pelo compose em /usr/local/bin/ffmpeg. Sem ele a gravacao sai travada, mas sai:
+    # se a compilacao falhou, vai um atalho para o ffmpeg da imagem, com o aviso.
+    if wait "$ffpid" && [ -x "$ffdir/ffmpeg" ]; then
+        echo "  ffmpeg da gravacao: $(tail -n1 "$ffdir/build.log" | cut -c1-60)"
+    else
+        printf '::warning::O ffmpeg da gravacao nao compilou: o gravador sobe com o ffmpeg da imagem e a gravacao sai travada (docs/30 D138). Fim do registro: %s\n' "$(tail -n2 "$ffdir/build.log" 2>/dev/null | tr '\n' ' ' | cut -c1-200)"
+        printf '#!/bin/sh\nexec /usr/bin/ffmpeg "$@"\n' > "$ffdir/ffmpeg"; chmod 755 "$ffdir/ffmpeg"
+    fi
+    rcopy "$ffdir/ffmpeg" "$target:$JIBRI_REMOTE_DIR/ffmpeg"
+    rcopy "$JITSI_DIR/jibri/custom-jibri.conf" "$target:$JIBRI_REMOTE_DIR/custom-jibri.conf"
+    # A tela virtual a 60 Hz (docs/30 D137), montada pelo compose: precisa estar na maquina antes do `up -d`.
+    rcopy "$JITSI_DIR/jibri/xorg-video-dummy.conf" "$target:$JIBRI_REMOTE_DIR/xorg-video-dummy.conf"
     rcopy "$JITSI_DIR/jibri/finalize.sh" "$target:$JIBRI_REMOTE_DIR/finalize.sh"
     rcopy "$JITSI_DIR/scripts/jibri-status.sh" "$target:$JIBRI_REMOTE_DIR/jibri-status.sh"
     rcopy "$JITSI_DIR/jibri/cpu-amostras.sh" "$target:$JIBRI_REMOTE_DIR/cpu-amostras.sh"
-    rsh "$target" "chmod 755 '$JIBRI_REMOTE_DIR/finalize.sh' '$JIBRI_REMOTE_DIR/jibri-status.sh' '$JIBRI_REMOTE_DIR/cpu-amostras.sh'; [ -f '$envj' ] || { umask 077; cat > '$envj'; }" < "$JITSI_DIR/jibri/.env.example"
+    rsh "$target" "chmod 755 '$JIBRI_REMOTE_DIR/finalize.sh' '$JIBRI_REMOTE_DIR/jibri-status.sh' '$JIBRI_REMOTE_DIR/cpu-amostras.sh' '$JIBRI_REMOTE_DIR/ffmpeg'; [ -f '$envj' ] || { umask 077; cat > '$envj'; }" < "$JITSI_DIR/jibri/.env.example"
     set_env "$target" "$envj" JITSI_IMAGE_REPO "$image_repo"
     set_env "$target" "$envj" JITSI_IMAGE_VERSION "$image_version"
     set_env "$target" "$envj" TZ UTC
@@ -235,6 +254,9 @@ up() {
     # Daqui em diante o gravador esta pronto: uma falha (o aviso ao app) nao apaga mais a maquina.
     JIBRI_HEALTHY=1
     echo "  saude: $(printf '%s' "$out" | tr -d '\n' | cut -c1-140)"
+    # A tela virtual (docs/30 D137): o modo que o Xorg registrou para o tamanho da gravacao; o numero depois do x e a taxa
+    # em Hz (60 com o nosso xorg-video-dummy.conf; 10 era o defeito de 24/11/2026). So informa, nunca para o preparo.
+    echo "  tela virtual: $(rsh "$target" "grep -h -o 'Modeline \"${resolution}\"x[0-9.]*' '$JIBRI_REMOTE_DIR/volumes/storage/jibri/logs/xorg.log' 2>/dev/null | sort -u | tr '\n' ' '" 2>/dev/null || true)"
 
     log "6/6 Avisando o app (state=ready)"
     local code; code=$(recorder_request POST "" "{\"sessionId\":\"$SESSAO\",\"state\":\"ready\"}")

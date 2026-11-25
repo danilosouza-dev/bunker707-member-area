@@ -31,6 +31,13 @@ busy=$(printf '%s' "$health" | sed -n 's/.*"busyStatus" *: *"\([A-Z_]*\)".*/\1/p
 state=$(printf '%s' "$health" | sed -n 's/.*"healthStatus" *: *"\([A-Z_]*\)".*/\1/p')
 echo "  ocupado: ${busy:-?}   saude: ${state:-?}"
 
+# A tela virtual (docs/30 D137): os modos que o Xorg registrou. O numero depois do x e a taxa de atualizacao em Hz: o
+# Chrome do gravador desenha nesse ritmo, entao menos de 30 da gravacao travada (10 era o defeito de 24/11/2026). So
+# informa; a medida que vale e o raf= e o pintou= das linhas bunker707-fluidez do aviso de fim (docs/20 §8B.5).
+echo "==> Tela virtual (xorg.log)"
+modes=$(grep -h -o 'Modeline "[0-9]*x[0-9]*"x[0-9.]*' "$base/volumes/storage/jibri/logs/xorg.log" 2>/dev/null | sort -u || true)
+if [ -n "$modes" ]; then printf '%s\n' "$modes" | sed 's/^/  /'; else echo "  (sem a linha do modo no xorg.log)"; fi
+
 echo "==> Gravacoes em $rec_dir"
 if [ -d "$rec_dir" ]; then
     find "$rec_dir" -type f \( -name '*.mp4' -o -name '*.uploaded' -o -name '*.failed' -o -name '*.notify-failed.json' \) -printf '  %TY-%Tm-%Td %TH:%TM  %12s  %P\n' 2>/dev/null | sort || ls -lR "$rec_dir"
