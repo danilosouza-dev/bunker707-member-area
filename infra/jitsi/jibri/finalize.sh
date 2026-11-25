@@ -169,10 +169,13 @@ if out:
     print(json.dumps(list(reversed(out)), ensure_ascii=True, separators=(",", ":")))
 PY
 }
-# O ffmpeg que gravou (docs/30 D138): a versao que o proprio Jibri registrou no arranque da gravacao
-# (/storage/logs/ffmpeg.*.txt). Para conferir que o gravador usou o 6.1 e nao o 7.1 da imagem.
+# O ffmpeg que gravou (docs/30 D138): a versao que o Jibri registrou no arranque da gravacao (os registros de
+# /storage/logs); se o registro nao a traz (o aviso do teste de 25/11/2026 veio sem ela), a do binario que o
+# custom-jibri.conf manda o Jibri usar. Para conferir que o gravador usou o 6.1 e nao o 7.1 da imagem.
 ffmpeg_gravou() {
-    grep -h -o 'ffmpeg version [^ ]*' "${FFMPEG_LOGS:-/storage/logs}"/ffmpeg.*.txt 2>/dev/null | tail -n1 | sed 's/^ffmpeg version //' | tr -cd 'A-Za-z0-9.+~_-' | cut -c1-40
+    v=$(grep -h -o 'ffmpeg version [^ ]*' "${FFMPEG_LOGS:-/storage/logs}"/*.txt 2>/dev/null | tail -n1 | sed 's/^ffmpeg version //')
+    [ -n "$v" ] || v=$("${FFMPEG_GRAVADOR:-/usr/local/bin/ffmpeg}" -version 2>/dev/null | sed -n '1s/^ffmpeg version \([^ ]*\).*/\1/p')
+    printf '%s' "$v" | tr -cd 'A-Za-z0-9.+~_-' | cut -c1-40
 }
 # As imagens diferentes por segundo do arquivo (docs/30 A65), a medida que vale: em tres janelas de 20 s (a 10%, 50% e
 # 85% da duracao), quantos quadros o mpdecimate mantem, isto e, quantos mudaram em relacao ao anterior. [[segundo, imagens

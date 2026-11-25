@@ -117,6 +117,12 @@ test("finalize.sh: a versao do ffmpeg que gravou sai do registro do Jibri, e as 
 
     const gravou = run("ffmpeg_gravou");
     assert.equal(gravou.stdout.trim(), "6.1.6", gravou.stderr);
+    // Sem a versao no registro do Jibri (o aviso do teste de 25/11/2026 veio sem ela): a do binario que o Jibri usa.
+    mkdirSync(join(dir, "vazio"));
+    writeFileSync(join(dir, "gravador"), '#!/bin/sh\necho "ffmpeg version 6.1.6 Copyright (c) 2000-2026 the FFmpeg developers"\n');
+    chmodSync(join(dir, "gravador"), 0o755);
+    assert.equal(run("ffmpeg_gravou", { FFMPEG_GRAVADOR: join(dir, "gravador"), FFMPEG_LOGS: join(dir, "vazio") }).stdout.trim(), "6.1.6");
+    assert.equal(run("ffmpeg_gravou", { FFMPEG_GRAVADOR: join(dir, "nao-existe"), FFMPEG_LOGS: join(dir, "vazio") }).stdout.trim(), "", "sem registro e sem binario, nada");
 
     const longa = run("duration=6369; file=/x/live.mp4; imagens_json");
     assert.equal(longa.stdout, "[[636,30.0],[3184,30.0],[5413,30.0]]", longa.stderr);
