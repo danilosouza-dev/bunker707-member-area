@@ -272,6 +272,7 @@ export type RecordingInsertRow = {
   file_name?: string | null;
   provider?: string;
   session_id?: string | null;
+  size_bytes?: number | null;
   source?: string;
   status?: string;
   webinar_id: string;

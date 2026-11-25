@@ -10,7 +10,7 @@ import "server-only";
 import { WebinarError, assertNoDbError, type WebinarsDb } from "./db";
 import { newRoomName } from "./jitsi-token";
 import type { RecorderState } from "./live-schemas";
-import type { RecorderStatus } from "./recorder-model";
+import { preferredRecording, type RecorderStatus } from "./recorder-model";
 import {
   RECORDING_COLUMNS,
   RECORDING_EVENT_COLUMNS,
@@ -373,14 +373,14 @@ export async function listRecordingsToPurge(db: WebinarsDb, nowIso: string, limi
   return (data ?? []) as RecordingRow[];
 }
 
-/** A gravacao de uma sessao vinda do gravador (source jibri), a mais nova. */
+/** A gravacao da sessao que vale (preferredRecording): a do computador pronta, senao a mais nova. */
 export async function fetchSessionRecordingRow(db: WebinarsDb, sessionId: string): Promise<RecordingRow | null> {
   const { data, error } = await db
     .from("webinar_recordings")
     .select(RECORDING_COLUMNS)
     .eq("session_id", sessionId)
     .order("created_at", { ascending: false })
-    .limit(1);
+    .limit(20);
   assertNoDbError(error, "Webinarios: ler a gravacao da sessao");
-  return ((data ?? []) as RecordingRow[])[0] ?? null;
+  return preferredRecording((data ?? []) as RecordingRow[]);
 }

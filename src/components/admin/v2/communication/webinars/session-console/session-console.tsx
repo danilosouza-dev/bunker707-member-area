@@ -103,6 +103,8 @@ import { adminToast } from "../../../toast";
 import { ConsoleAttendance } from "./console-attendance";
 import { ConsoleBar } from "./console-bar";
 import { ConsoleChat } from "./console-chat";
+import { ConsoleLocalRecording, LocalRecordingStatus } from "./console-local-recording";
+import { useLocalFollow } from "./local-recording-follow";
 import { ConsoleLeaveDialog } from "./console-leave-dialog";
 import { CONSOLE_LEAVE_WAIT_MS, consoleLeaveGuarded, type ConsoleLeaveTarget } from "./console-leave-model";
 import { consoleSkeleton } from "./console-layout-model";
@@ -322,6 +324,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   const room = useLiveRoom({
     audience: audienceNow,
     canPublish: permissions.canPublish,
+    canWrite: permissions.canWrite,
     container: stageRef,
     currentUserId,
     enabled: live !== null,
@@ -340,8 +343,11 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
       onPersonAction(person, participantId, { type: "kick" });
     },
     session,
+    skewMs: skew,
     webinar
   });
+  const local = room.localRecording;
+  const [followLocal, chooseFollowLocal] = useLocalFollow();
 
   // Sair da pagina com o console dentro da sala (docs/31 §10): a sala mora nesta pagina, e trocar de pagina na mesma aba
   // tirava quem apresenta da sala para todos (o video parado para quem assiste) ate ele voltar. A guarda segura o link,
@@ -581,6 +587,9 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
       return;
     }
 
+    // O arquivo deste computador fecha antes de a sala sair (docs/30 D142): sem isso, perderia os ultimos segundos.
+    await local.stop();
+
     if (room.room.recording.on || live.recorder.status === "recording") {
       room.command("stopRecording", room.room.recording.mode === "local" ? "local" : "file");
     }
@@ -629,6 +638,10 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
     }
 
     room.recordingMode.choose(mode);
+    // Junto com a gravacao da sala, a deste computador (docs/30 D142); a Live gravada (so a tela) fica so no servidor.
+    if (mode === "sala" && followLocal && local.available && permissions.canWrite) {
+      local.start();
+    }
     void run("live:rec-start", () => requestRecording({ sessionId }), (reply) => {
       setRecordUnavailable(reply.action === "unavailable");
 
@@ -639,6 +652,9 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   }
 
   function stopRecording() {
+    if (followLocal) {
+      void local.stop();
+    }
     room.command("stopRecording", room.room.recording.mode === "local" ? "local" : "file");
   }
 
@@ -1140,9 +1156,11 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
   // Sem resposta do retrato, na tela (docs/31 V2-A50): o chat, as pendentes, as perguntas e os presentes param de
   // atualizar, e quem apresenta precisa saber que modera dados velhos.
   const offline = Boolean(sessionId) && poll.offline;
+  const localBusy = live !== null && (local.recording || local.upload !== null || local.problem !== null);
   const banner =
-    failure || offline || readOnly || onlyPublishers ? (
+    failure || offline || readOnly || onlyPublishers || localBusy ? (
       <>
+        {localBusy ? <LocalRecordingStatus local={local} /> : null}
         {offline ? (
           <p className="text-[13px] leading-5 font-medium text-room-warn-fg" data-console-offline="">
             {WEBINAR_COPY.consoleV2.semResposta}
@@ -1287,6 +1305,7 @@ export function SessionConsole({ currentUserId, data, initialPoll = CONSOLE_POLL
                 ),
                 gravacao: live ? (
                   <>
+                    <ConsoleLocalRecording canWrite={permissions.canWrite} follow={followLocal} local={local} onFollow={chooseFollowLocal} />
                     <LiveRecorder
                       busyKey={busyKey}
                       canPublish={permissions.canPublish}

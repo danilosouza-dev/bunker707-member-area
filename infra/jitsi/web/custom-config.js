@@ -150,7 +150,7 @@ config.localRecording = { disable: false };
         if (!/config\.bunkerTheme=/.test(hash) || /config\.iAmRecorder=(?:%22|"|%27|')?true\b/.test(hash)) { return; }
         var script = document.createElement('script');
         // O v e o comeco do sha256 do arquivo (a guarda da infra confere e diz o valor novo), como no CSS.
-        script.src = '/libs/bunker707-local.js?v=7b1b7d38';
+        script.src = '/libs/bunker707-local.js?v=536e1def';
         script.async = true;
         (document.head || document.documentElement).appendChild(script);
     } catch (e) {

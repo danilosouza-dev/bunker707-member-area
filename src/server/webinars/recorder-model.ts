@@ -79,6 +79,28 @@ export type RecordingPatch = {
   status: "processing" | "failed";
 };
 
+/** O comeco do nome do arquivo da gravacao no computador de quem apresenta (docs/30 D141 e D142). */
+export const LOCAL_RECORDING_PREFIX = "gravacao-local-";
+
+/** A gravacao veio do computador de quem apresenta (o console enviou), e nao do gravador nem da equipe colando um video. */
+export function isLocalRecording(recording: { file_name: string | null; source: string }): boolean {
+  return recording.source === "upload" && (recording.file_name ?? "").startsWith(LOCAL_RECORDING_PREFIX);
+}
+
+/**
+ * A gravacao da sessao que vale, das mais novas para as mais velhas: a do computador de quem apresenta quando esta
+ * pronta (a do gravador vira a reserva, docs/30 D142); senao a mais nova, sem a do computador que ainda esta subindo
+ * (a menos que so exista ela).
+ */
+export function preferredRecording<T extends { file_name: string | null; source: string; status: string }>(newestFirst: readonly T[]): T | null {
+  return (
+    newestFirst.find((row) => isLocalRecording(row) && row.status === "ready") ??
+    newestFirst.find((row) => !(isLocalRecording(row) && row.status !== "ready")) ??
+    newestFirst[0] ??
+    null
+  );
+}
+
 /** O que `uploaded` e `upload_failed` gravam em webinar_recordings (source jibri); os outros estados nao tocam nela. */
 export function recordingPatchFor(input: {
   bunnyLibraryId?: string;

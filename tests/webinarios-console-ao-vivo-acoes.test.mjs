@@ -74,6 +74,7 @@ registerHooks({
 actionStubs.role = { role: "owner", user: { email: "produtor.teste@bunker707.test", id: HOST, user_metadata: { full_name: "Produtor de Teste" } } };
 
 const live = await import("../src/server/webinars/live-actions.ts");
+const localActions = await import("../src/server/webinars/local-recording-actions.ts");
 const consoleQueries = await import("../src/server/webinars/console-queries.ts");
 const { fakeRecorderDispatches } = await import("../src/server/webinars/recorder-dispatch.ts");
 const { WEBINAR_COPY } = await import("../src/lib/webinar-copy.ts");
@@ -1343,4 +1344,103 @@ test("R7: o retrato da live no ar leva a parte simulada do contador separada do 
   assert.equal((await consoleQueries.getConsoleSnapshot(WEBINAR, S_NO_AR, now)).simulatedNow, null, "so as entradas: nada a separar no contador");
   Object.assign(linha(db, S_ENCERRADA), decisao);
   assert.equal((await consoleQueries.getConsoleSnapshot(WEBINAR, S_ENCERRADA, now)).simulatedNow, null, "a live encerrada");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * A gravacao no computador de quem apresenta, enviada para a Bunny (docs/30 D142)
+ * ---------------------------------------------------------------------------------------------- */
+
+const CHAVE_BUNNY = "chave-de-teste-0001";
+const VIDEO_LOCAL = "0aaaaaaa-1111-4222-8333-444444444444";
+const ARQUIVO_LOCAL = `gravacao-local-${S_ENCERRADA}-2026-11-25-134150.mp4`;
+
+/** Roda com a Bunny de mentira: cada POST cria o proximo video; o GET responde `status`. */
+async function comBunny({ status = 0, videos = [VIDEO_LOCAL] }, fn) {
+  const pedidos = [];
+  const original = globalThis.fetch;
+  const fila = [...videos];
+  process.env.BUNNY_STREAM_API_KEY = CHAVE_BUNNY;
+  process.env.BUNNY_STREAM_LIBRARY_ID = "42";
+  globalThis.fetch = async (url, init) => {
+    pedidos.push({ init, url: String(url) });
+    const body = init.method === "POST" ? { guid: fila.shift() } : { length: 0, status };
+    return { json: async () => body, ok: true, status: 200 };
+  };
+  try {
+    return await fn(pedidos);
+  } finally {
+    globalThis.fetch = original;
+    delete process.env.BUNNY_STREAM_API_KEY;
+    delete process.env.BUNNY_STREAM_LIBRARY_ID;
+  }
+}
+
+test("gravação no computador: o pedido cria o vídeo e devolve a assinatura (nunca a chave); a retomada usa o mesmo vídeo; o fim passa para processing uma vez", async () => {
+  const db = usar(bancoEmMemoria(cenario(), RPC));
+  const sessao = linha(db, S_ENCERRADA);
+  sessao.recording_anchor_at = new Date(Date.parse(sessao.started_at) + 10_000).toISOString();
+  const pedido = { durationSeconds: 1800, fileName: ARQUIVO_LOCAL, sessionId: S_ENCERRADA, sizeBytes: 1_800_000_000, startedAtMs: Date.parse(sessao.recording_anchor_at) - 4_000 };
+
+  await comBunny({}, async (pedidos) => {
+    const primeira = ok(await localActions.prepareLocalUpload(pedido));
+    assert.equal(primeira.done, false);
+    const { createHash } = await import("node:crypto");
+    const { ticket } = primeira;
+    assert.deepEqual([ticket.endpoint, ticket.libraryId, ticket.videoId], ["https://video.bunnycdn.com/tusupload", "42", VIDEO_LOCAL]);
+    assert.equal(ticket.signature, createHash("sha256").update(`42${CHAVE_BUNNY}${ticket.expiresAtSeconds}${VIDEO_LOCAL}`).digest("hex"));
+    assert.ok(!JSON.stringify(primeira).includes(CHAVE_BUNNY), "a chave nunca sai do servidor");
+    assert.deepEqual([pedidos.length, pedidos[0].url, pedidos[0].init.method], [1, "https://video.bunnycdn.com/library/42/videos", "POST"]);
+
+    const gravacao = db.tables.webinar_recordings.find((row) => row.file_name === ARQUIVO_LOCAL);
+    assert.deepEqual([gravacao.status, gravacao.source, gravacao.session_id, gravacao.duration_seconds, gravacao.size_bytes], ["uploading", "upload", S_ENCERRADA, 1800, 1_800_000_000]);
+    assert.equal(gravacao.anchor_offset_ms, -4_000, "o arquivo comecou 4 s antes da ancora do chat");
+    assert.equal(linha(db, S_ENCERRADA).recording_id ?? null, null, "nada e ligado antes de a Bunny terminar");
+
+    const retomada = ok(await localActions.prepareLocalUpload(pedido));
+    assert.equal(retomada.ticket.videoId, VIDEO_LOCAL);
+    assert.equal(pedidos.length, 1, "a retomada nao cria outro video");
+    assert.equal(db.tables.webinar_recordings.filter((row) => row.file_name === ARQUIVO_LOCAL).length, 1);
+
+    assert.equal(ok(await localActions.finishLocalUpload({ fileName: ARQUIVO_LOCAL, sessionId: S_ENCERRADA })).changed, true);
+    assert.equal(gravacao.status, "processing");
+    assert.equal(ok(await localActions.finishLocalUpload({ fileName: ARQUIVO_LOCAL, sessionId: S_ENCERRADA })).changed, false);
+    assert.deepEqual(ok(await localActions.prepareLocalUpload(pedido)), { done: true }, "enviado: nao envia de novo");
+    assert.equal(audits(db, "webinar.local_recording_uploaded").length, 1);
+  });
+});
+
+test("gravação no computador: com o envio vencido na Bunny nasce outro vídeo na mesma linha; se o arquivo já tinha chegado, só conclui", async () => {
+  const pedido = { durationSeconds: 60, fileName: ARQUIVO_LOCAL, sessionId: S_ENCERRADA, sizeBytes: 1000, startedAtMs: Date.now() };
+  const OUTRO = "0bbbbbbb-1111-4222-8333-444444444444";
+  await comBunny({ status: 0, videos: [VIDEO_LOCAL, OUTRO] }, async () => {
+    const db = usar(bancoEmMemoria(cenario(), RPC));
+    ok(await localActions.prepareLocalUpload(pedido));
+    const nova = ok(await localActions.prepareLocalUpload({ ...pedido, fresh: true }));
+    assert.equal(nova.ticket.videoId, OUTRO);
+    assert.deepEqual(db.tables.webinar_recordings.filter((row) => row.file_name === ARQUIVO_LOCAL).map((row) => row.bunny_video_id), [OUTRO]);
+  });
+  await comBunny({ status: 3 }, async (pedidos) => {
+    const db = usar(bancoEmMemoria(cenario(), RPC));
+    ok(await localActions.prepareLocalUpload(pedido));
+    assert.deepEqual(ok(await localActions.prepareLocalUpload({ ...pedido, fresh: true })), { done: true });
+    assert.equal(db.tables.webinar_recordings.find((row) => row.file_name === ARQUIVO_LOCAL).status, "processing");
+    assert.deepEqual(pedidos.map((p) => p.init.method), ["POST", "GET"]);
+  });
+});
+
+test("gravação no computador: sem permissão 403, arquivo de outra sessão 400, sem a Bunny configurada 409, e nada é gravado", async () => {
+  const db = usar(bancoEmMemoria(cenario(), RPC));
+  const pedido = { durationSeconds: 60, fileName: ARQUIVO_LOCAL, sessionId: S_ENCERRADA, sizeBytes: 1000, startedAtMs: Date.now() };
+  falha(await localActions.prepareLocalUpload({ ...pedido, sessionId: S_NO_AR }), 400);
+  falha(await localActions.prepareLocalUpload({ ...pedido, fileName: "../outro.mp4" }), 400);
+  falha(await localActions.prepareLocalUpload(pedido), 409);
+  falha(await localActions.finishLocalUpload({ fileName: ARQUIVO_LOCAL, sessionId: S_ENCERRADA }), 404);
+  estado.negar = true;
+  try {
+    falha(await localActions.prepareLocalUpload(pedido), 403);
+    falha(await localActions.finishLocalUpload({ fileName: ARQUIVO_LOCAL, sessionId: S_ENCERRADA }), 403);
+  } finally {
+    estado.negar = false;
+  }
+  assert.equal(db.tables.webinar_recordings.length, cenario().webinar_recordings?.length ?? 0);
 });
