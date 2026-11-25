@@ -44,7 +44,7 @@ var CHANNELS = 2;
 var BITRATE = 10000000;
 // O som do arquivo anda isto para a frente: as amostras vazias do comeco do AAC e a espera da mistura, que o atrasariam.
 var ADVANCE = 900;
-var audio = { drop: 0, lead: null, mean: 0, next: null, reader: null, samples: 0, seen: 0, started: false };
+var audio = { drop: 0, filled: 0, lead: null, mean: 0, next: null, reader: null, samples: 0, seen: 0, started: false };
 // Cada imagem que chega (a camera, a tela e a camera de quem mais estiver no ar), na ordem de chegada.
 var feeds = new Map();
 var people = [];
@@ -189,6 +189,7 @@ function silence(frames) {
         aenc.encode(empty);
         empty.close();
         audio.samples += n;
+        audio.filled += n;
         frames -= n;
     }
 }
@@ -519,7 +520,14 @@ self.onmessage = function (event) {
         ctx.font = '600 16px sans-serif';
         small = new OffscreenCanvas(32, 18);
         sctx = small.getContext('2d', { alpha: false });
-        setInterval(function () { self.postMessage({ contas: counts, tipo: 'contas' }); counts = { camera: 0, tela: 0, saiu: 0, perdeu: 0 }; }, 5000);
+        setInterval(function () {
+            // O relogio do som, para o relatorio: quanto silencio entrou e a distancia do som para o video agora.
+            counts.silencio = Math.round(audio.filled * 1000 / RATE);
+            counts.som = audio.lead === null ? null : Math.round(audio.mean - audio.lead);
+            counts.espera = Math.round(DELAY);
+            self.postMessage({ contas: counts, tipo: 'contas' });
+            counts = { camera: 0, tela: 0, saiu: 0, perdeu: 0 };
+        }, 5000);
     } else if (data.papel === 'comecar') {
         // Sem nenhuma imagem (camera desligada e sem tela), a gravacao segue com o preto, no mesmo ritmo.
         LATE = data.atraso || 0;

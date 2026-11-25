@@ -27,7 +27,7 @@
     try { framed = Boolean(window.parent && window.parent !== window); } catch (e) { framed = true; }
     if (!framed || !window.VideoEncoder || !window.AudioEncoder || !window.MediaStreamTrackProcessor || !window.Worker) { return; }
 
-    var WORKER = '/libs/bunker707-local-worker.js?v=870a29e8';
+    var WORKER = '/libs/bunker707-local-worker.js?v=ed14ca65';
     var PREFIX = 'gravacao-local-';
     var MESSAGE = 'bunker707:gravacao-local';
     // A origem da pagina que montou o iframe e mandou o "ola" (o console novo); nula, vale o painel daqui.
@@ -266,7 +266,7 @@
         r.counts.forEach(function (c) { Object.keys(totals).forEach(function (k) { totals[k] += c[k]; }); });
         r.report = ['gravação no computador', r.name, 'duração ' + r.seconds + ' s, ' + Math.round(r.bytes / 1e6) + ' MB']
             .concat(r.notes, ['quadros: câmera ' + totals.camera + ', tela ' + totals.tela + ', gravados ' + totals.saiu + ', perdidos ' + totals.perdeu,
-                'por 5 s (câmera/tela/gravados/perdidos): ' + r.counts.map(function (c) { return [c.camera, c.tela, c.saiu, c.perdeu].join('/'); }).join(' ')]).join('\n');
+                'por 5 s (câmera/tela/gravados/perdidos/silêncio ms/som ms/espera ms): ' + r.counts.map(function (c) { return [c.camera, c.tela, c.saiu, c.perdeu, c.silencio, c.som, c.espera].join('/'); }).join(' ')]).join('\n');
         if (r.remote) { tell({ nome: r.name, relatorio: r.report, segundos: r.seconds, tipo: 'fim' }); tellState(); return; }
         var ready = r.onDisk ? directory().then(function (d) { return d.getFileHandle(r.name); }).then(function (h) { return h.getFile(); }) : Promise.resolve(new window.Blob(r.chunks, { type: 'video/mp4' }));
 
