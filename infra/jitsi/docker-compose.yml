@@ -75,6 +75,9 @@ services:
       # O modo da gravacao (docs/30 A63 e D125), carregado pelo custom-config.js; o nginx serve
       # /libs/bunker707-gravacao.js.
       - ./web/bunker707-gravacao.js:/usr/share/jitsi-meet/libs/bunker707-gravacao.js:ro
+      # A gravacao no computador de quem apresenta (docs/30 D141) e as linhas de trabalho dela.
+      - ./web/bunker707-local.js:/usr/share/jitsi-meet/libs/bunker707-local.js:ro
+      - ./web/bunker707-local-worker.js:/usr/share/jitsi-meet/libs/bunker707-local-worker.js:ro
     environment:
       <<: *common-env
       DISABLE_HTTPS: "1"
