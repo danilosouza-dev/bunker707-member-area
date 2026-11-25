@@ -169,6 +169,56 @@ if out:
     print(json.dumps(list(reversed(out)), ensure_ascii=True, separators=(",", ":")))
 PY
 }
+# O fim dos registros do Jibri e do ffmpeg desta gravacao (docs/30 A65): a maquina e apagada depois da live, e com ela o
+# motivo de uma gravacao que parou sozinha (as de 25/11/2026 pararam aos 87 s com o gravador ainda na sala). Do registro
+# do ffmpeg (/storage/logs/ffmpeg.*.txt), as ultimas linhas que nao sao andamento e as duas ultimas de andamento; do
+# registro do Jibri (log.*.txt), as ultimas linhas que falam de parada, erro, saida ou das conferencias da chamada.
+# Sem endereco, sem nome de sala, sem linha com senha; cada linha ate 240 letras e o conjunto ate 9 KB.
+# {"ffmpeg":[...],"jibri":[...]}. Sem python, sem registro ou com erro, nada.
+registro_json() {
+    command -v python3 >/dev/null 2>&1 || return 0
+    python3 - "${FFMPEG_LOGS:-/storage/logs}" <<'PY' 2>/dev/null || true
+import glob, json, os, re, sys
+
+def newest(pattern):
+    paths = sorted(glob.glob(os.path.join(sys.argv[1], pattern)), key=os.path.getmtime)
+    return paths[-1] if paths else None
+
+def clean(line):
+    line = re.sub(r"[a-z][a-z0-9+.-]*://\S+", "<endereco>", line.strip())
+    line = re.sub(r"\bw-[0-9a-z]+(?:-[0-9a-z]+)+", "<sala>", line)
+    line = re.sub(r"(?i)\b(jwt|token|key)=[^\s&]+", r"\1=<oculto>", line)
+    return line[:240]
+
+def tail(path, keep, limit):
+    if not path:
+        return []
+    found = []
+    with open(path, errors="replace") as handle:
+        for line in handle:
+            if line.strip() and keep(line) and not re.search(r"(?i)passw|secret|senha", line):
+                found.append(clean(line))
+    return found[-limit:]
+
+progress = re.compile(r"frame=\s*\d+")
+wanted = re.compile(r"(?i)stop|error|exit|quit|finaliz|status|empty|muted|media|kicked|ice|ffmpeg|leav|signal|timeout|fail")
+ffmpeg_log = newest("ffmpeg.*.txt")
+doc = {
+    "ffmpeg": tail(ffmpeg_log, lambda l: not progress.search(l), 14) + tail(ffmpeg_log, lambda l: bool(progress.search(l)), 2),
+    "jibri": tail(newest("log.*.txt"), lambda l: bool(wanted.search(l)), 24),
+}
+doc = {name: lines for name, lines in doc.items() if lines}
+def dump():
+    return json.dumps(doc, ensure_ascii=True, separators=(",", ":"))
+while doc and len(dump()) > 9000:
+    name = max(doc, key=lambda n: len(doc[n]))
+    doc[name].pop(0)
+    if not doc[name]:
+        del doc[name]
+if doc:
+    print(dump())
+PY
+}
 # O ffmpeg que gravou (docs/30 D138): a versao que o Jibri registrou no arranque da gravacao (os registros de
 # /storage/logs); se o registro nao a traz (o aviso do teste de 25/11/2026 veio sem ela), a do binario que o
 # custom-jibri.conf manda o Jibri usar. Para conferir que o gravador usou o 6.1 e nao o 7.1 da imagem.
@@ -205,6 +255,8 @@ gravou=$(ffmpeg_gravou)
 [ -n "$gravou" ] && body="$body,\"ffmpeg\":\"$(json_str "$gravou")\""
 imagens=$(imagens_json 2>/dev/null || true)
 [ -n "$imagens" ] && body="$body,\"imagens\":$imagens"
+registro=$(registro_json)
+[ -n "$registro" ] && body="$body,\"registro\":$registro"
 cpu=$(cpu_json "${CPU_LOG:-/storage/cpu.log}")
 [ -n "$cpu" ] && body="$body,\"cpu\":$cpu"
 fluidez=$(fluidez_json)

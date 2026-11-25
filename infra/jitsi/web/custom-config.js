@@ -137,3 +137,24 @@ config.localRecording = { disable: false };
     }
 })();
 // bunker707:gravacao-loader:fim
+
+// Bunker707: a gravacao no computador de quem apresenta (docs/30 D141). Como os carregadores acima, so no iframe do nosso
+// app (a chave config.bunkerTheme no hash) e nunca no gravador. O arquivo so age no iframe de quem modera; sem ele, a
+// sala segue como sempre. So cria a tag de script para um caminho desta origem, com o nome da tag nunca escrito com os
+// sinais de menor e maior.
+// bunker707:local-loader:inicio
+(function () {
+    if (typeof document === 'undefined' || typeof window === 'undefined') { return; }
+    try {
+        var hash = String((window.location && window.location.hash) || '');
+        if (!/config\.bunkerTheme=/.test(hash) || /config\.iAmRecorder=(?:%22|"|%27|')?true\b/.test(hash)) { return; }
+        var script = document.createElement('script');
+        // O v e o comeco do sha256 do arquivo (a guarda da infra confere e diz o valor novo), como no CSS.
+        script.src = '/libs/bunker707-local.js?v=7b1b7d38';
+        script.async = true;
+        (document.head || document.documentElement).appendChild(script);
+    } catch (e) {
+        // Sem o arquivo, a sala segue como sempre.
+    }
+})();
+// bunker707:local-loader:fim
