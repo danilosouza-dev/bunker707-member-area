@@ -75,6 +75,11 @@ var counts = EMPTY();
 var file = null;
 var offset = 0;
 
+/** A largura e a altura de uma imagem: o quadro da camera (VideoFrame) ou a copia da tela (ImageBitmap). */
+function wide(image) { return image.displayWidth || image.width; }
+
+function tall(image) { return image.displayHeight || image.height; }
+
 /** O retangulo que cabe inteiro na caixa, centralizado. */
 function fit(width, height, x, y, boxWidth, boxHeight) {
     var scale = Math.min(boxWidth / width, boxHeight / height);
@@ -86,11 +91,11 @@ function fit(width, height, x, y, boxWidth, boxHeight) {
 
 /** A imagem cheia na caixa, cortando a sobra do meio para fora. */
 function cover(target, frame, x, y, w, h) {
-    var scale = Math.max(w / frame.displayWidth, h / frame.displayHeight);
+    var scale = Math.max(w / wide(frame), h / tall(frame));
     var cw = w / scale;
     var ch = h / scale;
 
-    target.drawImage(frame, (frame.displayWidth - cw) / 2, (frame.displayHeight - ch) / 2, cw, ch, x, y, w, h);
+    target.drawImage(frame, (wide(frame) - cw) / 2, (tall(frame) - ch) / 2, cw, ch, x, y, w, h);
 }
 
 /** A camera na coluna, em pe, com o nome embaixo quando e de outra pessoa. */
@@ -163,7 +168,7 @@ function emit(index) {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, W, H);
     if (main) {
-        var r = fit(main.displayWidth, main.displayHeight, 0, 0, width, H);
+        var r = fit(wide(main), tall(main), 0, 0, width, H);
 
         if (r[2] < W || r[3] < H) { backdrop(main); }
         ctx.drawImage(main, r[0], r[1], r[2], r[3]);
@@ -633,18 +638,35 @@ function drop(id) {
 function pump(id, readable) {
     drop(id);
     if (!readable) { return; }
-    var feed = { diff: null, queue: [], stamps: [], shownAt: 0, reader: readable.getReader(), shown: null };
+    var feed = { chain: Promise.resolve(), diff: null, queue: [], stamps: [], shownAt: 0, reader: readable.getReader(), shown: null };
 
     feeds.set(id, feed);
     (function next() {
         feed.reader.read().then(function (result) {
             if (feeds.get(id) !== feed) { if (result.value) { result.value.close(); } return; }
             if (result.done) { drop(id); return; }
-            if (id === 'camera' && !startAt && feed.stamps.length < 61) { feed.stamps.push(result.value.timestamp); }
-            feed.queue.push({ at: hourOf(feed, result.value), frame: result.value });
-            // Nunca uma fila grande na espera: a captura para de entregar com imagens presas.
-            if (feed.queue.length > (id === 'camera' ? 4 : 8)) { feed.queue.shift().frame.close(); }
+            var frame = result.value;
+            var at = hourOf(feed, frame);
+
             if (id === 'camera' || id === 'tela') { counts[id] += 1; }
+            if (id === 'camera') {
+                if (!startAt && feed.stamps.length < 61) { feed.stamps.push(frame.timestamp); }
+                feed.queue.push({ at: at, frame: frame });
+                // Nunca uma fila grande na espera: a captura para de entregar com imagens presas.
+                if (feed.queue.length > 4) { feed.queue.shift().frame.close(); }
+                next();
+
+                return;
+            }
+            // A tela (e a camera de quem mais estiver no ar): uma copia na hora, e o quadro volta ao navegador. A captura da
+            // tela tem poucos espacos; com 8 quadros presos na espera do atraso da camera, ela entregava 5 por segundo
+            // (26/11/2026; docs/30 D148). A copia espera no lugar dela.
+            feed.chain = feed.chain.then(function () { return createImageBitmap(frame); }).then(function (copy) {
+                frame.close();
+                if (feeds.get(id) !== feed) { copy.close(); return; }
+                feed.queue.push({ at: at, frame: copy });
+                if (feed.queue.length > 8) { feed.queue.shift().frame.close(); }
+            }).catch(function () { try { frame.close(); } catch (e) { /* ja fechado */ } });
             next();
         }).catch(function () { /* a faixa acabou */ });
     }());
