@@ -21,7 +21,7 @@ const META_EVERY_S = 5;
 const OPEN_STALE_MS = 25_000;
 const STOP_WAIT_MS = 6_000;
 
-type Recording = { bytes: number; closing: boolean; fileName: string; frameName: string; openedAt: number; seconds: number; startedAtMs: number | null; worker: Worker };
+type Recording = { bytes: number; closing: boolean; lines: string[]; fileName: string; frameName: string; openedAt: number; seconds: number; startedAtMs: number | null; worker: Worker };
 
 export type LocalUploadState = { name: string; sent: number; size: number };
 
@@ -113,7 +113,7 @@ export function useLocalRecording(input: {
         setProblem(copy.semDisco);
         return;
       }
-      const active: Recording = { bytes: 0, closing: false, fileName: localFileName(sessionId, frameName), frameName, openedAt: Date.now(), seconds: 0, startedAtMs: null, worker };
+      const active: Recording = { bytes: 0, closing: false, fileName: localFileName(sessionId, frameName), frameName, lines: [], openedAt: Date.now(), seconds: 0, startedAtMs: null, worker };
       recording.current = active;
       setCurrent({ bytes: 0, started: false });
       const fail = () => {
@@ -199,6 +199,15 @@ export function useLocalRecording(input: {
         return;
       }
       if (!active || heard.name !== active.frameName || active.closing) {
+        return;
+      }
+      if (heard.kind === "counts") {
+        // O relatorio cresce a cada 5 s e fica guardado (a live pode acabar sem parar a gravacao).
+        if (heard.notes) {
+          active.lines.push(heard.notes);
+        }
+        active.lines.push(heard.line);
+        patchMeta(active.fileName, { report: ["gravação no computador", active.frameName, "a cada 5 s: tempo câmera/tela/gravados/perdidos, amostras de som", ...active.lines].join("\n") });
         return;
       }
       if (heard.kind === "started") {

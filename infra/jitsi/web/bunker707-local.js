@@ -27,7 +27,7 @@
     try { framed = Boolean(window.parent && window.parent !== window); } catch (e) { framed = true; }
     if (!framed || !window.VideoEncoder || !window.AudioEncoder || !window.MediaStreamTrackProcessor || !window.Worker) { return; }
 
-    var WORKER = '/libs/bunker707-local-worker.js?v=196f37a8';
+    var WORKER = '/libs/bunker707-local-worker.js?v=0541d400';
     var PREFIX = 'gravacao-local-';
     var MESSAGE = 'bunker707:gravacao-local';
     // A origem da pagina que montou o iframe e mandou o "ola" (o console novo); nula, vale o painel daqui.
@@ -202,7 +202,17 @@
         r.ctx.resume().catch(function () {});
         r.composer.postMessage({ papel: 'compor' });
         r.composer.onmessage = function (e) {
-            if (e.data.tipo === 'contas') { r.counts.push(e.data.contas); r.last = e.data.contas; }
+            if (e.data.tipo === 'contas') {
+                r.counts.push(e.data.contas);
+                r.last = e.data.contas;
+                // As contas vao ao console a cada 5 s: o relatorio fica guardado la mesmo se a live acabar sem parar a gravacao.
+                if (r.remote) {
+                    var c = e.data.contas;
+                    var line = [Math.round((Date.now() - r.startedAt) / 1000) + 's', c.camera + '/' + c.tela + '/' + c.saiu + '/' + c.perdeu, 'voz ' + c.voz, 'mix ' + c.mix, 'out ' + c.out, 'sil ' + c.sil, 'troca ' + c.troca, 'taxa ' + (c.taxa || '-'), 'som ' + c.som, 'espera ' + c.espera].join(' ');
+
+                    tell({ linha: line, nome: r.name, notas: r.counts.length === 1 ? r.notes.join(' | ').slice(0, 2000) : undefined, tipo: 'contas' });
+                }
+            }
             else if (e.data.tipo === 'ritmo') { r.notes.push('ritmo da câmera ' + e.data.medido.toFixed(3) + ', gravado ' + e.data.ritmo.toFixed(3)); }
             else if (e.data.tipo === 'voz-recusada') { r.direct = false; r.voice = null; r.notes.push('microfone pela mistura'); }
             else if (e.data.tipo === 'pronto') { running(r); }
