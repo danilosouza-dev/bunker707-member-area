@@ -29,7 +29,7 @@ check() {
     local code
     code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$@" "$url" 2>/dev/null || true); [ -n "$code" ] || code=000
     # expected pode ter alternativas separadas por |
-    if printf '%s' "$code" | grep -qE "^(${expected})$"; then
+    if grep -qE "^(${expected})$" <<<"$code"; then
         printf '  ok   %-28s %s\n' "$name" "$code"
     else
         printf '  FALHA %-28s esperado %s, veio %s (%s)\n' "$name" "$expected" "$code" "$url"
@@ -97,7 +97,7 @@ else
             *) body=$(curl -sS --max-time 15 "$template_url" 2>/dev/null || true); route="pelo endereco publico" ;;
         esac
         # Todo modelo tem ao menos uma variavel do GoTrue ({{ .SiteURL }}, {{ .Token }}...): uma pagina de erro nao tem.
-        if printf '%s' "$body" | grep -q '{{ *\.'; then
+        if grep -q '{{ *\.' <<<"$body"; then
             printf '  ok   %-28s %s\n' "modelo ${template_url##*/}" "$route"
         else
             printf '  FALHA %-28s nao baixou %s (%s)\n' "modelo ${template_url##*/}" "$route" "$template_url"
