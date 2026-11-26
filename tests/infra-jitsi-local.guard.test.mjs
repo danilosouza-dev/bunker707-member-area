@@ -212,6 +212,16 @@ test("o som que chega em rajadas (a linha ocupada com a tela e o som do computad
   assert.ok(Math.abs(smooth - 20) < 0.2, `som ${smooth.toFixed(2)} s para 20 s de captura`);
 });
 
+test("a tela e as outras cameras viram uma copia na hora e o quadro volta ao navegador; so a camera fica na espera, no maximo 4 (D148: segurando 8 quadros da tela, 0,4 por segundo; copiando, 29,6)", () => {
+  const worker = read("bunker707-local-worker.js");
+  const pump = worker.slice(worker.indexOf("function pump("), worker.indexOf("self.onmessage"));
+  assert.match(pump, /createImageBitmap\(frame\)[\s\S]*?frame\.close\(\);/, "a copia e o quadro devolvido");
+  assert.match(pump, /if \(id === 'camera'\) \{[\s\S]*?if \(feed\.queue\.length > 4\) \{ feed\.queue\.shift\(\)\.frame\.close\(\); \}/, "a camera segura no maximo 4");
+  const others = pump.slice(pump.indexOf("createImageBitmap"));
+  assert.match(others, /feed\.queue\.push\(\{ at: at, frame: copy \}\)/, "na espera da tela fica so a copia");
+  assert.doesNotMatch(others, /frame: frame/, "nenhum quadro da tela fica preso");
+});
+
 test("o arquivo: um moov com as duas faixas, e cada fragmento com a hora e a duracao exatas (um quadro que faltou vira o anterior mais longo); o som na ordem, sem buraco", () => {
   const { context, sent } = compositor();
   vm.runInContext("NUM = 48000; DEN = 1001; mp4 = { aac: new Uint8Array([17, 144]), audio: [], avcC: new Uint8Array([1, 2, 3]), headed: false, seq: 1, sound: 0, video: [] };", context);
