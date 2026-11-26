@@ -27,7 +27,7 @@
     try { framed = Boolean(window.parent && window.parent !== window); } catch (e) { framed = true; }
     if (!framed || !window.VideoEncoder || !window.AudioEncoder || !window.MediaStreamTrackProcessor || !window.Worker) { return; }
 
-    var WORKER = '/libs/bunker707-local-worker.js?v=8c932249';
+    var WORKER = '/libs/bunker707-local-worker.js?v=0541d400';
     var PREFIX = 'gravacao-local-';
     var MESSAGE = 'bunker707:gravacao-local';
     // A origem da pagina que montou o iframe e mandou o "ola" (o console novo); nula, vale o painel daqui.
