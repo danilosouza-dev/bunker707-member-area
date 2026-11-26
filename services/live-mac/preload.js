@@ -10,9 +10,9 @@ if (VOICE_ORIGINS.includes(location.origin) || location.protocol === "file:") {
   ipcRenderer.on("voz:som", (_event, bytes) => listener && listener(bytes));
   ipcRenderer.on("voz:aviso", (_event, text) => console.info("[voz]", text));
   contextBridge.exposeInMainWorld("bunkerVoz", {
-    abrir: (callback) => {
+    abrir: (callback, name) => {
       listener = callback;
-      ipcRenderer.send("voz:abrir");
+      ipcRenderer.send("voz:abrir", typeof name === "string" ? name : "");
     },
     fechar: () => {
       listener = null;
@@ -59,8 +59,33 @@ if (VOICE_ORIGINS.includes(location.origin) || location.protocol === "file:") {
       }
       registerProcessor("bunker-voz", Voz);`;
     let source = null;
+    let port = null;
 
-    async function voice() {
+    /** O nome do microfone que a sala pediu (pelo deviceId); sem pedido, o que o navegador usaria. */
+    async function micName(audio) {
+      const wanted = audio && typeof audio === "object" ? audio.deviceId : undefined;
+      const id = typeof wanted === "string" ? wanted : wanted && (wanted.exact || wanted.ideal);
+      let list = (await devices.enumerateDevices()).filter((d) => d.kind === "audioinput");
+      // Sem uma captura de audio de verdade, o navegador nao conta os nomes dos microfones (nem para a sala escolher):
+      // uma abertura rapida libera os nomes, e a faixa e fechada na hora.
+      if (!list.some((d) => d.label)) {
+        try {
+          (await original({ audio: true })).getTracks().forEach((t) => t.stop());
+        } catch {
+          // Sem a permissao, fica o microfone padrao do Mac.
+        }
+        list = (await devices.enumerateDevices()).filter((d) => d.kind === "audioinput");
+      }
+      const found = (id && list.find((d) => d.deviceId === id)) || list.find((d) => d.deviceId === "default") || list[0];
+      return found ? found.label : "";
+    }
+
+    async function voice(audio) {
+      const name = await micName(audio);
+      if (source) {
+        // Outro microfone na sala: a captura troca, a faixa da pagina continua a mesma.
+        window.bunkerVoz.abrir((bytes) => port.postMessage(bytes, [bytes]), name);
+      }
       if (!source) {
         const ctx = new AudioContext({ latencyHint: "interactive", sampleRate: 48000 });
         await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: "text/javascript" })));
@@ -68,7 +93,8 @@ if (VOICE_ORIGINS.includes(location.origin) || location.protocol === "file:") {
         const dest = ctx.createMediaStreamDestination();
         dest.channelCount = 1;
         node.connect(dest);
-        window.bunkerVoz.abrir((bytes) => node.port.postMessage(bytes, [bytes]));
+        port = node.port;
+        window.bunkerVoz.abrir((bytes) => port.postMessage(bytes, [bytes]), name);
         await ctx.resume();
         source = dest.stream.getAudioTracks()[0];
       }
@@ -81,7 +107,7 @@ if (VOICE_ORIGINS.includes(location.origin) || location.protocol === "file:") {
       }
       const video = constraints.video ? await original({ video: constraints.video }) : null;
       const stream = new MediaStream(video ? video.getVideoTracks() : []);
-      stream.addTrack(await voice());
+      stream.addTrack(await voice(constraints.audio));
       return stream;
     };
   }})();`);

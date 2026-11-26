@@ -20,4 +20,4 @@ Sai `out/Live Bunker707.app` e `out/Live-Bunker707-mac.zip`.
 4. Entre com a sua conta e vá ao console da live.
 5. Na barra do Mac, no ícone do microfone, escolha **Isolamento de Voz**. No menu **Ver > Testar o microfone** dá para conferir: em silêncio, abaixo de −70 dB.
 
-O microfone usado é o padrão do Mac (Ajustes > Som > Entrada). O seletor de microfone da sala não muda nada aqui.
+O microfone é o escolhido nas Configurações da sala (o seletor de microfone). Sem escolha, vale o padrão do Mac (Ajustes > Som > Entrada); cuidado: ligar a câmera pela Cam Link pode tornar o microfone da câmera o padrão.

@@ -47,11 +47,23 @@ function voiceBinary() {
   return app.isPackaged ? path.join(process.resourcesPath, "voz") : path.join(__dirname, "nativo", "voz");
 }
 
-function startVoice() {
-  if (voice) {
+/** O microfone pedido pela sala (o nome, sem o "(3142:a008)" que o navegador acrescenta). */
+let wantedMic = "";
+
+function startVoice(name) {
+  const clean = String(name || "").replace(/^(Padrão|Default) - /, "").replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*$/i, "").slice(0, 120);
+  // Outro microfone escolhido: a captura recomeca com ele.
+  if (voice && clean === wantedMic) {
     return;
   }
-  voice = spawn(voiceBinary(), [], { stdio: ["pipe", "pipe", "pipe"] });
+  if (voice) {
+    voice.stdin.end();
+    voice.kill();
+    voice = null;
+  }
+  wantedMic = clean;
+  voice = spawn(voiceBinary(), [clean], { stdio: ["pipe", "pipe", "pipe"] });
+  const current = voice;
   let rest = Buffer.alloc(0);
   voice.stdout.on("data", (data) => {
     const all = rest.length ? Buffer.concat([rest, data]) : data;
@@ -79,7 +91,9 @@ function startVoice() {
     }
   });
   voice.on("exit", () => {
-    voice = null;
+    if (voice === current) {
+      voice = null;
+    }
   });
 }
 
@@ -90,12 +104,12 @@ function stopVoiceIfIdle() {
   }
 }
 
-ipcMain.on("voz:abrir", (event) => {
+ipcMain.on("voz:abrir", (event, name) => {
   if (!event.senderFrame || !trusted(event.senderFrame.url)) {
     return;
   }
   listeners.add(event.senderFrame);
-  startVoice();
+  startVoice(name);
 });
 ipcMain.on("voz:fechar", (event) => {
   listeners.delete(event.senderFrame);
@@ -121,7 +135,8 @@ app.whenReady().then(async () => {
   }
   const ses = session.defaultSession;
   ses.setPermissionRequestHandler((wc, permission, done, details) => done(MEDIA.has(permission) && trusted(details.requestingUrl || wc.getURL())));
-  ses.setPermissionCheckHandler((wc, permission, origin) => MEDIA.has(permission) && trusted(origin));
+  // A pagina de teste do microfone e um arquivo: a origem dela e "file://", e vale o endereco inteiro.
+  ses.setPermissionCheckHandler((wc, permission, origin, details) => MEDIA.has(permission) && trusted((details && details.requestingUrl) || origin));
   // Compartilhar a tela pelo seletor do proprio Mac.
   ses.setDisplayMediaRequestHandler((request, callback) => callback({}), { useSystemPicker: true });
   Menu.setApplicationMenu(
