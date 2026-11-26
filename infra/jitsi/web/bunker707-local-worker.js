@@ -61,7 +61,10 @@ var people = [];
 var timer = null;
 var startAt = 0;
 var slot = 0;
-var counts = { camera: 0, tela: 0, saiu: 0, perdeu: 0 };
+// As contas de cada 5 s (o relatorio da gravacao): quadros e, do som, as amostras que chegaram do microfone direto (voz) e
+// da mistura (mix), as que foram para o arquivo (out), o silencio posto (sil), as trocas entre os dois e o ritmo da voz.
+var EMPTY = function () { return { camera: 0, tela: 0, saiu: 0, perdeu: 0, voz: 0, mix: 0, out: 0, sil: 0, troca: 0 }; };
+var counts = EMPTY();
 var file = null;
 var offset = 0;
 
@@ -204,6 +207,8 @@ function silence(frames) {
         empty.close();
         audio.samples += n;
         audio.filled += n;
+        counts.sil += n;
+        counts.out += n;
         frames -= n;
     }
 }
@@ -240,6 +245,7 @@ function addRest(planes, n) {
 function voiceOff() {
     if (!voice.on) { return; }
     voice.on = false;
+    counts.troca += 1;
     audio.next = null;
     clearRest();
 }
@@ -274,12 +280,14 @@ function emitSound(planes, frames, stamp, who) {
     aenc.encode(out);
     out.close();
     audio.samples += frames;
+    counts.out += frames;
 }
 
 /** Cada pedaco de som que chega: do microfone direto ('voz') ou da mistura das outras vozes ('mistura'). */
 function hear(data, who) {
     if (!aenc || !startAt) { data.close(); return; }
     if (data.sampleRate !== RATE) {
+        if (who === 'voz') { counts.taxa = data.sampleRate; }
         data.close();
         // O microfone noutro ritmo de amostras: a pagina o poe na mistura, como antes.
         if (who === 'voz' && !voice.refused) { voice.refused = true; voiceOff(0); self.postMessage({ tipo: 'voz-recusada' }); }
@@ -294,10 +302,12 @@ function hear(data, who) {
         data.copyTo(planes.subarray(c * frames, (c + 1) * frames), { format: 'f32-planar', planeIndex: Math.min(c, data.numberOfChannels - 1) });
     }
     data.close();
+    counts[who === 'voz' ? 'voz' : 'mix'] += frames;
     if (who === 'voz') {
+        counts.taxa = RATE;
         if (voice.refused) { return; }
         voice.last = performance.now();
-        if (!voice.on) { voice.on = true; audio.next = null; clearRest(); }
+        if (!voice.on) { voice.on = true; audio.next = null; clearRest(); counts.troca += 1; }
         addRest(planes, frames);
         emitSound(planes, frames, stamp, who);
 
@@ -633,7 +643,7 @@ self.onmessage = function (event) {
             counts.som = audio.lead === null ? null : Math.round(audio.mean - audio.lead);
             counts.espera = Math.round(DELAY);
             self.postMessage({ contas: counts, tipo: 'contas' });
-            counts = { camera: 0, tela: 0, saiu: 0, perdeu: 0 };
+            counts = EMPTY();
         }, 5000);
     } else if (data.papel === 'comecar') {
         // Sem nenhuma imagem (camera desligada e sem tela), a gravacao segue com o preto, no mesmo ritmo.
