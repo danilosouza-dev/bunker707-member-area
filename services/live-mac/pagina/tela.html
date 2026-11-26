@@ -1,0 +1,68 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Compartilhar a tela</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+<style>
+  body { margin: 0; background: #151517; color: #eee; font: 14px/1.4 -apple-system, sans-serif; display: flex; flex-direction: column; height: 100vh; }
+  h1 { font-size: 18px; margin: 18px 20px 4px; }
+  p { margin: 0 20px 12px; color: #aaa; }
+  #lista { flex: 1; overflow: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 4px 20px 12px; }
+  button.fonte { background: #222226; border: 2px solid transparent; border-radius: 10px; padding: 8px; color: #eee; text-align: left; cursor: pointer; }
+  button.fonte.marcada { border-color: #e5484d; }
+  button.fonte img { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #000; border-radius: 6px; display: block; }
+  button.fonte span { display: block; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  footer { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-top: 1px solid #2a2a2e; }
+  label { flex: 1; display: flex; gap: 8px; align-items: center; }
+  footer button { font: 600 14px sans-serif; padding: 10px 18px; border-radius: 8px; border: 0; cursor: pointer; }
+  #ok { background: #e5484d; color: #fff; }
+  #ok:disabled { opacity: 0.4; }
+  #cancelar { background: #2a2a2e; color: #eee; }
+</style>
+<h1>Compartilhar a tela</h1>
+<p>Escolha a tela inteira ou uma janela.</p>
+<div id="lista">Carregando…</div>
+<footer>
+  <label><input id="som" type="checkbox" checked /> Compartilhar o som do computador</label>
+  <button id="cancelar" type="button">Cancelar</button>
+  <button id="ok" type="button" disabled>Compartilhar</button>
+</footer>
+<script>
+  let chosen = null;
+  const lista = document.getElementById("lista");
+  const ok = document.getElementById("ok");
+  window.seletor.fontes().then(({ fontes, semPermissao }) => {
+    lista.textContent = "";
+    if (semPermissao) {
+      lista.style.display = "block";
+      lista.innerHTML = "<p style='margin:20px 0'>O Mac ainda não deixou o Live Bunker707 ver a tela. Em <b>Ajustes > Privacidade e Segurança > Gravação de Tela e Áudio do Sistema</b>, ligue o <b>Live Bunker707</b>. Depois feche e abra o aplicativo.</p>";
+      const go = document.createElement("button");
+      go.type = "button";
+      go.textContent = "Abrir os Ajustes";
+      go.style.cssText = "font:600 14px sans-serif;padding:10px 18px;border-radius:8px;border:0;background:#e5484d;color:#fff;cursor:pointer";
+      go.onclick = () => window.seletor.ajustes();
+      lista.append(go);
+      return;
+    }
+    fontes.sort((a, b) => Number(b.screen) - Number(a.screen)).forEach((fonte, n) => {
+      const button = document.createElement("button");
+      button.className = "fonte";
+      button.type = "button";
+      const img = document.createElement("img");
+      img.src = fonte.thumb;
+      img.alt = "";
+      const name = document.createElement("span");
+      name.textContent = fonte.screen ? `Tela inteira ${n + 1}` : fonte.name;
+      button.append(img, name);
+      button.onclick = () => {
+        chosen = fonte.id;
+        document.querySelectorAll(".fonte").forEach((b) => b.classList.toggle("marcada", b === button));
+        ok.disabled = false;
+      };
+      button.ondblclick = () => window.seletor.escolher(fonte.id, document.getElementById("som").checked);
+      lista.append(button);
+    });
+  });
+  ok.onclick = () => chosen && window.seletor.escolher(chosen, document.getElementById("som").checked);
+  document.getElementById("cancelar").onclick = () => window.seletor.escolher(null, false);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") window.seletor.escolher(null, false); });
+</script>

@@ -1,0 +1,8 @@
+<!doctype html><meta charset=utf-8><title>Testar o microfone</title>
+<style>body{background:#111;color:#eee;font:18px/1.5 -apple-system,sans-serif;max-width:640px;margin:40px auto;padding:0 20px}button{font:600 18px sans-serif;padding:12px 22px;border-radius:10px}#n{font-size:42px;font-weight:700;color:#7fd;margin:24px 0}</style>
+<h2>Testar o microfone</h2>
+<p>Clique em Ligar. Na barra do Mac, no ícone do microfone, escolha <b>Isolamento de Voz</b> para o Live Bunker707. Em silêncio, o nível deve ficar abaixo de −70 dB; falando, perto de −20 dB.</p>
+<button id=b>Ligar</button><div id=n>—</div>
+<script>
+document.getElementById('b').onclick=async()=>{const s=await navigator.mediaDevices.getUserMedia({audio:true});const c=new AudioContext();await c.resume();const a=c.createAnalyser();a.fftSize=4096;c.createMediaStreamSource(s).connect(a);const d=new Float32Array(4096);setInterval(()=>{a.getFloatTimeDomainData(d);let z=0;for(const v of d)z+=v*v;document.getElementById('n').textContent=Math.max(-120,10*Math.log10(z/4096+1e-12)).toFixed(0)+' dB'},250)};
+</script>
