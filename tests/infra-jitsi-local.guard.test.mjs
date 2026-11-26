@@ -182,6 +182,36 @@ test("o ritmo da gravacao e o dobro do da camera (24 vira 48, 30 vira 60), com u
   assert.equal(rate(27.6, { hint: 29.97 }), 60, "o aparelho que nao entrega o que diz");
 });
 
+test("o som que chega em rajadas (a linha ocupada com a tela e o som do computador) nao fica mais longo que o tempo real (26/11/2026: 308 s de som numa live de 234 s)", () => {
+  const run = ({ stallEvery, stallMs }) => {
+    let now = 1000;
+    const self = { postMessage() {} };
+    const context = vm.createContext({ clearTimeout() {}, performance: { now: () => now }, self, setInterval() {}, setTimeout() {} });
+    vm.runInContext(read("bunker707-local-worker.js"), context);
+    let written = 0;
+    context.AudioData = class { constructor(init) { this.numberOfFrames = init.numberOfFrames; } close() {} };
+    vm.runInContext("aenc = { encode(data) { globalThis.__written(data.numberOfFrames); } }; startAt = 1000;", Object.assign(context, { __written: (n) => { written += n; } }));
+    const chunk = (stamp) => ({ close() {}, copyTo() {}, numberOfChannels: 1, numberOfFrames: 480, sampleRate: 48000, timestamp: stamp });
+    const seconds = 20;
+    let backlog = [];
+    for (let i = 0; i < seconds * 100; i += 1) {
+      now = 1000 + i * 10;
+      backlog.push(chunk(5e6 + i * 10000));
+      const stalled = stallEvery && i % stallEvery >= stallEvery - stallMs / 10;
+      if (stalled) { continue; }
+      // Depois de um engasgo, o relogio da linha roda antes das leituras que esperavam (o caso de 26/11/2026).
+      vm.runInContext("follow(); watchVoice();", context);
+      for (const data of backlog) { context.hear(data, "voz"); }
+      backlog = [];
+    }
+    return written / 48000;
+  };
+  const smooth = run({ stallEvery: 0, stallMs: 0 });
+  const bursts = run({ stallEvery: 300, stallMs: 800 });
+  assert.ok(Math.abs(bursts - smooth) < 0.05, `com rajadas ${bursts.toFixed(2)} s, sem ${smooth.toFixed(2)} s`);
+  assert.ok(Math.abs(smooth - 20) < 0.2, `som ${smooth.toFixed(2)} s para 20 s de captura`);
+});
+
 test("o arquivo: um moov com as duas faixas, e cada fragmento com a hora e a duracao exatas (um quadro que faltou vira o anterior mais longo); o som na ordem, sem buraco", () => {
   const { context, sent } = compositor();
   vm.runInContext("NUM = 48000; DEN = 1001; mp4 = { aac: new Uint8Array([17, 144]), audio: [], avcC: new Uint8Array([1, 2, 3]), headed: false, seq: 1, sound: 0, video: [] };", context);

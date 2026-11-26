@@ -51,6 +51,10 @@ var audio = { bias: null, drop: 0, filled: 0, lead: null, mean: 0, next: null, r
 // tempo que varia. Com ele no ar, ele manda no relogio do som e as outras vozes (a mistura) esperam numa fila curta.
 var voice = { last: 0, on: false, reader: null, refused: false };
 var rest = { frames: 0, list: [] };
+// Quanto tempo o som pode chegar atrasado (a captura guarda 2 s na espera) antes de valer como parado. Mais curto que isso,
+// a linha ocupada (a tela compartilhada com o som do computador) le o som em rajadas e o silencio entraria em dobro:
+// em 26/11/2026, o som de uma live de 234 s saiu com 308 s.
+var STALL_MS = 2500;
 // Cada imagem que chega (a camera, a tela e a camera de quem mais estiver no ar), na ordem de chegada.
 var feeds = new Map();
 var people = [];
@@ -178,7 +182,11 @@ function follow() {
     if (!audio.started) { return; }
     var ahead = audio.samples * 1000 / RATE - (performance.now() - startAt);
 
-    if (ahead < -1500) { silence(Math.round((-ahead - 100) * RATE / 1000)); audio.next = null; return; }
+    // O som parado de verdade (mais que os 2 s que a captura guarda na espera): o que falta e silencio. Um atraso menor nao:
+    // o som atrasado chega inteiro depois (a linha ocupada le em rajadas), e o silencio contaria o mesmo trecho duas vezes.
+    var behind = ahead - (audio.lead === null ? 0 : audio.lead);
+
+    if (behind < -STALL_MS) { silence(Math.round(-behind * RATE / 1000)); audio.next = null; return; }
     // A distancia normal entre os dois (a espera da mistura), pela media dos primeiros segundos; depois, so a media longa.
     audio.seen += 1;
     audio.mean += (ahead - audio.mean) / Math.min(audio.seen, 90);
@@ -228,13 +236,17 @@ function addRest(planes, n) {
     }
 }
 
-/** O microfone parou de entregar (mudo na sala, aparelho tirado): a mistura volta a mandar, e o buraco vira silencio. */
-function voiceOff(gapMs) {
+/** O microfone parou de entregar: a mistura volta a mandar (o buraco, se houver, vem pelo horario da captura). */
+function voiceOff() {
     if (!voice.on) { return; }
     voice.on = false;
     audio.next = null;
     clearRest();
-    if (audio.started && gapMs > 20) { silence(Math.round((gapMs - 10) * RATE / 1000)); }
+}
+
+/** O microfone sem entregar nada por mais tempo que a espera da captura: mudo na sala ou tirado. A mistura volta a mandar. */
+function watchVoice() {
+    if (voice.on && performance.now() - voice.last > STALL_MS) { voiceOff(); }
 }
 
 /** Um pedaco pronto vai para o arquivo, na ordem, com a hora contada em amostras. */
@@ -251,7 +263,7 @@ function emitSound(planes, frames, stamp, who) {
         audio.bias = 'voz';
         if (ADVANCE > ADVANCE_VOICE) { silence(ADVANCE - ADVANCE_VOICE); } else { audio.drop = ADVANCE_VOICE - ADVANCE; }
     }
-    // Um trecho que a captura perdeu (a maquina engasgou) vira silencio do mesmo tamanho: o resto nao adianta.
+    // Um trecho que a captura perdeu (pelo horario da captura, nunca pelo da chegada) vira silencio do mesmo tamanho.
     var hole = audio.next === null ? 0 : Math.round((stamp - audio.next) * RATE / 1e6);
 
     if (hole > 240 && hole < RATE * 60 && !audio.drop) { silence(hole); }
@@ -554,7 +566,7 @@ function end() {
 function beat() {
     timer = null;
     if (!venc) { return; }
-    if (voice.on && performance.now() - voice.last > 400) { voiceOff(performance.now() - voice.last); }
+    watchVoice();
     var due = Math.floor((performance.now() - startAt) * NUM / DEN / 1000);
 
     follow();
