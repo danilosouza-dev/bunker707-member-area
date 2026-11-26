@@ -37,7 +37,7 @@ falha() { printf '  FALHA %-40s %s\n' "$1" "$2"; failures=$((failures + 1)); }
 check() {  # check "nome" codigo-esperado url
     local name="$1" expected="$2" url="$3" code
     code=$(curl -sS "${insecure[@]}" -o /dev/null -w '%{http_code}' --max-time 20 "$url" 2>/dev/null || true); [ -n "$code" ] || code=000
-    if printf '%s' "$code" | grep -qE "^(${expected})$"; then ok "$name" "$code"; else falha "$name" "esperado $expected, veio $code ($url)"; fi
+    if grep -qE "^(${expected})$" <<<"$code"; then ok "$name" "$code"; else falha "$name" "esperado $expected, veio $code ($url)"; fi
 }
 
 log "Containers"
@@ -79,28 +79,28 @@ for expr in "interfaceConfig.SHOW_JITSI_WATERMARK = false" "interfaceConfig.SHOW
             "interfaceConfig.SHOW_POWERED_BY = false" "interfaceConfig.APP_NAME = 'Bunker707'" \
             "interfaceConfig.PROVIDER_NAME = 'Bunker707'" "interfaceConfig.MOBILE_APP_PROMO = false" \
             "interfaceConfig.JITSI_WATERMARK_LINK = ''"; do
-    printf '%s' "$iface" | grep -qF "$expr" || { brand_ok=0; falha "interface_config.js" "falta: $expr"; }
+    grep -qF "$expr" <<<"$iface" || { brand_ok=0; falha "interface_config.js" "falta: $expr"; }
 done
 # A ultima mencao a SHOW_JITSI_WATERMARK e a nossa (o padrao `SHOW_JITSI_WATERMARK: true` vem antes).
 last=$(printf '%s' "$iface" | grep -n 'SHOW_JITSI_WATERMARK' | tail -n1)
-printf '%s' "$last" | grep -q 'false' || { brand_ok=0; falha "interface_config.js" "ultima SHOW_JITSI_WATERMARK nao e false: $last"; }
+grep -q 'false' <<<"$last" || { brand_ok=0; falha "interface_config.js" "ultima SHOW_JITSI_WATERMARK nao e false: $last"; }
 [ "$brand_ok" = 1 ] && ok "interface_config.js" "custom-interface_config.js no fim, sem a marca"
 cfg=$(curl -sS "${insecure[@]}" --max-time 20 "$public_url/config.js" 2>/dev/null || true)
 cfg_ok=1
 for expr in 'config.videoQuality.codecPreferenceOrder = ["VP8"' "config.videoQuality.screenshareCodec = 'VP8'" "config.disableChat = true" "config.readOnlyName = true" "config.hideConferenceTimer = true" "config.channelLastN = 9" "css/bunker707.css?v=$css_v" "libs/bunker707-plateia.js?v=$plateia_v" "libs/bunker707-gravacao.js?v=$gravacao_v"; do
-    printf '%s' "$cfg" | grep -qF "$expr" || { cfg_ok=0; falha "config.js" "falta: $expr"; }
+    grep -qF "$expr" <<<"$cfg" || { cfg_ok=0; falha "config.js" "falta: $expr"; }
 done
 # A barra padrao servida e a minima (docs/30 §8.1): a ultima toolbarButtons nao tem tela, gravar, seguranca nem a lista.
 toolbar=$(printf '%s' "$cfg" | grep -E '^[[:space:]]*config\.toolbarButtons[[:space:]]*=' | tail -n1)
 for button in "'desktop'" "'recording'" "'security'" "'participants-pane'"; do
-    if [ -z "$toolbar" ] || printf '%s' "$toolbar" | grep -qF "$button"; then cfg_ok=0; falha "config.js" "barra padrao com $button (ou sem toolbarButtons): $toolbar"; fi
+    if [ -z "$toolbar" ] || grep -qF "$button" <<<"$toolbar"; then cfg_ok=0; falha "config.js" "barra padrao com $button (ou sem toolbarButtons): $toolbar"; fi
 done
 [ "$cfg_ok" = 1 ] && ok "config.js" "custom-config.js no fim"
 if [ -z "$frame_ancestors" ]; then
     falha "frame-ancestors (MEET_FRAME_ANCESTORS)" "vazio: a sala nao abre no iframe da area de membros"
 else
     csp=$(curl -sSI "${insecure[@]}" --max-time 20 "$public_url/config.js" 2>/dev/null | grep -i '^content-security-policy:' | tr -d '\r' || true)
-    if printf '%s' "$csp" | grep -qF "frame-ancestors $frame_ancestors"; then ok "frame-ancestors" "$frame_ancestors"; else falha "frame-ancestors" "${csp:-sem cabecalho Content-Security-Policy}"; fi
+    if grep -qF "frame-ancestors $frame_ancestors" <<<"$csp"; then ok "frame-ancestors" "$frame_ancestors"; else falha "frame-ancestors" "${csp:-sem cabecalho Content-Security-Policy}"; fi
 fi
 
 log "Saude interna (127.0.0.1)"
