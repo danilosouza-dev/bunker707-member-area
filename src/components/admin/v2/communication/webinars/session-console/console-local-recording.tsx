@@ -14,8 +14,8 @@ import type { LocalRecordingState } from "./use-local-recording";
 // enquanto grava ou envia, com qualquer painel aberto.
 
 const copy = WEBINAR_COPY.consoleAoVivo.gravacaoLocal;
-/** 8 Mbps de video e 160 kbps de audio. */
-const BYTES_PER_HOUR = 3_700_000_000;
+/** 10 Mbps de video e 160 kbps de audio. */
+const BYTES_PER_HOUR = 4_600_000_000;
 
 function clock(seconds: number): string {
   const whole = Math.max(0, Math.round(seconds));
