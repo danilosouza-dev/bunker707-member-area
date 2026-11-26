@@ -11,6 +11,23 @@
 need HCLOUD_TOKEN; install_hcloud
 role="${1:-}"
 
+# Diagnostico pontual de indisponibilidade: somente leitura, sem abrir portas nem reiniciar servicos.
+if [ "${DIAGNOSTICO_REDE:-}" = "1" ]; then
+    for server in "$MEMBROS_NAME" "$MEET_NAME"; do
+        log "Diagnostico: $server"
+        data=$(timeout 25 hcloud --no-experimental-warnings server describe "$server" -o json) || { echo "consulta do servidor falhou"; continue; }
+        printf '%s' "$data" | jq '{name,status,locked,location:(.location.name // .datacenter.location.name),public_net:{ipv4:{ip:.public_net.ipv4.ip,blocked:.public_net.ipv4.blocked},ipv6:{ip:.public_net.ipv6.ip,blocked:.public_net.ipv6.blocked},firewalls:.public_net.firewalls}}'
+        for firewall in $(printf '%s' "$data" | jq -r '.public_net.firewalls[]?.id'); do
+            timeout 25 hcloud --no-experimental-warnings firewall describe "$firewall" -o json | jq '{name,applied_to,rules:[.rules[]|{direction,protocol,port,source_count:(.source_ips|length),any_v4:(.source_ips|index("0.0.0.0/0")!=null),any_v6:(.source_ips|index("::/0")!=null),destination_count:(.destination_ips|length)}]}' || echo "consulta do firewall falhou"
+        done
+    done
+    log "Conectividade HTTP a partir do runner"
+    for url in "https://membros.$ZONE_NAME/api/health" "https://meet.$ZONE_NAME/config.js" "https://www.cloudflare.com/ips-v4"; do
+        curl -4 -sS -o /dev/null --connect-timeout 5 --max-time 8 -w "$url HTTP=%{http_code} DNS=%{time_namelookup} TCP=%{time_connect} TLS=%{time_appconnect} total=%{time_total}\n" "$url" || true
+    done
+    exit 0
+fi
+
 if [ "$role" = "meet" ]; then
     log "Servidor C ($MEET_NAME)"
     if server_exists "$MEET_NAME"; then
