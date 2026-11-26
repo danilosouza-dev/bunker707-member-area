@@ -16,7 +16,7 @@ await packager({
     NSCameraUsageDescription: "Para a sua câmera aparecer nas lives da Bunker707.",
     NSMicrophoneUsageDescription: "Para você falar nas lives da Bunker707."
   },
-  extraResource: ["out/voz"],
+  extraResource: ["out/captura"],
   ignore: [/^\/out/, /^\/nativo/, /^\/build\.sh/, /^\/empacotar\.mjs/, /^\/README\.md/, /\.log$/],
   name: "Live Bunker707",
   osxSign: false,

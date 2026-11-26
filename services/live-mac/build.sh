@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 npm ci --no-audit --no-fund
 mkdir -p out
-swiftc -O nativo/voz.swift -o out/voz
+swiftc -O nativo/captura.swift -o out/captura
 node empacotar.mjs
 app="out/Live Bunker707-darwin-arm64/Live Bunker707.app"
 codesign --force --deep -s - "$app"
