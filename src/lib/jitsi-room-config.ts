@@ -515,6 +515,7 @@ export type LocalRecordingFrameState = {
 export type LocalRecordingFrameEvent =
   | { kind: "chunk"; bytes: ArrayBuffer; name: string }
   | { kind: "end"; name: string; report: string; seconds: number }
+  | { kind: "counts"; line: string; name: string; notes: string | null }
   | { kind: "failed"; name: string | null; reason: string }
   | { kind: "open"; name: string; type: string }
   | { kind: "started"; name: string }
@@ -553,6 +554,8 @@ export function localRecordingEventOf(data: unknown): LocalRecordingFrameEvent |
       return name ? { kind: "started", name } : undefined;
     case "pedaco":
       return name && raw.bytes instanceof ArrayBuffer ? { bytes: raw.bytes, kind: "chunk", name } : undefined;
+    case "contas":
+      return name && typeof raw.linha === "string" ? { kind: "counts", line: raw.linha.slice(0, 400), name, notes: typeof raw.notas === "string" ? raw.notas.slice(0, 2000) : null } : undefined;
     case "fim":
       return name ? { kind: "end", name, report: typeof raw.relatorio === "string" ? raw.relatorio.slice(0, 20_000) : "", seconds: countOf(raw.segundos) } : undefined;
     case "falhou":

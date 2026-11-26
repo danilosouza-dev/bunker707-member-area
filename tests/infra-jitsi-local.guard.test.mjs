@@ -165,7 +165,7 @@ function compositor() {
   return { context, sent };
 }
 
-test("o ritmo da gravacao e o dobro do da camera (24 vira 48, 30 vira 60), com um quadro perdido na medicao e o que o aparelho diz no desempate; ritmo que nao existe, 60", () => {
+test("a gravacao e a 30 na familia da camera (23,976 e 29,97 em 29,97; 24 e 30 em 30; 25 em 25; D147), com um quadro perdido na medicao e o desempate pelo aparelho; ritmo que nao existe, 30", () => {
   const rate = (fps, { hint = 0, lost = [] } = {}) => {
     const { context } = compositor();
     const stamps = Array.from({ length: 61 }, (_, n) => (n * 1e6) / fps).filter((_, n) => !lost.includes(n));
@@ -173,13 +173,13 @@ test("o ritmo da gravacao e o dobro do da camera (24 vira 48, 30 vira 60), com u
     vm.runInContext(`feeds.set("camera", { stamps }); cadence(${hint});`, context);
     return Number((context.NUM / context.DEN).toFixed(3));
   };
-  assert.equal(rate(24000 / 1001, { hint: 23.98 }), 47.952);
-  assert.equal(rate(23.95, { hint: 23.976 }), 47.952, "a medicao curta erra um pouco; o aparelho desempata");
-  assert.equal(rate(24, { hint: 24 }), 48);
-  assert.equal(rate(25), 50);
-  assert.equal(rate(30000 / 1001, { hint: 29.97, lost: [10, 33] }), 59.94);
-  assert.equal(rate(59.94, { hint: 59.94 }), 59.94, "camera a 60: uma casa por quadro");
-  assert.equal(rate(27.6, { hint: 29.97 }), 60, "o aparelho que nao entrega o que diz");
+  assert.equal(rate(24000 / 1001, { hint: 23.98 }), 29.97);
+  assert.equal(rate(23.95, { hint: 23.976 }), 29.97, "a medicao curta erra um pouco; o aparelho desempata");
+  assert.equal(rate(24, { hint: 24 }), 30);
+  assert.equal(rate(25), 25);
+  assert.equal(rate(30000 / 1001, { hint: 29.97, lost: [10, 33] }), 29.97);
+  assert.equal(rate(59.94, { hint: 59.94 }), 29.97);
+  assert.equal(rate(27.6, { hint: 29.97 }), 30, "o aparelho que nao entrega o que diz");
 });
 
 test("o som que chega em rajadas (a linha ocupada com a tela e o som do computador) nao fica mais longo que o tempo real (26/11/2026: 308 s de som numa live de 234 s)", () => {

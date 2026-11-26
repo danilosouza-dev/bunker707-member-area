@@ -13,12 +13,17 @@
 
 var W = 1920;
 var H = 1080;
-// O ritmo fixo da gravacao: um quadro a cada casa de DEN/NUM de segundo, sempre, no dobro do ritmo da camera (medido antes
-// de comecar; 24 grava em 48, 30 em 60): cada quadro da camera ocupa exatas duas casas, sem repetir nem perder nenhum, e a
-// tela e o mouse andam no ritmo alto. Sem camera, 60. O player e a Bunny convertem um ritmo irregular pela media
-// (25/11/2026: 28,25), e o movimento soluca.
-var RATES = [[48000, 1001], [48, 1], [50, 1], [60000, 1001], [60, 1]];
-var NUM = 60;
+// O ritmo fixo da gravacao: um quadro a cada casa de DEN/NUM de segundo, sempre, a 30 por segundo (o padrao de mercado
+// para aula com tela: OBS, Zoom e Riverside gravam a 30), na familia da camera: 29,97 para as cameras de video (23,976,
+// 29,97, 59,94), 30 para 24, 30 e 60, e 25 para as de 25 e 50. Com a camera a 30, cada quadro dela vira um quadro do
+// arquivo; a 24, um a cada quatro aparece duas vezes, como um filme numa tela comum. O player e a Bunny convertem um ritmo
+// irregular pela media (25/11/2026: 28,25), e o movimento soluca. O dobro do ritmo (D143, 48 com a camera a 24) dobrava o
+// trabalho da linha (docs/30 D147).
+var RATES = [[24000, 1001], [24, 1], [25, 1], [30000, 1001], [30, 1], [50, 1], [60000, 1001], [60, 1]];
+var CONTAINER = { 23.976: [30000, 1001], 24: [30, 1], 25: [25, 1], 29.97: [30000, 1001], 30: [30, 1], 50: [25, 1], 59.94: [30000, 1001], 60: [30, 1] };
+// A camera no mesmo ritmo do arquivo: so entao a casa e alinhada ao meio do quadro dela.
+var LOCKED = false;
+var NUM = 30;
 var DEN = 1;
 // A imagem espera isto antes de entrar no quadro (a captura chega um pouco adiantada ou atrasada). Anda devagar em volta
 // de 40 ms para a casa cair sempre no meio do quadro da camera.
@@ -55,13 +60,18 @@ var rest = { frames: 0, list: [] };
 // a linha ocupada (a tela compartilhada com o som do computador) le o som em rajadas e o silencio entraria em dobro:
 // em 26/11/2026, o som de uma live de 234 s saiu com 308 s.
 var STALL_MS = 2500;
+// O tremor do horario de cada pedaco que nao e buraco.
+var GAP_US = 100000;
 // Cada imagem que chega (a camera, a tela e a camera de quem mais estiver no ar), na ordem de chegada.
 var feeds = new Map();
 var people = [];
 var timer = null;
 var startAt = 0;
 var slot = 0;
-var counts = { camera: 0, tela: 0, saiu: 0, perdeu: 0 };
+// As contas de cada 5 s (o relatorio da gravacao): quadros e, do som, as amostras que chegaram do microfone direto (voz) e
+// da mistura (mix), as que foram para o arquivo (out), o silencio posto (sil), as trocas entre os dois e o ritmo da voz.
+var EMPTY = function () { return { camera: 0, tela: 0, saiu: 0, perdeu: 0, voz: 0, mix: 0, out: 0, sil: 0, troca: 0 }; };
+var counts = EMPTY();
 var file = null;
 var offset = 0;
 
@@ -120,7 +130,7 @@ function align(at) {
     var feed = feeds.get('camera');
     var period = 1000 * DEN / NUM;
 
-    if (!feed || !feed.shown) { return; }
+    if (!feed || !feed.shown || !LOCKED) { return; }
     var age = (at - feed.shownAt) / period;
     var off = age - Math.floor(age) - 0.5;
 
@@ -204,6 +214,8 @@ function silence(frames) {
         empty.close();
         audio.samples += n;
         audio.filled += n;
+        counts.sil += n;
+        counts.out += n;
         frames -= n;
     }
 }
@@ -240,6 +252,7 @@ function addRest(planes, n) {
 function voiceOff() {
     if (!voice.on) { return; }
     voice.on = false;
+    counts.troca += 1;
     audio.next = null;
     clearRest();
 }
@@ -263,23 +276,33 @@ function emitSound(planes, frames, stamp, who) {
         audio.bias = 'voz';
         if (ADVANCE > ADVANCE_VOICE) { silence(ADVANCE - ADVANCE_VOICE); } else { audio.drop = ADVANCE_VOICE - ADVANCE; }
     }
-    // Um trecho que a captura perdeu (pelo horario da captura, nunca pelo da chegada) vira silencio do mesmo tamanho.
-    var hole = audio.next === null ? 0 : Math.round((stamp - audio.next) * RATE / 1e6);
+    // Um trecho que a captura perdeu (pelo horario da captura, nunca pelo da chegada) vira silencio do mesmo tamanho. So uma
+    // falta de verdade, acima de 100 ms: a mistura entrega os pedacos com o horario tremido (um pouco cedo, um pouco tarde),
+    // e contar so os atrasos punha segundos de silencio a mais (26/11/2026: 2,6 s a cada 5 s com a tela compartilhada).
+    // O horario esperado anda pelas amostras, nao pelo carimbo de cada pedaco.
+    if (audio.next === null) {
+        audio.next = stamp;
+    } else {
+        var gap = stamp - audio.next;
 
-    if (hole > 240 && hole < RATE * 60 && !audio.drop) { silence(hole); }
-    audio.next = stamp + frames * 1e6 / RATE;
+        if (gap > GAP_US && gap < 60e6 && !audio.drop) { silence(Math.round(gap * RATE / 1e6)); audio.next = stamp; }
+        else if (gap < -GAP_US || gap >= 60e6) { audio.next = stamp; }
+    }
+    audio.next += frames * 1e6 / RATE;
     if (audio.drop >= frames) { audio.drop -= frames; return; }
     var out = new AudioData({ data: planes, format: 'f32-planar', numberOfChannels: CHANNELS, numberOfFrames: frames, sampleRate: RATE, timestamp: Math.round(audio.samples * 1e6 / RATE) });
 
     aenc.encode(out);
     out.close();
     audio.samples += frames;
+    counts.out += frames;
 }
 
 /** Cada pedaco de som que chega: do microfone direto ('voz') ou da mistura das outras vozes ('mistura'). */
 function hear(data, who) {
     if (!aenc || !startAt) { data.close(); return; }
     if (data.sampleRate !== RATE) {
+        if (who === 'voz') { counts.taxa = data.sampleRate; }
         data.close();
         // O microfone noutro ritmo de amostras: a pagina o poe na mistura, como antes.
         if (who === 'voz' && !voice.refused) { voice.refused = true; voiceOff(0); self.postMessage({ tipo: 'voz-recusada' }); }
@@ -294,10 +317,12 @@ function hear(data, who) {
         data.copyTo(planes.subarray(c * frames, (c + 1) * frames), { format: 'f32-planar', planeIndex: Math.min(c, data.numberOfChannels - 1) });
     }
     data.close();
+    counts[who === 'voz' ? 'voz' : 'mix'] += frames;
     if (who === 'voz') {
+        counts.taxa = RATE;
         if (voice.refused) { return; }
         voice.last = performance.now();
-        if (!voice.on) { voice.on = true; audio.next = null; clearRest(); }
+        if (!voice.on) { voice.on = true; audio.next = null; clearRest(); counts.troca += 1; }
         addRest(planes, frames);
         emitSound(planes, frames, stamp, who);
 
@@ -458,7 +483,7 @@ function broke(error) {
     self.postMessage({ erro: String(error && error.name || error), tipo: 'quebrou' });
 }
 
-/** O ritmo da camera, pela media dos carimbos dela, quando bate (3%) com um ritmo de verdade; senao, 60. */
+/** O ritmo da camera, pela media dos carimbos dela, quando bate (3%) com um ritmo de verdade; senao, 30. */
 function cadence(hint) {
     var feed = feeds.get('camera');
     var s = feed ? feed.stamps : [];
@@ -470,17 +495,24 @@ function cadence(hint) {
     var slots = gaps.reduce(function (sum, gap) { return sum + Math.max(1, Math.round(gap / middle)); }, 0);
     var fps = slots * 1e6 / (s[s.length - 1] - s[0]);
 
-    // Dos que batem, o mais perto; uma camera a 50 ou 60 ocupa uma casa por quadro.
-    var found = RATES.map(function (x) { return { off: Math.min(Math.abs(fps / (x[0] / x[1]) - 1), Math.abs(fps * 2 / (x[0] / x[1]) - 1)), rate: x }; })
+    // Dos que batem, o mais perto.
+    var found = RATES.map(function (x) { return { off: Math.abs(fps / (x[0] / x[1]) - 1), rate: x }; })
         .sort(function (x, y) { return x.off - y.off; })[0];
 
     // 2 s de carimbos nao separam 23,976 de 24 nem 29,97 de 30: entre os dois, vale o que o aparelho diz.
     RATES.forEach(function (x) {
         var twin = Math.abs(x[0] / x[1] / (found.rate[0] / found.rate[1]) - 1) < 0.002;
 
-        if (twin && (Math.abs(hint * 2 - x[0] / x[1]) < 0.03 || Math.abs(hint - x[0] / x[1]) < 0.015)) { found.rate = x; }
+        if (twin && Math.abs(hint - x[0] / x[1]) < 0.015) { found.rate = x; }
     });
-    if (found.off < 0.03) { NUM = found.rate[0]; DEN = found.rate[1]; }
+    if (found.off < 0.03) {
+        var camera = Math.round(found.rate[0] / found.rate[1] * 1000) / 1000;
+        var box = CONTAINER[camera] || [30, 1];
+
+        NUM = box[0];
+        DEN = box[1];
+        LOCKED = Math.abs(camera - NUM / DEN) < 0.01;
+    }
     self.postMessage({ medido: fps, ritmo: NUM / DEN, tipo: 'ritmo' });
 }
 
@@ -633,7 +665,7 @@ self.onmessage = function (event) {
             counts.som = audio.lead === null ? null : Math.round(audio.mean - audio.lead);
             counts.espera = Math.round(DELAY);
             self.postMessage({ contas: counts, tipo: 'contas' });
-            counts = { camera: 0, tela: 0, saiu: 0, perdeu: 0 };
+            counts = EMPTY();
         }, 5000);
     } else if (data.papel === 'comecar') {
         // Sem nenhuma imagem (camera desligada e sem tela), a gravacao segue com o preto, no mesmo ritmo.
