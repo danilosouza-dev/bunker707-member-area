@@ -112,6 +112,7 @@ if (data !== null && method === "GET") method = "POST";
 fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify({ tool: "curl", method, url, data }) + "\n");
 const reply = (body) => { if (out) fs.writeFileSync(out, body); else process.stdout.write(body); if (writeOut) process.stdout.write("200"); process.exit(0); };
 if (url === "https://checkip.amazonaws.com") reply("203.0.113.7\n");
+if (url.startsWith("https://api.vultr.com/v2/plans")) reply(JSON.stringify({ plans: [{ id: "vhp-8c-16gb-amd", hourly_cost: 0.132, monthly_cost: 96 }] }));
 if (url === "https://www.cloudflare.com/ips-v4") reply("173.245.48.0/20\n");
 if (url === "https://www.cloudflare.com/ips-v6") reply("2400:cb00::/32\n");
 // O webhook do gravador no app (docs/30 §5.3): o GET responde a situacao que o teste escolheu; o POST, ok.
@@ -160,6 +161,31 @@ const completo = (process.env.SSH_SHIM_STDIN_COMPLETO || "").split("|").filter(B
 fs.appendFileSync(process.env.SHIM_LOG, JSON.stringify({ tool: "ssh", target, command, control, stdin: completo ? stdin : stdin.slice(0, 80) }) + "\n");
 if (control) process.exit(0);
 const flagOn = (name) => Boolean(process.env[name]);
+// A API da Vultr (provedor netcup, docs/20 §8D), chamada de dentro do servidor C pelo curl com a chave num config pela
+// entrada (-K -): o estado fica em VULTR_STATE; cada chamada anota se a chave veio pela entrada e se vazou no comando.
+if (command.includes("api.vultr.com/v2")) {
+  const vPath = process.env.VULTR_STATE;
+  const v = JSON.parse(fs.readFileSync(vPath, "utf8"));
+  const method = /-X '([A-Z]+)'/.exec(command)?.[1] ?? "GET";
+  const url = /'https:\/\/api\.vultr\.com\/v2([^']*)'/.exec(command)[1];
+  const b64 = /printf %s '([A-Za-z0-9+\/=]+)' \| base64 -d/.exec(command)?.[1];
+  const body = b64 ? JSON.parse(Buffer.from(b64, "base64").toString()) : null;
+  const chave = process.env.VULTR_API_KEY_DE_TESTE ?? "";
+  v.chamadas.push({ method, url, body, alvo: target, chavePelaEntrada: Boolean(chave) && stdin.includes("Bearer " + chave), chaveNoComando: Boolean(chave) && command.includes(chave) });
+  const out = (code, obj) => { fs.writeFileSync(vPath, JSON.stringify(v, null, 2)); process.stdout.write((obj ? JSON.stringify(obj) : "") + "\n" + code); process.exit(0); };
+  const u = new URL("https://vultr.invalid" + url);
+  if (method === "GET" && u.pathname === "/instances") out(200, { instances: v.instances });
+  if (method === "POST" && u.pathname === "/instances") {
+    if ((v.indisponivel ?? []).includes(body.plan + "@" + body.region)) out(400, { error: "Plan is not available in the selected region", status: 400 });
+    const n = 10 + v.criadas++;
+    const inst = { id: "0000000" + n + "-0000-4000-8000-000000000000", label: body.label, plan: body.plan, region: body.region, main_ip: "198.51.100." + n, status: "active", date_created: "2026-11-27T12:00:00+00:00", tags: body.tags };
+    v.instances.push(inst);
+    out(202, { instance: inst });
+  }
+  const del = /^\/instances\/(.+)$/.exec(u.pathname);
+  if (method === "DELETE" && del) { v.instances = v.instances.filter((i) => i.id !== del[1]); out(204, null); }
+  out(404, { error: "vultr de mentira: inesperado " + method + " " + url });
+}
 // Respostas escolhidas pelo teste: [{ contem, saida, codigo }], a primeira cujo trecho aparece no comando.
 const replies = process.env.SSH_SHIM_REPLIES ? JSON.parse(process.env.SSH_SHIM_REPLIES) : [];
 const reply = replies.find((r) => command.includes(r.contem));
@@ -307,7 +333,7 @@ export const hzCalls = (calls, prefix) => calls.filter((c) => c.tool === "hcloud
  * Uma conta de mentira: servidores, imagens, DNS e firewalls iniciais; `runScript(script, env, args)` roda o script de
  * infra/cloud com os binarios de mentira na frente do PATH; `calls()` le o log na ordem; `hz()` e `cf()` o estado.
  */
-export function criarInfraDeMentira({ servers = [], images = [], unavailable = [], records = [], imageStatus, firewalls, tipos, storageBox, sshKeys } = {}) {
+export function criarInfraDeMentira({ servers = [], images = [], unavailable = [], records = [], imageStatus, firewalls, tipos, storageBox, sshKeys, vultr = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "bunker707-infra-"));
   tempDirs.push(dir);
   const shims = join(dir, "shims");
@@ -326,6 +352,8 @@ export function criarInfraDeMentira({ servers = [], images = [], unavailable = [
   const fws = firewalls ?? ["bunker707-membros", "bunker707-marketing", "bunker707-meet"].map((s) => ({ name: `${s}-fw`, applied_to: [], rules: [] }));
   writeFileSync(hzState, JSON.stringify({ servers, images, firewalls: fws, serverTypes: tipos ?? serverTypes, unavailable, imageStatus, storageBox, sshKeys, nextImageId: 9000, nextIp: 10 }));
   writeFileSync(cfState, JSON.stringify({ records, settings: {}, nextId: 1 }));
+  const vultrState = join(dir, "vultr.json");
+  writeFileSync(vultrState, JSON.stringify({ instances: [], chamadas: [], criadas: 0, ...vultr }));
   const work = join(dir, "work");
   mkdirSync(work);
   // O Storage Box: uma pasta, mexida pelo sftp de mentira.
@@ -333,8 +361,8 @@ export function criarInfraDeMentira({ servers = [], images = [], unavailable = [
   mkdirSync(box);
   const env = (extra = {}) => {
     const base = { ...process.env };
-    for (const name of ["HCLOUD_TOKEN", "CLOUDFLARE_API_TOKEN", "GITHUB_TOKEN", "GITHUB_OUTPUT", "GITHUB_ACTIONS", "GITHUB_REF", "RUNNER_TEMP", "OPCOES", "PAYLOAD", "COMANDO", "PAPEIS", "MEMBROS_TYPE", "MARKETING_TYPE", "MEET_TYPE", "SKIP_MARKETING", "PRODUCER_IP", "JIBRI_SECRETS", "SESSAO", "CONFIRMADO", "CONFIRMAR", "FORCAR", "FORCE", "MANTER_SE_FALHAR", "SO_SE_PREPARANDO", "SNAPSHOT", "SSH", "TROCAR_SENHA_BANCO", "SEM_BACKUP_ANTES", "ROTACIONAR", "GITHUB_EVENT_PATH", "GITHUB_REPOSITORY", "PACOTE_RUN"]) delete base[name];
-    for (const name of Object.keys(base)) if (name.startsWith("LICENCAS_") || name.startsWith("TESTE_")) delete base[name];
+    for (const name of ["HCLOUD_TOKEN", "CLOUDFLARE_API_TOKEN", "GITHUB_TOKEN", "GITHUB_OUTPUT", "GITHUB_ACTIONS", "GITHUB_REF", "RUNNER_TEMP", "OPCOES", "PAYLOAD", "COMANDO", "PAPEIS", "MEMBROS_TYPE", "MARKETING_TYPE", "MEET_TYPE", "SKIP_MARKETING", "PRODUCER_IP", "JIBRI_SECRETS", "SESSAO", "CONFIRMADO", "CONFIRMAR", "FORCAR", "FORCE", "MANTER_SE_FALHAR", "SO_SE_PREPARANDO", "SNAPSHOT", "SSH", "TROCAR_SENHA_BANCO", "SEM_BACKUP_ANTES", "ROTACIONAR", "GITHUB_EVENT_PATH", "GITHUB_REPOSITORY", "PACOTE_RUN", "PROVEDOR", "VULTR_API_KEY"]) delete base[name];
+    for (const name of Object.keys(base)) if (name.startsWith("LICENCAS_") || name.startsWith("TESTE_") || name.startsWith("NETCUP_") || name.startsWith("R2_")) delete base[name];
     return {
       ...base,
       PATH: `${shims}:${process.env.PATH}`,
@@ -343,6 +371,7 @@ export function criarInfraDeMentira({ servers = [], images = [], unavailable = [
       CLOUDFLARE_API_TOKEN: "cf-token-de-teste",
       HZ_STATE: hzState,
       CF_STATE: cfState,
+      VULTR_STATE: vultrState,
       SHIM_LOG: log,
       BOX_DIR: box,
       // As raizes publicas do repositorio: um arquivo desta conta de mentira (so existe se o teste o escrever), nunca o
@@ -359,5 +388,6 @@ export function criarInfraDeMentira({ servers = [], images = [], unavailable = [
   const calls = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : []);
   const hz = () => JSON.parse(readFileSync(hzState, "utf8"));
   const cf = () => JSON.parse(readFileSync(cfState, "utf8"));
-  return { runScript, calls, hz, cf, envFor: env, box, work, raizesArquivo: join(dir, "raizes.json") };
+  const vultrDeMentira = () => JSON.parse(readFileSync(vultrState, "utf8"));
+  return { runScript, calls, hz, cf, vultr: vultrDeMentira, envFor: env, box, work, raizesArquivo: join(dir, "raizes.json") };
 }

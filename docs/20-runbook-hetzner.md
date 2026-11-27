@@ -1205,6 +1205,72 @@ falha da conferencia; o vetor do resumo saiu do codigo do Emissor), `tests/infra
 `tests/infra-licencas.test.mjs` (o DNS e o Caddy do terceiro nome). **Nao rodou:** nada de verdade (Hetzner, Cloudflare,
 o Emissor e a escola no ar, o certificado do endereco novo).
 
+## 8D. Outro provedor: netcup, Vultr e Cloudflare R2 (`PROVEDOR=netcup`, 26/11/2026)
+
+Em 26/11/2026 a conta da Hetzner ficou bloqueada (os servidores seguiam `running`, mas com o IPv4 e o IPv6 marcados
+`blocked`; o produtor pagou e o suporte nao respondeu no dia). O produtor decidiu (docs/21 §12): a producao passa para a
+**netcup** (os tres servidores fixos), a **Vultr** (o gravador por hora) e o **Cloudflare R2** (o backup); se a Hetzner
+voltar, ela volta a ser a producao e esta estrutura vira o staging. O codigo da Hetzner continua inteiro: o provedor e
+escolhido pela variavel do repositorio `PROVEDOR` (`hetzner`, o padrao, ou `netcup`), ou por `PROVEDOR=...` nas opcoes de
+uma execucao. Tudo do provedor novo mora em `infra/cloud/provedor-netcup.sh`, carregado pelo `lib.sh` no fim, que troca so
+as funcoes que falavam com a API da Hetzner; deploy, segredos, exec, backup, DNS e smoke sao os mesmos.
+
+| Papel | Onde | Custo (sem imposto, 26/11/2026) |
+|---|---|---|
+| A, `bunker707-membros` | netcup VPS 500 G12.5 (2 vCPU compartilhadas, 4 GB, 64 GB), Manassas (EUA leste), mes a mes | EUR 9,18/mes |
+| C, `bunker707-meet` | netcup VPS 500 G12.5, Manassas | EUR 9,18/mes |
+| B, `bunker707-marketing` | netcup VPS 500 G12.5, Europa (local sorteado AT/DE/NL) | EUR 7,98/mes |
+| D, o gravador | Vultr `vhp-8c-16gb-amd` (8 vCPU, 16 GB) em `ewr` (Nova Jersey); reservas `vhp-8c-16gb-intel`, `vc2-6c-16gb` e o local `atl` | US$ 0,132/h, so durante a live |
+| Backup | Cloudflare R2, bucket `bunker707-backups` (leste da America do Norte), conta da Cloudflare do DNS | gratis ate 10 GB guardados; US$ 0,015/GB/mes acima |
+
+O que muda em relacao a Hetzner:
+
+- **Servidores fixos**: contratados por mes no painel da netcup (a renovacao e automatica; cancelar pede 31 dias antes do
+  fim). O fluxo nao cria nem apaga servidor fixo; `provision`, `snapshot`, `restaurar` e `plan` param com `PROVEDOR=netcup`.
+  O IP de cada um vem das variaveis do repositorio `NETCUP_MEMBROS_IP`, `NETCUP_MEET_IP` e `NETCUP_MARKETING_IP`.
+- **Firewall**: nao ha firewall na nuvem. O ufw do servidor e o firewall: a 22 fica aberta, so para chave (sem senha,
+  com fail2ban); o 80 e o 443 do membros e do Mautic aceitam so as faixas da Cloudflare (etapa `preparar`); a sala (DNS
+  puro) aceita 80, 443 e UDP 10000 de qualquer lugar; a 5222 da sala aceita so os IPs dos gravadores vivos da Vultr (o
+  `fw_ensure` da sala refaz as regras "XMPP so do Jibri" no ufw a cada `jibri-up`/`jibri-down` e no `deploy-meet`).
+- **O gravador**: a chave da API da Vultr (`VULTR_API_KEY`, segredo do repositorio) so aceita pedidos dos IPs da lista
+  dela (Account > API > Access Control). Os IPs do GitHub mudam a cada execucao, entao cada chamada sai do runner pelo SSH
+  do servidor C, com a chave pela entrada do SSH num config do curl (nunca em argv nem no disco do servidor): **o IP do
+  servidor C precisa estar na lista da Vultr**. A maquina nasce com o mesmo cloud-init, sem segredo no `user_data`, e a
+  22 dela fica aberta so para chave enquanto ela existe; o resto do `jibri-up`/`jibri-down` e o de sempre (§8B.5). Conta
+  nova da Vultr pode ter limite de maquinas: o `jibri-up` trata a recusa como falta de estoque e avisa `unavailable`.
+- **Backup**: o `deploy-membros` e o `deploy-marketing` gravam no `.env` do servidor `RESTIC_REPOSITORY=s3:https://<conta>.r2.cloudflarestorage.com/bunker707-backups/restic`
+  (`restic-mautic` no Mautic), `AWS_ACCESS_KEY_ID` e `AWS_SECRET_ACCESS_KEY` (o token do R2 com "Leitura/gravacao para
+  objeto" so neste bucket), que o `backup.sh` e o `restore.sh` exportam para o restic. A senha de recuperacao derivada do
+  token (§10) continua cadastrada em cada repositorio.
+- **DNS**: os registros A vao para os IPs da netcup e os AAAA antigos sao apagados (a netcup entrega IPv6, mas nao
+  configuramos).
+- **A chave de deploy** continua derivada do `HCLOUD_TOKEN` (o segredo fica no GitHub mesmo com a conta da Hetzner parada).
+
+O que o GitHub precisa (Settings > Secrets and variables > Actions):
+
+| Nome | Tipo | Valor |
+|---|---|---|
+| `PROVEDOR` | variavel | `netcup` |
+| `NETCUP_MEMBROS_IP`, `NETCUP_MEET_IP`, `NETCUP_MARKETING_IP` | variaveis | o IPv4 de cada VPS (e-mail de entrega da netcup) |
+| `R2_ACCOUNT_ID` | variavel | o id da conta da Cloudflare (32 hex; nao e segredo) |
+| `R2_BUCKET` | variavel (opcional) | `bunker707-backups` |
+| `VULTR_API_KEY` | segredo | a chave da API da Vultr (o produtor cola) |
+| `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | segredos | o ID da chave de acesso e a chave de acesso secreta do token do R2 (o produtor cola; o "Valor do token" nao e usado) |
+
+Ordem para subir (cada etapa pelo workflow **Infra (Hetzner)**, da `main`):
+
+1. `chave-ssh`: imprime a chave publica de deploy.
+2. No painel da netcup (SCP), em cada VPS: instalar o **Ubuntu 24.04** com essa chave no root (o produtor faz, ou a IA
+   pelo navegador com o ok dele).
+3. As variaveis da tabela acima no GitHub; o IP do servidor C na lista da chave da Vultr.
+4. `preparar` com `CONFIRMADO=sim` (`PAPEIS=membros,meet` escolhe alguns): bootstrap por SSH como root (Docker, ufw,
+   fail2ban, restic, swap, o usuario `deploy`), o ufw so da Cloudflare no membros e no Mautic, a `transfer.pub` de cada um
+   e o DNS. Rodar de novo refaz o ufw do zero: depois dele, o `deploy-meet` e o `deploy-marketing` refazem as regras deles.
+5. `deploy-membros`, `deploy-meet` e `deploy-marketing`, como na Hetzner (§8, §8A, §8B).
+6. `secrets-membros`, `secrets-meet`, `secrets-marketing` com os envelopes para as `transfer.pub` novas, e `equipe`.
+7. `status` e `status-meet`; o botao Testar sala; um `jibri-up` de ensaio com `MANTER_SE_FALHAR=1` e a medida dos quadros
+   do MP4 (docs/30 D138, memoria da bancada).
+
 ## 9. Deploy de nova versao do app
 
 **Com a producao guardada (secao 4A.7), `restaurar` antes do `deploy-membros`** (a etapa para com "rode restaurar" se o servidor nao existir) e `snapshot` com `CONFIRMAR=apagar` depois do teste.

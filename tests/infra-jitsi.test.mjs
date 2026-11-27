@@ -952,13 +952,13 @@ test("jibri.sh e provision-meet recusam sem CONFIRMADO=sim antes de tocar na Het
   assert.match(jibriSource, /"state\\":\\"gone\\"/);
   assert.match(jibriSource, /"state\\":\\"ready\\"/);
   assert.match(jibriSource, /"state\\":\\"unavailable\\"/);
-  assert.match(jibriSource, /hz server delete "\$name"/);
+  assert.match(jibriSource, /gravador_apagar "\$name"/);
   const downStart = jibriSource.indexOf("down() {");
-  assert.ok(downStart > 0 && jibriSource.indexOf("fw_close_all\n        log \"Apagando $name\"", downStart) < jibriSource.indexOf('hz server delete "$name"', downStart), "a 22 e fechada antes de o servidor sumir (o trap nao acharia o IP)");
+  assert.ok(downStart > 0 && jibriSource.indexOf("fw_close_all\n        log \"Apagando $name\"", downStart) < jibriSource.indexOf('gravador_apagar "$name"', downStart), "a 22 e fechada antes de o servidor sumir (o trap nao acharia o IP)");
   // O on_failure do up (apaga o gravador criado que nao ficou pronto) roda no trap do lib.sh, depois do fw_close_all.
   assert.match(libSource, /fw_close_all \|\| rc=1; if \[ "\$rc" != 0 \] && declare -F on_failure >\/dev\/null; then on_failure; fi; exit \$rc/);
   assert.match(jibriSource, /print_cost/, "o custo por hora e impresso");
-  assert.match(jibriSource, /--label papel=jibri --label sessao="\$SESSAO"/, "o servidor leva a sessao na label");
+  assert.match(libSource, /--label papel=jibri --label sessao="\$SESSAO"/, "o servidor leva a sessao na label (gravador_criar da Hetzner, no lib.sh)");
   assert.match(jibriSource, /JIBRI_FALLBACK_TYPES:-ccx23 cpx32/);
   assert.match(jibriSource, /resolution="1280x720"/, "cpx32 grava em 720p");
   assert.match(jibriSource, /\/jibri\/api\/v1\.0\/health/, "espera a API de saude do Jibri");
@@ -979,7 +979,7 @@ test("workflow e run.sh: as oito etapas novas, JIBRI_SECRETS so nos passos dos s
   assert.match(infraJob, /JIBRI_SECRETS: \$\{\{ secrets\.JIBRI_SECRETS \}\}/);
   const jobEnv = infraJob.slice(infraJob.indexOf("\n    env:"), infraJob.indexOf("\n    steps:"));
   assert.doesNotMatch(jobEnv, /JIBRI_SECRETS/, "o segredo do gravador nao fica no env do job inteiro");
-  assert.match(infraJob, /case "\$ETAPA" in provision\|provision-meet\|snapshot\|restaurar\)/, "provision-meet mexe no DNS: exige o token da Cloudflare");
+  assert.match(infraJob, /case "\$ETAPA" in provision\|provision-meet\|snapshot\|restaurar(\|preparar)?\)/, "provision-meet mexe no DNS: exige o token da Cloudflare");
   assert.match(infraJob, /case "\$ETAPA" in jibri-up\|jibri-down\) \[ -n "\$JIBRI_SECRETS" \]/);
   assert.match(infraJob, /if: startsWith\(inputs\.etapa, 'deploy-'\)/, "deploy-meet herda a trava da main");
   assert.match(workflowSource, /CONFIRMADO=sim SESSAO=<id>/, "a descricao das opcoes ensina as novas");

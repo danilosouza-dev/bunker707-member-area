@@ -41,12 +41,12 @@ valid_sessao() {
     printf '%s' "$1" | grep -qE '^[a-z0-9][a-z0-9-]{3,47}$' || die "SESSAO invalida: '$1' (o id da sessao: letras minusculas, numeros e hifens, de 4 a 48 caracteres)."
 }
 jibri_name() { printf '%s%s' "$JIBRI_NAME_PREFIX" "$1"; }
-server_json_field() { hzj server describe "$1" | jq -r "$2"; }
-# print_cost TIPO LOCAL [horas]: preco por hora lido da API e a conta da live (2,5 h por padrao, docs/30 §6.7).
+# print_cost TIPO LOCAL [horas]: preco por hora lido da API e a conta da live (2,5 h por padrao, docs/30 §6.7). A moeda e a
+# do provedor (PRECO_MOEDA: EUR na Hetzner, USD na Vultr).
 print_cost() {
     local p; p=$(hourly_price "$1" "$2")
     if [ -n "$p" ]; then
-        awk -v p="$p" -v t="$1" -v h="${3:-2.5}" 'BEGIN { printf "  custo: EUR %.4f/h (%s, preco liquido da API hoje); %.1f h ~ EUR %.2f; a Hetzner cobra por hora ate o teto mensal\n", p, t, h, p * h }'
+        awk -v p="$p" -v t="$1" -v h="${3:-2.5}" -v m="$PRECO_MOEDA" 'BEGIN { printf "  custo: %s %.4f/h (%s, preco liquido da API hoje); %.1f h ~ %s %.2f; cobrado por hora enquanto a maquina existir\n", m, p, t, h, m, p * h }'
     else
         echo "  custo: preco de $1 nao lido pela API; referencia docs/30 §7.5: cpx42 ~ EUR 0,112/h, live de 2,5 h ~ EUR 0,28"
     fi
@@ -69,8 +69,7 @@ on_failure() {
         1|sim|true) warn "MANTER_SE_FALHAR=1: $name fica ligado (cobrando por hora) para investigar com exec-jibri; apague com jibri-down SESSAO=$SESSAO CONFIRMADO=sim." ;;
         *)
             printf '::error::O preparo do gravador falhou depois de criar %s: apagando a maquina (nenhuma gravacao existia).\n' "$name"
-            if hz server delete "$name"; then
-                hz firewall delete "$(fw_name "$name")" >/dev/null 2>&1 || warn "firewall $(fw_name "$name") nao apagado (apague no console da Hetzner)."
+            if gravador_apagar "$name"; then
                 jibri_cidrs_refresh
                 if server_exists "$MEET_NAME"; then fw_ensure "$MEET_NAME" || warn "a regra 5222 do $MEET_NAME nao foi refeita: rode jibri-down."; fi
                 echo "  $name apagado."
@@ -135,8 +134,8 @@ up() {
     local pub ud type loc created="" resolution="$JIBRI_RECORDING_RESOLUTION" t l
     fw_ensure "$name"
     if server_exists "$name"; then
-        type=$(server_json_field "$name" '.server_type.name'); loc=$(server_json_field "$name" '.location.name // .datacenter.location.name')
-        echo "  ja existe: $type em $loc, $(server_json_field "$name" '.status') (idempotente: refaz o .env e confere a saude)."
+        type=$(gravador_campo "$name" tipo); loc=$(gravador_campo "$name" local)
+        echo "  ja existe: $type em $loc, $(gravador_campo "$name" status) (idempotente: refaz o .env e confere a saude)."
     else
         pub=$(deploy_public_key); ud="$WORK_DIR/cloud-init-$name.yaml"
         # Com /g: a linha do install -d da pasta /opt/jibri tem o __DEPLOY_USER__ duas vezes (dono e grupo); sem ele o
@@ -144,30 +143,16 @@ up() {
         sed -e "s|__DEPLOY_USER__|$DEPLOY_USER|g" -e "s|__SSH_PUBLIC_KEY__|$pub|g" \
             -e "s|__JITSI_IMAGE_REPO__|$image_repo|g" -e "s|__JITSI_IMAGE_VERSION__|$image_version|g" \
             "$JITSI_DIR/jibri/cloud-init.yaml" > "$ud"
-        for t in $JIBRI_TYPE $JIBRI_FALLBACK_TYPES; do
-            for l in "$LOCATION" $FALLBACK_LOCATIONS; do
-                echo "  criando $name ($t) em $l..."
-                if hz server create --name "$name" --type "$t" --image ubuntu-24.04 --location "$l" \
-                    --ssh-key "$SSH_KEY_NAME" --firewall "$(fw_name "$name")" --user-data-from-file "$ud" \
-                    --label app=bunker707 --label papel=jibri --label sessao="$SESSAO" >/dev/null 2>"$WORK_DIR/create-$name.err"; then
-                    created=1; type="$t"; loc="$l"; JIBRI_CREATED_NOW="$name"; break 2
-                fi
-                if grep -qiE 'unavailable|not available|resource_limit|capacity' "$WORK_DIR/create-$name.err"; then
-                    warn "$t indisponivel em $l: $(tr -d '\n' < "$WORK_DIR/create-$name.err" | cut -c1-160)"
-                    continue
-                fi
-                cat "$WORK_DIR/create-$name.err" >&2
-                die "Falha ao criar $name."
-            done
-        done
+        if gravador_criar "$name" "$ud"; then
+            created=1; type="$GRAVADOR_TIPO"; loc="$GRAVADOR_LOCAL"; JIBRI_CREATED_NOW="$name"
+        fi
         if [ -z "$created" ]; then
             local code; code=$(recorder_request POST "" "{\"sessionId\":\"$SESSAO\",\"state\":\"unavailable\"}")
             die "Nenhum tipo ($JIBRI_TYPE $JIBRI_FALLBACK_TYPES) disponivel em $LOCATION $FALLBACK_LOCATIONS. O app recebeu state=unavailable ($code): a live acontece, a gravacao e pelo navegador/OBS com Enviar gravacao no admin (D3)."
         fi
     fi
     if [ "$type" = "cpx32" ]; then resolution="1280x720"; warn "cpx32 (4 vCPU): gravando em 720p; o replay desta live sai em 720p."; fi
-    fw_apply "$name"
-    hz server poweron "$name" >/dev/null 2>&1 || true
+    gravador_ligar "$name"
     print_cost "$type" "$loc"
 
     log "3/6 .env do gravador por SSH (sem segredo no cloud-init)"
@@ -276,7 +261,7 @@ down() {
     need HCLOUD_TOKEN JIBRI_SECRETS
     install_hcloud; deploy_key
     local names forced="" name code
-    if [ -n "${SESSAO:-}" ]; then valid_sessao "$SESSAO"; names=$(jibri_name "$SESSAO"); else names=$(hzj server list --selector papel=jibri | jq -r '.[].name'); fi
+    if [ -n "${SESSAO:-}" ]; then valid_sessao "$SESSAO"; names=$(jibri_name "$SESSAO"); else names=$(gravador_nomes); fi
     [ -n "$names" ] || { echo "Nenhum gravador ligado (label papel=jibri)."; return 0; }
     case "${FORCAR:-${FORCE:-}}" in 1|sim|true) forced=1 ;; esac
     local only_preparing=""
@@ -292,7 +277,7 @@ down() {
         fi
         local sessao="${name#"$JIBRI_NAME_PREFIX"}" created type loc hours ip target code rs ok_to_delete="" pending=""
         log "Gravador $name (sessao $sessao)"
-        created=$(server_json_field "$name" '.created'); type=$(server_json_field "$name" '.server_type.name'); loc=$(server_json_field "$name" '.location.name // .datacenter.location.name')
+        created=$(gravador_campo "$name" criado); type=$(gravador_campo "$name" tipo); loc=$(gravador_campo "$name" local)
         hours=$(hours_since "$created")
         echo "  ligado ha $hours h ($type em $loc)"
         # 1. O app confirma que a gravacao esta na Bunny? (GET assinado, docs/30 §5.3)
@@ -326,8 +311,7 @@ down() {
         [ -n "$forced" ] && [ -z "$ok_to_delete" ] && warn "FORCAR=1: apagando $name sem a confirmacao do envio."
         fw_close_all
         log "Apagando $name"
-        hz server delete "$name"
-        hz firewall delete "$(fw_name "$name")" >/dev/null 2>&1 || warn "firewall $(fw_name "$name") nao apagado (apague no console da Hetzner)."
+        gravador_apagar "$name" || die "$name NAO foi apagado: rode jibri-down de novo com SESSAO=$sessao CONFIRMADO=sim."
         jibri_cidrs_refresh
         if server_exists "$MEET_NAME"; then fw_ensure "$MEET_NAME"; echo "  regra 5222 do $MEET_NAME refeita sem $ip."; fi
         code=$(recorder_request POST "" "{\"sessionId\":\"$sessao\",\"state\":\"gone\"}")
@@ -344,7 +328,7 @@ exec_cmd() {
     if [ -n "${SESSAO:-}" ]; then
         valid_sessao "$SESSAO"; name=$(jibri_name "$SESSAO")
     else
-        name=$(hzj server list --selector papel=jibri | jq -r '.[].name'); count=$(printf '%s\n' "$name" | grep -c . || true)
+        name=$(gravador_nomes); count=$(printf '%s\n' "$name" | grep -c . || true)
         [ "$count" = "1" ] || die "Informe SESSAO=<id>: ha $count gravador(es) ligado(s)."
     fi
     server_exists "$name" || die "O gravador $name nao existe."

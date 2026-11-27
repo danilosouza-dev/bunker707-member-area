@@ -1610,3 +1610,27 @@ Construido (testado so com os dubles; nada rodou de verdade):
 Em aberto: a virada das vendas para a producao (o webhook da Hotmart e da Ticto apontando para
 `https://membros.bunker707.com.br/api/webhooks/...`, secao 8, item 4) nunca foi feita; para o teste, o produtor cadastra o
 webhook so do produto do Bunker Members (`docs/20` §9F, passo 18) e o desliga se a escola voltar ao snapshot.
+
+## 12. A Hetzner bloqueada e a troca para netcup, Vultr e Cloudflare R2 (26/11/2026)
+
+Em 26/11/2026 os servidores da Hetzner ficaram fora do ar: a API mostrava `running`, com o IPv4 e o IPv6 `blocked` (o
+diagnostico da branch `codex/diagnostico-rede-publicacao`). O produtor atribuiu a uma fatura em atraso, pagou e abriu
+chamado; a documentacao da API descreve `blocked` como bloqueio do setor de abuso, e o motivo certo vem no e-mail da
+Hetzner. A ultima correcao da gravacao (D148, `main` `c2d585e`) esta no GitHub mas nao chegou ao servidor.
+
+Decisao do produtor no mesmo dia: a producao vai para a **netcup** (3 VPS 500 G12.5 mes a mes: membros e sala em
+Manassas, Mautic na Europa, EUR 26,34/mes), o gravador por hora para a **Vultr** (US$ 0,132/h) e o backup para o
+**Cloudflare R2** (gratis ate 10 GB). Se a Hetzner voltar, ela volta a ser a producao e a netcup vira o staging. Feito no
+dia: a compra na netcup (pedido em analise), a API da Vultr ligada, o R2 ativado com o bucket `bunker707-backups` e o
+token salvo no GitHub. O codigo novo (`PROVEDOR=netcup`, `infra/cloud/provedor-netcup.sh`) e a ordem para subir estao no
+`docs/20` §8D.
+
+Pesquisa de precos de 26/11/2026 (sem imposto): Contabo Cloud VPS 4 a EUR 5,50 (mais barato, sem cobranca por hora e com
+fama de maquina disputada); Hetzner hoje CX esgotado, CPX22 EUR 19,49 a 22,99; DigitalOcean, Vultr e Linode fixos de US$ 20
+a 36 por maquina; OVH VPS sem estoque; Hostinger no Brasil R$ 108,99 por maquina mes a mes. Gravador por hora: Hetzner
+CPX42 EUR 0,11/h (Helsinque 0,095), Vultr `vhp-8c-16gb-amd` US$ 0,132/h, GCP Spot mais barato mas pode ser interrompido.
+
+Falta: a netcup entregar as VPS; o Ubuntu 24.04 com a chave da etapa `chave-ssh`; as variaveis do repositorio; o IP do
+servidor C na lista da chave da Vultr; o `preparar`; os deploys; e medir a gravacao na maquina da Vultr antes de uma live
+de verdade.
+
