@@ -1271,6 +1271,42 @@ Ordem para subir (cada etapa pelo workflow **Infra (Hetzner)**, da `main`):
 7. `status` e `status-meet`; o botao Testar sala; um `jibri-up` de ensaio com `MANTER_SE_FALHAR=1` e a medida dos quadros
    do MP4 (docs/30 D138, memoria da bancada).
 
+## 8E. Segunda copia do backup no Cloudflare R2 (27/11/2026)
+
+Em 26/11/2026 a conta da Hetzner ficou bloqueada um dia, e o backup, no Storage Box, ficou preso junto (§8D). O
+produtor decidiu (27/11/2026) manter o backup **nos dois lugares**: o Storage Box continua o primeiro (mais rapido
+para restaurar, no mesmo datacenter) e o Cloudflare R2 recebe uma segunda copia, fora da Hetzner. So depois de uma
+restauracao inteira a partir do R2 da certo pensar em cancelar o Storage Box.
+
+| Papel | Storage Box (primeira copia) | R2 (segunda copia) | Quando |
+|---|---|---|---|
+| A, area de membros | `sftp:storagebox:bunker707/restic` | `bunker707-backups/hetzner/restic` | todo dia, 03:30 UTC (o mesmo timer) |
+| B, Mautic | `sftp:storagebox:bunker707/restic-mautic` | `bunker707-backups/hetzner/restic-mautic` | todo dia, 03:50 UTC (o mesmo timer) |
+| C, sala (so o `infra/jitsi/.env`) | nao | `bunker707-backups/hetzner/restic-meet` | no fim de cada `deploy-meet` e `secrets-meet` (os unicos que mudam o arquivo) |
+
+- **Como liga**: a variavel do repositorio `R2_ACCOUNT_ID` (o id da conta da Cloudflare, nao e segredo) e os
+  segredos `R2_ACCESS_KEY_ID` e `R2_SECRET_ACCESS_KEY` (o token do R2 com Leitura/gravacao para objeto so no bucket).
+  Com eles, o `deploy-membros` e o `deploy-marketing` gravam no `.env` do servidor `RESTIC_REPOSITORY_R2` e as chaves
+  `AWS_*` (`backup_r2_papel` em `infra/cloud/lib.sh`); sem `R2_ACCOUNT_ID`, nada muda. Cada provedor numa pasta do
+  bucket (`hetzner/...`; a netcup do §8D usa a raiz), para a producao e o staging nunca escreverem no mesmo repositorio.
+- **O backup**: `infra/scripts/backup.sh` e `infra/mautic/scripts/backup.sh` fazem o backup no Storage Box como
+  sempre e, com `RESTIC_REPOSITORY_R2`, o mesmo backup no R2 (`r2_backup` em `infra/scripts/lib.sh`), com a mesma
+  retencao e a mesma senha. As copias sao independentes: o R2 fora do ar nao desfaz o backup do Storage Box, mas o
+  timer sai com erro e o heartbeat nao bate; o Storage Box fora do ar nao impede o R2. Cada uma tem a marca dela em
+  `/var/backups/bunker707*/ultimo-sucesso` e `ultimo-sucesso-r2`, que o `status` mostra.
+- **O primeiro `--init` com o R2** (no `deploy-membros`/`deploy-marketing`) cria o repositorio do R2 com os
+  parametros de pedaco do Storage Box (`restic init --from-repo --copy-chunker-params`) e copia para la o historico que
+  ja existe (`restic copy`). A senha de recuperacao derivada do token (§10) entra nos dois repositorios (`--add-key`).
+- **A sala**: `infra/jitsi/scripts/backup-env.sh` guarda o `infra/jitsi/.env` (o `JWT_APP_SECRET`, as senhas do
+  Jicofo, do JVB, do Jibri e do TURN). As chaves do R2 e a senha do repositorio (a de recuperacao) chegam pela
+  entrada do SSH, nunca no comando nem no disco. Falhar aqui so avisa: a sala segue no ar.
+- **Restaurar pelo R2**: `restore.sh --r2` (area de membros) e `infra/mautic/scripts/restore.sh --r2` leem
+  `RESTIC_REPOSITORY_R2` e as chaves do `.env`; num servidor sem `.env`, exportar `RESTIC_REPOSITORY=s3:https://<conta>.r2.cloudflarestorage.com/bunker707-backups/hetzner/restic`,
+  `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` e a senha (ou `RESTIC_PASSWORD_FILE` com a de recuperacao). A sala:
+  com as mesmas variaveis, `restic restore latest --tag bunker707-meet --target /` devolve o `.env` ao lugar.
+- **Custo**: o R2 cobra so o que fica guardado acima de 10 GB por mes (US$ 0,015/GB) e nao cobra a saida. Em
+  27/11/2026 o backup inteiro tinha menos de 0,5 GB.
+
 ## 9. Deploy de nova versao do app
 
 **Com a producao guardada (secao 4A.7), `restaurar` antes do `deploy-membros`** (a etapa para com "rode restaurar" se o servidor nao existir) e `snapshot` com `CONFIRMAR=apagar` depois do teste.

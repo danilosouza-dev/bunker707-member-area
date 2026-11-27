@@ -24,8 +24,6 @@ VULTR_PLANOS="${VULTR_PLANOS:-vhp-8c-16gb-amd vhp-8c-16gb-intel vc2-6c-16gb}"
 VULTR_REGIOES="${VULTR_REGIOES:-ewr atl}"
 # Ubuntu 24.04 LTS x64 (GET https://api.vultr.com/v2/os, conferido em 26/11/2026).
 VULTR_OS_ID="${VULTR_OS_ID:-2284}"
-R2_ACCOUNT_ID="${R2_ACCOUNT_ID:-}"
-R2_BUCKET="${R2_BUCKET:-bunker707-backups}"
 
 # ---- servidores fixos (IPs das variaveis) ----------------------------------------------------------
 netcup_ip_do() {  # netcup_ip_do NOME -> IP da variavel (vazio se o nome nao e de um servidor fixo)
@@ -200,17 +198,7 @@ PRECO_MOEDA="USD"
 # ---- backup no Cloudflare R2 -----------------------------------------------------------------------
 # netcup_backup_r2 user@host ENV_FILE PASTA: o restic do papel aponta para s3:<conta>.r2.cloudflarestorage.com/<bucket>/<PASTA>
 # com as chaves do token do R2 (Leitura/gravacao para objeto, so no bucket). O restic le AWS_* do ambiente (backup.sh).
-netcup_backup_r2() {
-    local target="$1" envf="$2" pasta="$3"
-    need R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
-    printf '%s' "$R2_ACCOUNT_ID" | grep -qE '^[a-f0-9]{32}$' || die "R2_ACCOUNT_ID invalido."
-    printf '%s' "$R2_BUCKET" | grep -qE '^[a-z0-9][a-z0-9-]{2,62}$' || die "R2_BUCKET invalido."
-    mask "$R2_SECRET_ACCESS_KEY"
-    set_env "$target" "$envf" RESTIC_REPOSITORY "s3:https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com/$R2_BUCKET/$pasta"
-    set_env "$target" "$envf" AWS_ACCESS_KEY_ID "$R2_ACCESS_KEY_ID"
-    set_env "$target" "$envf" AWS_SECRET_ACCESS_KEY "$R2_SECRET_ACCESS_KEY"
-    echo "  backup: restic no R2 ($R2_BUCKET/$pasta)"
-}
+netcup_backup_r2() { backup_r2_env "$1" "$2" "$3" RESTIC_REPOSITORY; }
 
 # ---- status ------------------------------------------------------------------------------------------
 netcup_status() {

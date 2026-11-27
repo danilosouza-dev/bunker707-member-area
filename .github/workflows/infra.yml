@@ -10,8 +10,9 @@ name: Infra (Hetzner)
 #
 # Provedor (docs/20 §8D): a variavel do repositorio PROVEDOR (hetzner, o padrao, ou netcup) escolhe onde as etapas operam;
 # PROVEDOR=... nas opcoes vale so para aquela execucao. Com netcup, os IPs dos servidores fixos vem das variaveis
-# NETCUP_*_IP, o gravador e criado na Vultr (segredo VULTR_API_KEY) e o backup vai para o Cloudflare R2 (variavel
-# R2_ACCOUNT_ID e segredos R2_ACCESS_KEY_ID e R2_SECRET_ACCESS_KEY, so no deploy).
+# NETCUP_*_IP, o gravador e criado na Vultr (segredo VULTR_API_KEY) e o backup vai para o Cloudflare R2. Na Hetzner, com a
+# variavel R2_ACCOUNT_ID, o R2 recebe a segunda copia de cada backup (docs/20 §8E). Os segredos R2_ACCESS_KEY_ID e
+# R2_SECRET_ACCESS_KEY so entram no deploy-membros, deploy-marketing, deploy-meet e secrets-meet.
 
 on:
   # Push que muda este arquivo so REGISTRA o workflow no GitHub (um workflow novo numa branch nao aparece
@@ -201,8 +202,8 @@ jobs:
           R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
           R2_BUCKET: ${{ vars.R2_BUCKET }}
           VULTR_API_KEY: ${{ (startsWith(inputs.etapa, 'jibri-') || inputs.etapa == 'exec-jibri' || inputs.etapa == 'status' || inputs.etapa == 'status-meet' || inputs.etapa == 'deploy-meet') && secrets.VULTR_API_KEY || '' }}
-          R2_ACCESS_KEY_ID: ${{ (inputs.etapa == 'deploy-membros' || inputs.etapa == 'deploy-marketing') && secrets.R2_ACCESS_KEY_ID || '' }}
-          R2_SECRET_ACCESS_KEY: ${{ (inputs.etapa == 'deploy-membros' || inputs.etapa == 'deploy-marketing') && secrets.R2_SECRET_ACCESS_KEY || '' }}
+          R2_ACCESS_KEY_ID: ${{ (inputs.etapa == 'deploy-membros' || inputs.etapa == 'deploy-marketing' || inputs.etapa == 'deploy-meet' || inputs.etapa == 'secrets-meet') && secrets.R2_ACCESS_KEY_ID || '' }}
+          R2_SECRET_ACCESS_KEY: ${{ (inputs.etapa == 'deploy-membros' || inputs.etapa == 'deploy-marketing' || inputs.etapa == 'deploy-meet' || inputs.etapa == 'secrets-meet') && secrets.R2_SECRET_ACCESS_KEY || '' }}
           PAYLOAD: ${{ (startsWith(inputs.etapa, 'secrets-') && inputs.payload) || '' }}
           COMANDO: ${{ (startsWith(inputs.etapa, 'exec-') && inputs.payload) || '' }}
           # Servidor de licencas (docs/20 §8C.5): cada segredo so entra na etapa que o usa, e nenhum e obrigatorio. A chave

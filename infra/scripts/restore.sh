@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Restaura um backup (backup.sh) num servidor limpo e roda o teste de fumaca:
 #   export RESTIC_REPOSITORY=sftp:storagebox:bunker707/restic RESTIC_PASSWORD=...   # ou um .env ja no lugar
-#   sh infra/scripts/restore.sh --snapshot latest [--yes] [--sem-fumaca]
+#   sh infra/scripts/restore.sh --snapshot latest [--yes] [--sem-fumaca] [--r2]
+# --r2 restaura da copia no Cloudflare R2 (RESTIC_REPOSITORY_R2 e as chaves AWS_* do .env, docs/20 §8E) em vez do
+# Storage Box. Num servidor sem .env: exporte RESTIC_REPOSITORY=s3:https://..., AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY.
 # (RESTIC_PASSWORD_FILE no lugar de RESTIC_PASSWORD e BUNKER707_BACKUP_TAG para outra marca: o kit usa os dois.)
 # --sem-fumaca pula o smoke do fim: o smoke vai pelos enderecos publicos, e num servidor novo o DNS ainda pode apontar
 # para o antigo (o kit restaura antes e roda o smoke depois, sem desfazer a restauracao se ele falhar).
@@ -18,21 +20,29 @@
 snapshot="latest"
 assume_yes=0
 fumaca=1
+do_r2=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --snapshot) snapshot="$2"; shift ;;
         --yes) assume_yes=1 ;;
         --sem-fumaca) fumaca=0 ;;
-        -h|--help) sed -n 2,13p "$0"; exit 0 ;;
+        --r2) do_r2=1 ;;
+        -h|--help) sed -n 2,15p "$0"; exit 0 ;;
         *) die "opcao desconhecida: $1" ;;
     esac
     shift
 done
 
+# O .env so entra quando o repositorio tambem vem dele: quem exporta RESTIC_REPOSITORY passa a senha junto.
 if [ -z "${RESTIC_REPOSITORY:-}" ] && [ -f "$ENV_FILE" ]; then
-    RESTIC_REPOSITORY=$(env_value RESTIC_REPOSITORY)
+    if [ "$do_r2" = 1 ]; then
+        RESTIC_REPOSITORY=$(env_value RESTIC_REPOSITORY_R2)
+        [ -n "$RESTIC_REPOSITORY" ] || die "--r2: o .env nao tem RESTIC_REPOSITORY_R2 (a copia no R2 nao esta ligada neste servidor)."
+    else
+        RESTIC_REPOSITORY=$(env_value RESTIC_REPOSITORY)
+    fi
     RESTIC_PASSWORD=$(env_value RESTIC_PASSWORD)
-    # Repositorio S3 (Cloudflare R2, docs/20 §8D): as chaves do token do R2 ficam no mesmo .env.
+    # Repositorio S3 (Cloudflare R2, docs/20 §8D e §8E): as chaves do token do R2 ficam no mesmo .env.
     if [ -z "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "$(env_value AWS_ACCESS_KEY_ID)" ]; then
         AWS_ACCESS_KEY_ID=$(env_value AWS_ACCESS_KEY_ID); AWS_SECRET_ACCESS_KEY=$(env_value AWS_SECRET_ACCESS_KEY)
         export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY

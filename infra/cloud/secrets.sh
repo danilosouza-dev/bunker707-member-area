@@ -51,6 +51,7 @@ if [ "$role" = "membros" ]; then
     membros_recria "$target"
 elif [ "$role" = "meet" ]; then
     rsh "$target" "cd '$REMOTE_DIR' && docker compose -f infra/jitsi/docker-compose.yml --profile borda up -d && bash -c '. infra/jitsi/scripts/_env.sh; reconnect_focus; for s in prosody jicofo jvb web; do wait_healthy \$s 300; done' && bash infra/jitsi/scripts/smoke.sh"
+    meet_backup_r2 "$target"
 else
     extra=""; [ -n "${SKIP_MARKETING:-}" ] && extra="-f infra/mautic/compose.colocado.yml"
     profile=""; [ -n "${SKIP_MARKETING:-}" ] || profile="--profile borda"

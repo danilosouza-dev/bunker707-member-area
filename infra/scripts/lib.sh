@@ -122,3 +122,61 @@ restic_add_recovery_key() {
         log "Senha de recuperacao cadastrada em $RESTIC_REPOSITORY."
     fi
 }
+
+# ---- Segunda copia no Cloudflare R2 (docs/20 §8E) -----------------------------------------------------------
+# Com RESTIC_REPOSITORY_R2 no .env (s3:https://<conta>.r2.cloudflarestorage.com/<bucket>/<pasta>, gravado pelo
+# deploy-membros/deploy-marketing quando o repositorio do GitHub tem R2_ACCOUNT_ID), cada backup vai tambem para o
+# R2: um segundo repositorio restic, com a mesma senha (RESTIC_PASSWORD) e a mesma senha de recuperacao, fora da
+# Hetzner. A copia no R2 e independente: se o Storage Box cair, o R2 continua recebendo, e vice-versa.
+# As chaves do token do R2 (AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY) ja sao exportadas pelos scripts de backup.
+r2_repo() { env_value RESTIC_REPOSITORY_R2; }
+
+# r2_restic ARGS...: o restic apontado para o R2 (sem mexer no RESTIC_REPOSITORY de quem chamou).
+r2_restic() {
+    local repo; repo=$(r2_repo)
+    [ -n "$repo" ] || die "RESTIC_REPOSITORY_R2 vazio no .env."
+    command -v restic >/dev/null 2>&1 || die "restic nao encontrado (bootstrap.sh instala no servidor)."
+    RESTIC_REPOSITORY="$repo" restic "$@"
+}
+
+# r2_init: cria o repositorio no R2 com os parametros de pedaco do principal e copia para ele o historico que ja
+# existe (restic copy), para que a primeira copia no R2 ja tenha os backups antigos. Idempotente.
+r2_init() {
+    [ -n "$(r2_repo)" ] || return 0
+    if r2_restic cat config >/dev/null 2>&1; then
+        log "Repositorio da copia no R2 ja existe ($(r2_repo))."
+        return 0
+    fi
+    log "Criando o repositorio da copia no R2 ($(r2_repo))..."
+    if RESTIC_FROM_PASSWORD="$RESTIC_PASSWORD" r2_restic init --from-repo "$RESTIC_REPOSITORY" --copy-chunker-params >/dev/null 2>&1; then
+        log "Copiando para o R2 o historico que ja existe em $RESTIC_REPOSITORY..."
+        RESTIC_FROM_PASSWORD="$RESTIC_PASSWORD" r2_restic copy --from-repo "$RESTIC_REPOSITORY" --quiet \
+            || warn "A copia do historico para o R2 falhou; os proximos backups vao para la mesmo assim."
+    else
+        # Sem o principal (Storage Box fora do ar, ou repositorio novo): o R2 nasce sozinho, sem o historico.
+        warn "Nao li $RESTIC_REPOSITORY para copiar os parametros; o repositorio do R2 nasce sem o historico."
+        r2_restic init >/dev/null
+    fi
+    log "Repositorio da copia no R2 pronto."
+}
+
+# r2_add_recovery_key ARQUIVO: a senha de recuperacao tambem no repositorio do R2.
+r2_add_recovery_key() {
+    local repo; repo=$(r2_repo)
+    [ -n "$repo" ] || return 0
+    ( RESTIC_REPOSITORY="$repo"; export RESTIC_REPOSITORY; restic_add_recovery_key "$1" )
+}
+
+# r2_backup TAG HOST KEEP_DAILY MARCA CAMINHOS...: o mesmo backup no R2, com a mesma retencao; grava a hora em MARCA
+# so quando deu certo. Volta 1 (sem morrer) quando falha: o backup do Storage Box ja esta feito e continua valendo.
+r2_backup() {
+    local tag="$1" host="$2" keep="$3" mark="$4"; shift 4
+    [ -n "$(r2_repo)" ] || return 0
+    log "Copia no R2 ($(r2_repo))..."
+    if ! r2_restic cat config >/dev/null 2>&1; then r2_init || { warn "Nao criei o repositorio no R2."; return 1; }; fi
+    r2_restic backup --tag "$tag" --host "$host" --quiet "$@" || { warn "O backup no R2 falhou."; return 1; }
+    r2_restic forget --tag "$tag" --host "$host" --group-by host --keep-daily "$keep" --prune --quiet \
+        || { warn "A retencao no R2 falhou (o backup de hoje entrou)."; return 1; }
+    date -u +%Y-%m-%dT%H:%M:%SZ > "$mark"
+    log "Copia no R2 concluida."
+}
