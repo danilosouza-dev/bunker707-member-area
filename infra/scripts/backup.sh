@@ -14,6 +14,7 @@
 #   pgsodium_root.key   chave raiz do Vault (segredos dos provedores de IA). Sem ela o Vault nao abre.
 #   env                 o infra/compose/.env (todos os segredos do stack)
 #   volumes/storage     arquivos do Storage (capas, materiais, fotos)
+# Com RESTIC_REPOSITORY_R2 no .env, o mesmo backup vai tambem para o Cloudflare R2 (docs/20 §8E; r2_* em lib.sh).
 # Tudo roda com as ferramentas de dentro do container do Postgres (mesma versao, sem imagem extra) e sai
 # pelo restic (criptografado antes de deixar o servidor). Retencao: BACKUP_KEEP_DAILY snapshots diarios, agrupados so
 # pelo host (--group-by host), porque o caminho da exportacao muda a cada backup.
@@ -154,6 +155,12 @@ run_backup() {
         log "Conferindo a integridade do repositorio..."
         restic_bin check --read-data-subset=10% || failures=1
     fi
+    # Segunda copia, fora da Hetzner (docs/20 §8E). Falhar aqui nao desfaz o backup do Storage Box, mas o timer sai
+    # com erro e o heartbeat nao bate, para alguem ver.
+    r2_backup bunker707 bunker707 "$keep_daily" "$backup_root/ultimo-sucesso-r2" "$stage" "$storage_dir" || failures=1
+    if [ "$do_check" = "1" ] && [ -n "$(r2_repo)" ]; then
+        r2_restic check --read-data-subset=10% || failures=1
+    fi
 
     # Guarda as duas exportacoes mais recentes em disco (restauracao rapida) e apaga o resto.
     ls -1dt "$backup_root"/stage/*/ 2>/dev/null | tail -n +3 | xargs -r rm -rf
@@ -161,13 +168,13 @@ run_backup() {
     if [ -n "$heartbeat_url" ] && [ "$failures" = "0" ]; then
         curl -fsS --max-time 10 -o /dev/null "$heartbeat_url" || warn "heartbeat ($heartbeat_url) nao respondeu."
     fi
-    [ "$failures" = "0" ] || die "restic check encontrou problema; veja a saida acima."
+    [ "$failures" = "0" ] || die "O backup do Storage Box entrou, mas a copia no R2 ou o restic check falhou; veja a saida acima."
     log "Backup $stamp concluido."
 }
 
 case "$mode" in
-    add-key) restic_add_recovery_key "$recovery_key_file" ;;
-    init) init_repo ;;
+    add-key) restic_add_recovery_key "$recovery_key_file"; r2_add_recovery_key "$recovery_key_file" ;;
+    init) init_repo; r2_init ;;
     timer) install_timer ;;
     backup) run_backup ;;
 esac

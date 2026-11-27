@@ -55,8 +55,8 @@ if [ "$role" = "membros" ]; then
     fi
     [ -n "$sb_user" ] && { set_env "$target" "$envf" STORAGE_BOX_USER "$sb_user"; set_env "$target" "$envf" STORAGE_BOX_HOST "$sb_host"; }
     fix_restic_path "$envf"
-    # netcup (docs/20 §8D): o backup vai para o Cloudflare R2, nao para o Storage Box.
-    [ "$PROVEDOR" != "netcup" ] || netcup_backup_r2 "$target" "$envf" restic
+    # Cloudflare R2 (docs/20 §8D e §8E): na netcup, o unico backup; na Hetzner, a segunda copia (R2_ACCOUNT_ID ligado).
+    backup_r2_papel "$target" "$envf" restic
     [ -n "${SKIP_MARKETING:-}" ] && set_env "$target" "$envf" MAUTIC_SITE_ADDRESS "$MAUTIC_DOMAIN"
     # Studio so para o produtor: PRODUCER_IP nas opcoes atualiza a allowlist a qualquer momento.
     [ -n "$PRODUCER_IP" ] && set_env "$target" "$envf" STUDIO_ALLOWED_IPS "$(cidr_or_empty "$PRODUCER_IP")"
@@ -100,7 +100,7 @@ SQL
     remote "bash infra/scripts/backup.sh --init"
     backup_recovery_key "$target" membros
     remote "sudo bash infra/scripts/backup.sh --install-timer >/dev/null && sudo systemctl start bunker707-backup.service"
-    remote "cat /var/backups/bunker707/ultimo-sucesso 2>/dev/null || true"
+    remote "cat /var/backups/bunker707/ultimo-sucesso 2>/dev/null || true; f=/var/backups/bunker707/ultimo-sucesso-r2; [ ! -f \$f ] || echo \"copia no R2: \$(cat \$f)\""
     remote "sudo journalctl -u bunker707-backup -n 5 --no-pager"
     echo
     echo "App no ar: https://$APP_DOMAIN (versao sha-$commit). Supabase: https://$API_DOMAIN. Studio: https://$STUDIO_DOMAIN (so STUDIO_ALLOWED_IPS)."
@@ -161,6 +161,7 @@ elif [ "$role" = "meet" ]; then
     fi
     for s in prosody jicofo jvb web; do remote "bash -c '. infra/jitsi/scripts/_env.sh; wait_healthy $s 300'"; done
     remote "bash infra/jitsi/scripts/smoke.sh"
+    meet_backup_r2 "$target"
     echo
     echo "Jitsi no ar: https://$MEET_DOMAIN (commit $commit). Sem marca do Jitsi; ninguem entra sem o JWT do app."
     echo "Falta: secrets-meet com JWT_APP_SECRET e secrets-membros com o MESMO valor em WEBINAR_JWT_SECRET (docs/20 §8B.3); depois status-meet e o botao Testar sala."
@@ -173,7 +174,7 @@ else
     fi
     [ -n "$sb_user" ] && { set_env "$target" "$envf" STORAGE_BOX_USER "$sb_user"; set_env "$target" "$envf" STORAGE_BOX_HOST "$sb_host"; }
     fix_restic_path "$envf"
-    [ "$PROVEDOR" != "netcup" ] || netcup_backup_r2 "$target" "$envf" restic-mautic
+    backup_r2_papel "$target" "$envf" restic-mautic
     log "Stack do Mautic: imagens, compose up, instalacao, smoke"
     if [ -n "${SKIP_MARKETING:-}" ]; then
         remote "docker compose -f infra/mautic/docker-compose.yml -f infra/mautic/compose.colocado.yml pull --quiet && docker compose -f infra/mautic/docker-compose.yml -f infra/mautic/compose.colocado.yml up -d && docker compose -f infra/compose/docker-compose.yml up -d caddy"

@@ -119,16 +119,19 @@ run_backup() {
     restic_bin forget --tag bunker707-mautic --host bunker707-mautic --group-by host --keep-daily "$keep_daily" --prune --quiet
     local failures=0
     if [ "$do_check" = "1" ]; then restic_bin check --read-data-subset=10% || failures=1; fi
+    # Segunda copia, fora da Hetzner (docs/20 §8E; r2_* em infra/scripts/lib.sh).
+    r2_backup bunker707-mautic bunker707-mautic "$keep_daily" "$backup_root/ultimo-sucesso-r2" "$stage" "$COMPOSE_DIR/volumes/config" "$COMPOSE_DIR/volumes/media" || failures=1
+    if [ "$do_check" = "1" ] && [ -n "$(r2_repo)" ]; then r2_restic check --read-data-subset=10% || failures=1; fi
     ls -1dt "$backup_root"/stage/*/ 2>/dev/null | tail -n +3 | xargs -r rm -rf
     date -u +%Y-%m-%dT%H:%M:%SZ > "$backup_root/ultimo-sucesso"
     if [ -n "$heartbeat_url" ] && [ "$failures" = "0" ]; then curl -fsS --max-time 10 -o /dev/null "$heartbeat_url" || warn "heartbeat nao respondeu."; fi
-    [ "$failures" = "0" ] || die "restic check encontrou problema."
+    [ "$failures" = "0" ] || die "O backup do Storage Box entrou, mas a copia no R2 ou o restic check falhou."
     log "Backup $stamp concluido."
 }
 
 case "$mode" in
-    add-key) restic_add_recovery_key "$recovery_key_file" ;;
-    init) ssh_config_alias; if restic_bin cat config >/dev/null 2>&1; then log "Repositorio restic ja existe."; else log "Criando o repositorio restic em $RESTIC_REPOSITORY..."; restic_bin init; fi; log "Guarde RESTIC_PASSWORD fora do servidor." ;;
+    add-key) restic_add_recovery_key "$recovery_key_file"; r2_add_recovery_key "$recovery_key_file" ;;
+    init) ssh_config_alias; if restic_bin cat config >/dev/null 2>&1; then log "Repositorio restic ja existe."; else log "Criando o repositorio restic em $RESTIC_REPOSITORY..."; restic_bin init; fi; r2_init; log "Guarde RESTIC_PASSWORD fora do servidor." ;;
     timer) install_timer ;;
     backup) run_backup ;;
 esac

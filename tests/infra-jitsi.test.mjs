@@ -1003,7 +1003,7 @@ test("workflow e run.sh: as oito etapas novas, JIBRI_SECRETS so nos passos dos s
 });
 
 test("scripts do Jitsi e o jibri.sh passam na conferencia de sintaxe; os de bash voltam do dash; o gerador e POSIX sh e o .mjs compila", () => {
-  assert.deepEqual(scriptFiles, ["_env.sh", "jibri-status.sh", "logs.sh", "smoke.sh", "update.sh", "volumes.sh"]);
+  assert.deepEqual(scriptFiles, ["_env.sh", "backup-env.sh", "jibri-status.sh", "logs.sh", "smoke.sh", "update.sh", "volumes.sh"]);
   for (const file of scriptFiles) {
     const path = join(jitsiDir, "scripts", file);
     assert.equal(run("bash", ["-n", path]).status, 0, file);

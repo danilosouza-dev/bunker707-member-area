@@ -1634,3 +1634,14 @@ Falta: a netcup entregar as VPS; o Ubuntu 24.04 com a chave da etapa `chave-ssh`
 servidor C na lista da chave da Vultr; o `preparar`; os deploys; e medir a gravacao na maquina da Vultr antes de uma live
 de verdade.
 
+
+### 12.1 A Hetzner voltou (27/11/2026)
+
+A conta da Hetzner voltou no dia seguinte. Decisao do produtor: a Hetzner segue como a producao, e a estrutura do §8D
+do docs/20 (netcup, Vultr e R2) vira o ambiente de teste, ligado so quando precisar. Nesse dia:
+
+- A gravacao no computador (D148) foi provada numa sala de teste na Vultr (`meet-teste.bunker707.com.br`, uma
+  maquina por hora, apagada depois, US$ 0,11 no total) e depois publicada na sala da Hetzner (`deploy-meet` da
+  `main`), testada pelo produtor com o som sincronizado.
+- O pedido da netcup ficou em analise; manter ou cancelar e decisao do produtor.
+- O backup ganhou a segunda copia no Cloudflare R2 (docs/20 §8E), para nao ficar preso a Hetzner de novo.
