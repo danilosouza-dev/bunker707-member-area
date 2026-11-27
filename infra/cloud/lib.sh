@@ -333,6 +333,44 @@ jibri_cidrs() {
     printf '%s' "$JIBRI_CIDRS_CACHE"
 }
 jibri_cidrs_refresh() { unset JIBRI_CIDRS_CACHE; }
+# ---- o gravador por hora na Hetzner (jibri.sh); o provedor-netcup.sh troca estas pela Vultr ---------------
+gravador_nomes() { hzj server list --selector papel=jibri | jq -r '.[].name'; }
+gravador_campo() {  # gravador_campo NOME tipo|local|criado|status
+    local q
+    case "$2" in tipo) q='.server_type.name' ;; local) q='.location.name // .datacenter.location.name' ;; criado) q='.created' ;; status) q='.status' ;; *) die "gravador_campo: $2" ;; esac
+    hzj server describe "$1" | jq -r "$q"
+}
+# gravador_criar NOME USER_DATA: tenta JIBRI_TYPE e as reservas em cada local; GRAVADOR_TIPO e GRAVADOR_LOCAL com o que
+# nasceu. Volta 1 sem estoque em tipo algum; outra recusa da API para tudo.
+gravador_criar() {
+    local name="$1" ud="$2" t l
+    for t in $JIBRI_TYPE ${JIBRI_FALLBACK_TYPES:-}; do
+        for l in "$LOCATION" $FALLBACK_LOCATIONS; do
+            echo "  criando $name ($t) em $l..."
+            if hz server create --name "$name" --type "$t" --image ubuntu-24.04 --location "$l" \
+                --ssh-key "$SSH_KEY_NAME" --firewall "$(fw_name "$name")" --user-data-from-file "$ud" \
+                --label app=bunker707 --label papel=jibri --label sessao="$SESSAO" >/dev/null 2>"$WORK_DIR/create-$name.err"; then
+                GRAVADOR_TIPO="$t"; GRAVADOR_LOCAL="$l"; return 0
+            fi
+            if grep -qiE 'unavailable|not available|resource_limit|capacity' "$WORK_DIR/create-$name.err"; then
+                warn "$t indisponivel em $l: $(tr -d '\n' < "$WORK_DIR/create-$name.err" | cut -c1-160)"
+                continue
+            fi
+            cat "$WORK_DIR/create-$name.err" >&2
+            die "Falha ao criar $name."
+        done
+    done
+    return 1
+}
+gravador_ligar() { fw_apply "$1"; hz server poweron "$1" >/dev/null 2>&1 || true; }
+gravador_apagar() {  # o servidor e o firewall dele
+    hz server delete "$1" || return 1
+    hz firewall delete "$(fw_name "$1")" >/dev/null 2>&1 || warn "firewall $(fw_name "$1") nao apagado (apague no console da Hetzner)."
+}
+# Moeda dos precos que hourly_price devolve (a Vultr cobra em dolar).
+PRECO_MOEDA="EUR"
+# so_na_hetzner ETAPA: as etapas que dependem da API da Hetzner (snapshot, restaurar, plan) param com o PROVEDOR=netcup.
+so_na_hetzner() { :; }
 fw_name() { printf '%s-fw' "$1"; }
 fw_ensure() {  # fw_ensure SERVER_NAME
     local name; name=$(fw_name "$1")
@@ -512,6 +550,65 @@ remote_auth_curl() {
 # Senha de recuperacao dos backups: derivada do HCLOUD_TOKEN e cadastrada como segunda chave do repositorio
 # restic do papel. Sem o .env do servidor (servidor perdido), quem tem o token abre o backup (docs/20 §10.2).
 # A senha vai pelo stdin do SSH para um arquivo temporario 0600 no servidor, apagado em seguida.
+# ---- Cloudflare R2: o backup fora do provedor (docs/20 §8D e §8E) ------------------------------------------
+# Na Hetzner, o R2 e a SEGUNDA copia (RESTIC_REPOSITORY_R2; o Storage Box segue como a primeira); na netcup, a unica
+# (RESTIC_REPOSITORY). Liga quando o repositorio do GitHub tem a variavel R2_ACCOUNT_ID. Cada provedor numa pasta
+# propria do bucket (hetzner/..., netcup/...), para a producao e o staging nunca escreverem no mesmo repositorio.
+R2_ACCOUNT_ID="${R2_ACCOUNT_ID:-}"
+R2_BUCKET="${R2_BUCKET:-bunker707-backups}"
+r2_ligado() { [ -n "$R2_ACCOUNT_ID" ]; }
+# r2_validar: confere a conta e o bucket ANTES de montar o endereco (um die dentro de $(...) so sairia do subshell).
+r2_validar() {
+    printf '%s' "$R2_ACCOUNT_ID" | grep -qE '^[a-f0-9]{32}$' || die "R2_ACCOUNT_ID invalido (32 letras e numeros, o id da conta da Cloudflare)."
+    printf '%s' "$R2_BUCKET" | grep -qE '^[a-z0-9][a-z0-9-]{2,62}$' || die "R2_BUCKET invalido."
+}
+r2_repo_url() {  # r2_repo_url PASTA (depois do r2_validar)
+    printf 's3:https://%s.r2.cloudflarestorage.com/%s/%s' "$R2_ACCOUNT_ID" "$R2_BUCKET" "$1"
+}
+# backup_r2_env user@host ENV_FILE PASTA VARIAVEL: o .env do papel aponta VARIAVEL para o repositorio do R2 e leva as
+# chaves do token do R2 (Leitura/gravacao para objeto, so no bucket), que o restic le do ambiente (backup.sh).
+backup_r2_env() {
+    local target="$1" envf="$2" pasta="$3" var="$4"
+    need R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
+    r2_validar
+    mask "$R2_SECRET_ACCESS_KEY"
+    set_env "$target" "$envf" "$var" "$(r2_repo_url "$pasta")"
+    set_env "$target" "$envf" AWS_ACCESS_KEY_ID "$R2_ACCESS_KEY_ID"
+    set_env "$target" "$envf" AWS_SECRET_ACCESS_KEY "$R2_SECRET_ACCESS_KEY"
+    echo "  backup: restic no R2 ($R2_BUCKET/$pasta, $var)"
+}
+# backup_r2_papel user@host ENV_FILE PASTA: a regra dos dois provedores num lugar so (deploy-membros, deploy-marketing).
+backup_r2_papel() {
+    if [ "$PROVEDOR" = "netcup" ]; then
+        backup_r2_env "$1" "$2" "$3" RESTIC_REPOSITORY
+    elif r2_ligado; then
+        backup_r2_env "$1" "$2" "$PROVEDOR/$3" RESTIC_REPOSITORY_R2
+    fi
+}
+# meet_backup_r2 user@host: o infra/jitsi/.env da sala no R2 (infra/jitsi/scripts/backup-env.sh), com a senha de
+# recuperacao derivada do token como senha do repositorio. Roda no fim do deploy-meet e do secrets-meet. Nao derruba a
+# etapa: sem o R2 ligado so avisa; se falhar, avisa e a sala segue no ar.
+meet_backup_r2() {
+    local target="$1" f="$WORK_DIR/restic-recovery" repo pasta
+    if ! r2_ligado; then echo "  backup da configuracao da sala: sem R2_ACCOUNT_ID no GitHub, pulado"; return 0; fi
+    need R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY
+    mask "$R2_SECRET_ACCESS_KEY"
+    r2_validar
+    if [ "$PROVEDOR" = "netcup" ]; then pasta=restic-meet; else pasta="$PROVEDOR/restic-meet"; fi
+    repo=$(r2_repo_url "$pasta")
+    log "Configuracao da sala (infra/jitsi/.env) no R2 ($R2_BUCKET/$pasta)"
+    node "$CLOUD_DIR/deploy-key.mjs" --secret --info bunker707-restic-recovery-v1 --out "$f" 2>/dev/null
+    # O script vai deste commit (o servidor pode ter uma versao anterior do repositorio, como no secrets-meet).
+    rsh "$target" "umask 077 && cat > /tmp/backup-env.sh" < "$REPO_ROOT/infra/jitsi/scripts/backup-env.sh"
+    if { printf '%s\n%s\n' "$R2_ACCESS_KEY_ID" "$R2_SECRET_ACCESS_KEY"; cat "$f"; echo; } \
+        | rsh "$target" "bash /tmp/backup-env.sh '$repo' '$REMOTE_DIR/infra/jitsi/.env'; rc=\$?; rm -f /tmp/backup-env.sh; exit \$rc"; then
+        :
+    else
+        warn "A copia da configuracao da sala no R2 falhou; a sala segue no ar. Rode de novo o deploy-meet ou o secrets-meet."
+    fi
+    rm -f "$f"
+}
+
 backup_recovery_key() {  # backup_recovery_key user@host membros|marketing|licencas
     local target="$1" script f="$WORK_DIR/restic-recovery"
     case "$2" in
@@ -575,7 +672,7 @@ cf_apply_dns_membros() {
     [ -n "${SKIP_MARKETING:-}" ] && subs="$subs ${MAUTIC_DOMAIN%%.*}"
     for sub in $subs; do
         cf_dns_upsert "$sub" A "$m4" true
-        [ -n "$m6" ] && cf_dns_upsert "$sub" AAAA "$m6" true
+        if [ -n "$m6" ]; then cf_dns_upsert "$sub" AAAA "$m6" true; else cf_dns_delete "$sub" AAAA; fi
     done
     return 0
 }
@@ -588,7 +685,7 @@ cf_apply_dns_marketing() {
     fi
     k4=$(server_ip4 "$MARKETING_NAME"); k6=$(server_ip6 "$MARKETING_NAME")
     cf_dns_upsert "${MAUTIC_DOMAIN%%.*}" A "$k4" true
-    [ -n "$k6" ] && cf_dns_upsert "${MAUTIC_DOMAIN%%.*}" AAAA "$k6" true
+    if [ -n "$k6" ]; then cf_dns_upsert "${MAUTIC_DOMAIN%%.*}" AAAA "$k6" true; else cf_dns_delete "${MAUTIC_DOMAIN%%.*}" AAAA; fi
     return 0
 }
 cf_zone_tls() {
@@ -621,7 +718,7 @@ cf_remove_dns() {
 cf_apply_dns_meet() {
     local ip4 ip6 sub; ip4=$(server_ip4 "$MEET_NAME"); ip6=$(server_ip6 "$MEET_NAME"); sub="${MEET_DOMAIN%%.*}"
     cf_dns_upsert "$sub" A "$ip4" false
-    [ -n "$ip6" ] && cf_dns_upsert "$sub" AAAA "$ip6" false
+    if [ -n "$ip6" ]; then cf_dns_upsert "$sub" AAAA "$ip6" false; else cf_dns_delete "$sub" AAAA; fi
     return 0
 }
 
@@ -870,3 +967,13 @@ hourly_price() {
 monthly_price() {
     hzj server-type describe "$1" 2>/dev/null | jq -r --arg l "$2" '.prices[]? | select(.location==$l) | (.price_monthly.net // .price_monthly.gross // empty)' 2>/dev/null | head -n1
 }
+
+# ---- provedor -------------------------------------------------------------------------------------------
+# PROVEDOR=netcup (variavel do repositorio ou opcao da etapa): servidores fixos na netcup, gravador na Vultr, backup no
+# Cloudflare R2 (docs/20 §8D). O padrao e a Hetzner, com tudo o que esta acima.
+PROVEDOR="${PROVEDOR:-hetzner}"
+case "$PROVEDOR" in
+    hetzner) ;;
+    netcup) . "$CLOUD_DIR/provedor-netcup.sh" ;;
+    *) die "PROVEDOR invalido: '$PROVEDOR' (hetzner ou netcup)." ;;
+esac

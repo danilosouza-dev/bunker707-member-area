@@ -7,6 +7,12 @@ name: Infra (Hetzner)
 # Segredos nunca entram pelos inputs: a chave do Resend e afins viajam num envelope cifrado para a chave
 # RSA do servidor (infra/cloud/envelope.sh), que so ele abre. O gravador por hora (jibri-up/jibri-down, docs/20
 # §8B) nao tem chave propria: os dele vem do segredo JIBRI_SECRETS do repositorio (linhas CHAVE=VALOR).
+#
+# Provedor (docs/20 §8D): a variavel do repositorio PROVEDOR (hetzner, o padrao, ou netcup) escolhe onde as etapas operam;
+# PROVEDOR=... nas opcoes vale so para aquela execucao. Com netcup, os IPs dos servidores fixos vem das variaveis
+# NETCUP_*_IP, o gravador e criado na Vultr (segredo VULTR_API_KEY) e o backup vai para o Cloudflare R2. Na Hetzner, com a
+# variavel R2_ACCOUNT_ID, o R2 recebe a segunda copia de cada backup (docs/20 §8E). Os segredos R2_ACCESS_KEY_ID e
+# R2_SECRET_ACCESS_KEY so entram no deploy-membros, deploy-marketing, deploy-meet e secrets-meet.
 
 on:
   # Push que muda este arquivo so REGISTRA o workflow no GitHub (um workflow novo numa branch nao aparece
@@ -26,6 +32,8 @@ on:
         options:
           - plan
           - provision
+          - preparar
+          - chave-ssh
           - deploy-membros
           - deploy-marketing
           - secrets-membros
@@ -164,12 +172,15 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           JIBRI_SECRETS: ${{ secrets.JIBRI_SECRETS }}
           TEM_LICENCAS_RAIZES: ${{ secrets.LICENCAS_RAIZES != '' }}
+          TEM_VULTR: ${{ secrets.VULTR_API_KEY != '' }}
+          PROVEDOR: ${{ vars.PROVEDOR }}
         run: |
           [ -n "$HCLOUD_TOKEN" ] || { echo "::error::Segredo HCLOUD_TOKEN ausente (Settings > Secrets and variables > Actions)."; exit 1; }
-          case "$ETAPA" in provision|provision-meet|snapshot|restaurar) [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::Segredo CLOUDFLARE_API_TOKEN ausente."; exit 1; } ;; esac
+          case "$ETAPA" in provision|provision-meet|snapshot|restaurar|preparar) [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::Segredo CLOUDFLARE_API_TOKEN ausente."; exit 1; } ;; esac
           case "$ETAPA" in dns-licencas|deploy-licencas|conectar-licencas) [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::Segredo CLOUDFLARE_API_TOKEN ausente (o DNS do Emissor e conferido no deploy e no conectar)."; exit 1; } ;; esac
           case "$ETAPA" in teste-dns|teste-apagar) [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::Segredo CLOUDFLARE_API_TOKEN ausente (o DNS da escola do ensaio)."; exit 1; } ;; esac
           case "$ETAPA" in jibri-up|jibri-down) [ -n "$JIBRI_SECRETS" ] || { echo "::error::Segredo JIBRI_SECRETS ausente (linhas CHAVE=VALOR do gravador, docs/20 secao 8B.3)."; exit 1; } ;; esac
+          case "$PROVEDOR:$ETAPA" in netcup:jibri-up|netcup:jibri-down|netcup:exec-jibri) [ "$TEM_VULTR" = true ] || { echo "::error::Segredo VULTR_API_KEY ausente (o gravador na Vultr, docs/20 secao 8D)."; exit 1; } ;; esac
           # As raizes publicas: infra/licencas/raizes.json, que a cerimonia-licencas imprime (docs/32 D41); o segredo
           # LICENCAS_RAIZES de antes ainda vale sem o arquivo. A chave de emissao nasce no servidor pela cerimonia.
           case "$ETAPA" in deploy-licencas) [ -s infra/licencas/raizes.json ] || [ "$TEM_LICENCAS_RAIZES" = true ] || { echo "::error::Faltam as raizes publicas: rode cerimonia-licencas e grave em infra/licencas/raizes.json, num commit, o que ela imprime (docs/20 secao 8C.8)."; exit 1; } ;; esac
@@ -182,6 +193,17 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JIBRI_SECRETS: ${{ secrets.JIBRI_SECRETS }}
+          # Provedor (docs/20 §8D): variaveis do repositorio, que nao sao segredo; os segredos da Vultr e do R2 so entram
+          # nas etapas que os usam.
+          PROVEDOR: ${{ vars.PROVEDOR }}
+          NETCUP_MEMBROS_IP: ${{ vars.NETCUP_MEMBROS_IP }}
+          NETCUP_MEET_IP: ${{ vars.NETCUP_MEET_IP }}
+          NETCUP_MARKETING_IP: ${{ vars.NETCUP_MARKETING_IP }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          VULTR_API_KEY: ${{ (startsWith(inputs.etapa, 'jibri-') || inputs.etapa == 'exec-jibri' || inputs.etapa == 'status' || inputs.etapa == 'status-meet' || inputs.etapa == 'deploy-meet') && secrets.VULTR_API_KEY || '' }}
+          R2_ACCESS_KEY_ID: ${{ (inputs.etapa == 'deploy-membros' || inputs.etapa == 'deploy-marketing' || inputs.etapa == 'deploy-meet' || inputs.etapa == 'secrets-meet') && secrets.R2_ACCESS_KEY_ID || '' }}
+          R2_SECRET_ACCESS_KEY: ${{ (inputs.etapa == 'deploy-membros' || inputs.etapa == 'deploy-marketing' || inputs.etapa == 'deploy-meet' || inputs.etapa == 'secrets-meet') && secrets.R2_SECRET_ACCESS_KEY || '' }}
           PAYLOAD: ${{ (startsWith(inputs.etapa, 'secrets-') && inputs.payload) || '' }}
           COMANDO: ${{ (startsWith(inputs.etapa, 'exec-') && inputs.payload) || '' }}
           # Servidor de licencas (docs/20 §8C.5): cada segredo so entra na etapa que o usa, e nenhum e obrigatorio. A chave
@@ -214,6 +236,10 @@ jobs:
         timeout-minutes: 5
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          PROVEDOR: ${{ vars.PROVEDOR }}
+          NETCUP_MEMBROS_IP: ${{ vars.NETCUP_MEMBROS_IP }}
+          NETCUP_MEET_IP: ${{ vars.NETCUP_MEET_IP }}
+          NETCUP_MARKETING_IP: ${{ vars.NETCUP_MARKETING_IP }}
         run: |
           if pkill -TERM -f 'infra/cloud/'; then
               for _ in $(seq 30); do pgrep -f 'infra/cloud/' >/dev/null || break; sleep 1; done

@@ -11,6 +11,7 @@
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
+so_na_hetzner plan
 need HCLOUD_TOKEN
 install_hcloud
 

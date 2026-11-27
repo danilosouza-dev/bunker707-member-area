@@ -19,6 +19,7 @@
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
+so_na_hetzner snapshot
 need HCLOUD_TOKEN CLOUDFLARE_API_TOKEN
 [ "${CONFIRMAR:-}" = "apagar" ] || die "Esta etapa APAGA os servidores depois do snapshot. Confirme com CONFIRMAR=apagar nas opcoes."
 roles=$(guard_roles)

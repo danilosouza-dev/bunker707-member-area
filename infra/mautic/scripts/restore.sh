@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Restaura um backup do Mautic (backup.sh) num servidor limpo e roda o smoke:
 #   export RESTIC_REPOSITORY=sftp:storagebox:bunker707/restic-mautic RESTIC_PASSWORD=...   # ou um .env no lugar
-#   sh infra/mautic/scripts/restore.sh --snapshot latest [--yes]
+#   sh infra/mautic/scripts/restore.sh --snapshot latest [--yes] [--r2]
+# --r2 restaura da copia no Cloudflare R2 (RESTIC_REPOSITORY_R2 e as chaves AWS_* do .env, docs/20 §8E).
 # Ordem: restic restore -> .env -> volumes config/ e media/ -> sobe so o MySQL -> importa o dump -> sobe o
 # resto -> smoke. O MySQL precisa estar vazio (o script recusa sobrescrever sem --yes).
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
@@ -9,17 +10,30 @@
 
 . "$(dirname -- "$0")/_env.sh"
 
-snapshot="latest"; assume_yes=0
+snapshot="latest"; assume_yes=0; do_r2=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --snapshot) snapshot="$2"; shift ;;
+        --r2) do_r2=1 ;;
         --yes) assume_yes=1 ;;
-        -h|--help) sed -n 2,7p "$0"; exit 0 ;;
+        -h|--help) sed -n 2,8p "$0"; exit 0 ;;
         *) die "opcao desconhecida: $1" ;;
     esac
     shift
 done
-if [ -z "${RESTIC_REPOSITORY:-}" ] && [ -f "$ENV_FILE" ]; then RESTIC_REPOSITORY=$(env_value RESTIC_REPOSITORY); RESTIC_PASSWORD=$(env_value RESTIC_PASSWORD); fi
+# O .env so entra quando o repositorio tambem vem dele: quem exporta RESTIC_REPOSITORY passa a senha junto.
+if [ -z "${RESTIC_REPOSITORY:-}" ] && [ -f "$ENV_FILE" ]; then
+    if [ "$do_r2" = 1 ]; then
+        RESTIC_REPOSITORY=$(env_value RESTIC_REPOSITORY_R2)
+        [ -n "$RESTIC_REPOSITORY" ] || die "--r2: o .env nao tem RESTIC_REPOSITORY_R2 (a copia no R2 nao esta ligada neste servidor)."
+    else
+        RESTIC_REPOSITORY=$(env_value RESTIC_REPOSITORY)
+    fi
+    RESTIC_PASSWORD=$(env_value RESTIC_PASSWORD)
+    if [ -z "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "$(env_value AWS_ACCESS_KEY_ID)" ]; then
+        AWS_ACCESS_KEY_ID=$(env_value AWS_ACCESS_KEY_ID); AWS_SECRET_ACCESS_KEY=$(env_value AWS_SECRET_ACCESS_KEY); export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+    fi
+fi
 [ -n "${RESTIC_REPOSITORY:-}" ] && [ -n "${RESTIC_PASSWORD:-}" ] || die "Exporte RESTIC_REPOSITORY e RESTIC_PASSWORD (ou tenha um .env com eles)."
 export RESTIC_REPOSITORY RESTIC_PASSWORD
 if [ "$(id -u)" = "0" ]; then restore_root="${BUNKER707_BACKUP_DIR:-/var/backups/bunker707-mautic}/restore"; else restore_root="${BUNKER707_BACKUP_DIR:-$HOME/.bunker707-mautic-backups}/restore"; fi
