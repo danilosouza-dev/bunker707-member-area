@@ -21,13 +21,15 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
-if [ "$do_r2" = 1 ] && [ -z "${RESTIC_REPOSITORY:-}" ] && [ -f "$ENV_FILE" ]; then
-    RESTIC_REPOSITORY=$(env_value RESTIC_REPOSITORY_R2)
-    [ -n "$RESTIC_REPOSITORY" ] || die "--r2: o .env nao tem RESTIC_REPOSITORY_R2 (a copia no R2 nao esta ligada neste servidor)."
-fi
-if [ -z "${RESTIC_REPOSITORY:-}" ] && [ -f "$ENV_FILE" ]; then RESTIC_REPOSITORY=$(env_value RESTIC_REPOSITORY); fi
-if [ -f "$ENV_FILE" ]; then
-    [ -n "${RESTIC_PASSWORD:-}" ] || RESTIC_PASSWORD=$(env_value RESTIC_PASSWORD)
+# O .env so entra quando o repositorio tambem vem dele: quem exporta RESTIC_REPOSITORY passa a senha junto.
+if [ -z "${RESTIC_REPOSITORY:-}" ] && [ -f "$ENV_FILE" ]; then
+    if [ "$do_r2" = 1 ]; then
+        RESTIC_REPOSITORY=$(env_value RESTIC_REPOSITORY_R2)
+        [ -n "$RESTIC_REPOSITORY" ] || die "--r2: o .env nao tem RESTIC_REPOSITORY_R2 (a copia no R2 nao esta ligada neste servidor)."
+    else
+        RESTIC_REPOSITORY=$(env_value RESTIC_REPOSITORY)
+    fi
+    RESTIC_PASSWORD=$(env_value RESTIC_PASSWORD)
     if [ -z "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "$(env_value AWS_ACCESS_KEY_ID)" ]; then
         AWS_ACCESS_KEY_ID=$(env_value AWS_ACCESS_KEY_ID); AWS_SECRET_ACCESS_KEY=$(env_value AWS_SECRET_ACCESS_KEY); export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
     fi
