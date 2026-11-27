@@ -3,7 +3,8 @@
 #   bash infra/cloud/run.sh <etapa>
 # com OPCOES="CHAVE=VALOR ..." (ex.: MEMBROS_TYPE=cx33 PRODUCER_IP=203.0.113.10 SKIP_MARKETING=1) e, nas
 # etapas que precisam, PAYLOAD (envelope cifrado) ou COMANDO (exec-*). Etapas:
-#   plan, provision, deploy-membros, deploy-marketing, secrets-membros, secrets-marketing, equipe,
+#   plan, provision, preparar (servidores que ja existem na netcup, PROVEDOR=netcup; CONFIRMADO=sim), chave-ssh,
+#   deploy-membros, deploy-marketing, secrets-membros, secrets-marketing, equipe,
 #   status, status-ssh, backup-membros, backup-marketing, exec-membros, exec-marketing,
 #   provision-meet, deploy-meet, secrets-meet, exec-meet, status-meet (servidor C do Jitsi; CONFIRMADO=sim),
 #   jibri-up, jibri-down, exec-jibri (gravador por hora; SESSAO=<id> e CONFIRMADO=sim; docs/20 §8B),
@@ -46,6 +47,12 @@ exec_remote() {  # exec_remote membros|marketing|meet|licencas: roda COMANDO com
 case "$etapa" in
     plan) bash "$here/plan.sh" ;;
     provision) bash "$here/provision.sh" ;;
+    preparar) bash "$here/provision.sh" preparar ;;
+    chave-ssh)
+        # A chave publica de deploy (derivada do HCLOUD_TOKEN), para colar no painel da netcup ao instalar o Ubuntu.
+        . "$here/lib.sh"; need HCLOUD_TOKEN; deploy_key
+        log "Chave publica de deploy (cole no painel do provedor, no root, ao instalar o Ubuntu 24.04)"
+        cat "$KEY_PATH.pub" ;;
     deploy-membros) bash "$here/deploy.sh" membros ;;
     deploy-marketing) bash "$here/deploy.sh" marketing ;;
     secrets-membros) bash "$here/secrets.sh" membros ;;

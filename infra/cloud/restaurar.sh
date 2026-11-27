@@ -14,6 +14,7 @@
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
+so_na_hetzner restaurar
 need HCLOUD_TOKEN CLOUDFLARE_API_TOKEN
 roles=$(guard_roles)
 install_hcloud; deploy_key

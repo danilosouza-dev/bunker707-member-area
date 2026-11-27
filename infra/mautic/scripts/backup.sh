@@ -29,6 +29,11 @@ require_env_file
 export RESTIC_REPOSITORY RESTIC_PASSWORD
 RESTIC_REPOSITORY=$(require_env_value RESTIC_REPOSITORY)
 RESTIC_PASSWORD=$(require_env_value RESTIC_PASSWORD)
+# Repositorio S3 (Cloudflare R2, docs/20 §8D): as chaves do token do R2 no .env, que o restic le do ambiente.
+if [ -n "$(env_value AWS_ACCESS_KEY_ID)" ]; then
+    export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+    AWS_ACCESS_KEY_ID=$(env_value AWS_ACCESS_KEY_ID); AWS_SECRET_ACCESS_KEY=$(require_env_value AWS_SECRET_ACCESS_KEY)
+fi
 keep_daily=$(env_value BACKUP_KEEP_DAILY 30)
 heartbeat_url=$(env_value BACKUP_HEARTBEAT_URL)
 if [ -n "${BUNKER707_BACKUP_DIR:-}" ]; then backup_root="$BUNKER707_BACKUP_DIR"

@@ -10,6 +10,12 @@
 . "$(dirname -- "$0")/lib.sh"
 need HCLOUD_TOKEN; install_hcloud
 role="${1:-}"
+if [ "$PROVEDOR" = "netcup" ]; then
+    # netcup + Vultr (docs/20 §8D): sem API de servidores fixos; IPs das variaveis, SSH e as respostas publicas.
+    deploy_key
+    netcup_status
+    exit 0
+fi
 
 if [ "$role" = "meet" ]; then
     log "Servidor C ($MEET_NAME)"

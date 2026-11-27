@@ -333,6 +333,44 @@ jibri_cidrs() {
     printf '%s' "$JIBRI_CIDRS_CACHE"
 }
 jibri_cidrs_refresh() { unset JIBRI_CIDRS_CACHE; }
+# ---- o gravador por hora na Hetzner (jibri.sh); o provedor-netcup.sh troca estas pela Vultr ---------------
+gravador_nomes() { hzj server list --selector papel=jibri | jq -r '.[].name'; }
+gravador_campo() {  # gravador_campo NOME tipo|local|criado|status
+    local q
+    case "$2" in tipo) q='.server_type.name' ;; local) q='.location.name // .datacenter.location.name' ;; criado) q='.created' ;; status) q='.status' ;; *) die "gravador_campo: $2" ;; esac
+    hzj server describe "$1" | jq -r "$q"
+}
+# gravador_criar NOME USER_DATA: tenta JIBRI_TYPE e as reservas em cada local; GRAVADOR_TIPO e GRAVADOR_LOCAL com o que
+# nasceu. Volta 1 sem estoque em tipo algum; outra recusa da API para tudo.
+gravador_criar() {
+    local name="$1" ud="$2" t l
+    for t in $JIBRI_TYPE ${JIBRI_FALLBACK_TYPES:-}; do
+        for l in "$LOCATION" $FALLBACK_LOCATIONS; do
+            echo "  criando $name ($t) em $l..."
+            if hz server create --name "$name" --type "$t" --image ubuntu-24.04 --location "$l" \
+                --ssh-key "$SSH_KEY_NAME" --firewall "$(fw_name "$name")" --user-data-from-file "$ud" \
+                --label app=bunker707 --label papel=jibri --label sessao="$SESSAO" >/dev/null 2>"$WORK_DIR/create-$name.err"; then
+                GRAVADOR_TIPO="$t"; GRAVADOR_LOCAL="$l"; return 0
+            fi
+            if grep -qiE 'unavailable|not available|resource_limit|capacity' "$WORK_DIR/create-$name.err"; then
+                warn "$t indisponivel em $l: $(tr -d '\n' < "$WORK_DIR/create-$name.err" | cut -c1-160)"
+                continue
+            fi
+            cat "$WORK_DIR/create-$name.err" >&2
+            die "Falha ao criar $name."
+        done
+    done
+    return 1
+}
+gravador_ligar() { fw_apply "$1"; hz server poweron "$1" >/dev/null 2>&1 || true; }
+gravador_apagar() {  # o servidor e o firewall dele
+    hz server delete "$1" || return 1
+    hz firewall delete "$(fw_name "$1")" >/dev/null 2>&1 || warn "firewall $(fw_name "$1") nao apagado (apague no console da Hetzner)."
+}
+# Moeda dos precos que hourly_price devolve (a Vultr cobra em dolar).
+PRECO_MOEDA="EUR"
+# so_na_hetzner ETAPA: as etapas que dependem da API da Hetzner (snapshot, restaurar, plan) param com o PROVEDOR=netcup.
+so_na_hetzner() { :; }
 fw_name() { printf '%s-fw' "$1"; }
 fw_ensure() {  # fw_ensure SERVER_NAME
     local name; name=$(fw_name "$1")
@@ -575,7 +613,7 @@ cf_apply_dns_membros() {
     [ -n "${SKIP_MARKETING:-}" ] && subs="$subs ${MAUTIC_DOMAIN%%.*}"
     for sub in $subs; do
         cf_dns_upsert "$sub" A "$m4" true
-        [ -n "$m6" ] && cf_dns_upsert "$sub" AAAA "$m6" true
+        if [ -n "$m6" ]; then cf_dns_upsert "$sub" AAAA "$m6" true; else cf_dns_delete "$sub" AAAA; fi
     done
     return 0
 }
@@ -588,7 +626,7 @@ cf_apply_dns_marketing() {
     fi
     k4=$(server_ip4 "$MARKETING_NAME"); k6=$(server_ip6 "$MARKETING_NAME")
     cf_dns_upsert "${MAUTIC_DOMAIN%%.*}" A "$k4" true
-    [ -n "$k6" ] && cf_dns_upsert "${MAUTIC_DOMAIN%%.*}" AAAA "$k6" true
+    if [ -n "$k6" ]; then cf_dns_upsert "${MAUTIC_DOMAIN%%.*}" AAAA "$k6" true; else cf_dns_delete "${MAUTIC_DOMAIN%%.*}" AAAA; fi
     return 0
 }
 cf_zone_tls() {
@@ -621,7 +659,7 @@ cf_remove_dns() {
 cf_apply_dns_meet() {
     local ip4 ip6 sub; ip4=$(server_ip4 "$MEET_NAME"); ip6=$(server_ip6 "$MEET_NAME"); sub="${MEET_DOMAIN%%.*}"
     cf_dns_upsert "$sub" A "$ip4" false
-    [ -n "$ip6" ] && cf_dns_upsert "$sub" AAAA "$ip6" false
+    if [ -n "$ip6" ]; then cf_dns_upsert "$sub" AAAA "$ip6" false; else cf_dns_delete "$sub" AAAA; fi
     return 0
 }
 
@@ -870,3 +908,13 @@ hourly_price() {
 monthly_price() {
     hzj server-type describe "$1" 2>/dev/null | jq -r --arg l "$2" '.prices[]? | select(.location==$l) | (.price_monthly.net // .price_monthly.gross // empty)' 2>/dev/null | head -n1
 }
+
+# ---- provedor -------------------------------------------------------------------------------------------
+# PROVEDOR=netcup (variavel do repositorio ou opcao da etapa): servidores fixos na netcup, gravador na Vultr, backup no
+# Cloudflare R2 (docs/20 §8D). O padrao e a Hetzner, com tudo o que esta acima.
+PROVEDOR="${PROVEDOR:-hetzner}"
+case "$PROVEDOR" in
+    hetzner) ;;
+    netcup) . "$CLOUD_DIR/provedor-netcup.sh" ;;
+    *) die "PROVEDOR invalido: '$PROVEDOR' (hetzner ou netcup)." ;;
+esac

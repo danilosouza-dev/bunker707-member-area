@@ -21,7 +21,14 @@
 
 . "$(dirname -- "$0")/lib.sh"
 role="${1:-}"
-[ -z "$role" ] || [ "$role" = "meet" ] || [ "$role" = "licencas" ] || die "uso: provision.sh [meet|licencas]"
+[ -z "$role" ] || [ "$role" = "meet" ] || [ "$role" = "licencas" ] || [ "$role" = "preparar" ] || die "uso: provision.sh [meet|licencas|preparar]"
+if [ "$PROVEDOR" = "netcup" ] && [ "$role" != "preparar" ]; then
+    die "Com PROVEDOR=netcup os servidores sao contratados no painel da netcup: use a etapa preparar (docs/20 §8D)."
+fi
+if [ "$role" = "preparar" ]; then
+    [ "$PROVEDOR" = "netcup" ] || die "A etapa preparar e para servidores que ja existem (PROVEDOR=netcup, docs/20 §8D); na Hetzner e a provision."
+    [ "${CONFIRMADO:-}" = "sim" ] || die "preparar instala a base (Docker, ufw, fail2ban, restic) nos servidores da netcup e aponta o DNS para eles. O ufw e refeito do zero. Confirme com CONFIRMADO=sim (PAPEIS=membros,meet escolhe alguns)."
+fi
 if [ "$role" = "meet" ]; then
     [ "${CONFIRMADO:-}" = "sim" ] || die "provision-meet cria o servidor C do Jitsi (cobrado por mes a partir de agora). Confirme com CONFIRMADO=sim nas opcoes, depois do ok do produtor no chat (docs/20 §8B.2)."
 fi
@@ -87,6 +94,32 @@ install_backup_key() {
     rsh "root@$ip" "cat > /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox.pub && chown '$DEPLOY_USER:$DEPLOY_USER' /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox.pub" < "$key.pub"
     echo "  chave de backup instalada em ~$DEPLOY_USER/.ssh/id_ed25519_storagebox"
 }
+
+# ====== servidores que ja existem na netcup (preparar; docs/20 §8D) =======================================
+# Pre-requisito: o Ubuntu 24.04 instalado pelo painel da netcup com a chave publica da etapa chave-ssh no root.
+if [ "$role" = "preparar" ]; then
+    pub=$(deploy_public_key)
+    roles=$(guard_roles)
+    for r in $roles; do
+        name=$(role_server "$r"); ip=$(server_ip4 "$name")
+        log "Preparando $name ($ip): bootstrap por SSH como root"
+        bootstrap_server "$name"
+        case "$r" in membros|marketing) netcup_ufw_so_cloudflare "root@$ip" ;; esac
+        print_transfer_pub "$name"
+    done
+    log "DNS em $ZONE_NAME"
+    for r in $roles; do
+        case "$r" in
+            membros) cf_apply_dns_membros ;;
+            marketing) cf_apply_dns_marketing ;;
+            meet) cf_apply_dns_meet ;;
+        esac
+    done
+    cf_zone_tls
+    echo
+    echo "Pronto. Proximo: deploy-membros, deploy-meet e deploy-marketing (da main); a sala e o Mautic refazem as regras do ufw deles no deploy."
+    exit 0
+fi
 
 # ====== servidor do Emissor de licencas (provision-licencas) =============================================
 if [ "$role" = "licencas" ]; then

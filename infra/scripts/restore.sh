@@ -32,6 +32,11 @@ done
 if [ -z "${RESTIC_REPOSITORY:-}" ] && [ -f "$ENV_FILE" ]; then
     RESTIC_REPOSITORY=$(env_value RESTIC_REPOSITORY)
     RESTIC_PASSWORD=$(env_value RESTIC_PASSWORD)
+    # Repositorio S3 (Cloudflare R2, docs/20 §8D): as chaves do token do R2 ficam no mesmo .env.
+    if [ -z "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "$(env_value AWS_ACCESS_KEY_ID)" ]; then
+        AWS_ACCESS_KEY_ID=$(env_value AWS_ACCESS_KEY_ID); AWS_SECRET_ACCESS_KEY=$(env_value AWS_SECRET_ACCESS_KEY)
+        export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+    fi
 fi
 # A senha pode vir de um arquivo (RESTIC_PASSWORD_FILE): e assim que o kit passa a chave de recuperacao digitada
 # (infra/kit/restaurar.sh), sem ela entrar no ambiente.

@@ -55,6 +55,8 @@ if [ "$role" = "membros" ]; then
     fi
     [ -n "$sb_user" ] && { set_env "$target" "$envf" STORAGE_BOX_USER "$sb_user"; set_env "$target" "$envf" STORAGE_BOX_HOST "$sb_host"; }
     fix_restic_path "$envf"
+    # netcup (docs/20 §8D): o backup vai para o Cloudflare R2, nao para o Storage Box.
+    [ "$PROVEDOR" != "netcup" ] || netcup_backup_r2 "$target" "$envf" restic
     [ -n "${SKIP_MARKETING:-}" ] && set_env "$target" "$envf" MAUTIC_SITE_ADDRESS "$MAUTIC_DOMAIN"
     # Studio so para o produtor: PRODUCER_IP nas opcoes atualiza a allowlist a qualquer momento.
     [ -n "$PRODUCER_IP" ] && set_env "$target" "$envf" STUDIO_ALLOWED_IPS "$(cidr_or_empty "$PRODUCER_IP")"
@@ -130,7 +132,13 @@ elif [ "$role" = "meet" ]; then
     jvb_port=$(get_env "$target" "$envf" JVB_PORT); jvb_port="${jvb_port:-10000}"
     log "Pastas dos volumes (uid 1000) e portas no ufw: UDP $jvb_port (midia) e TCP 5222 (so o Jibri; o firewall da Hetzner limita a origem)"
     remote "bash infra/jitsi/scripts/volumes.sh"
-    remote "sudo ufw route allow proto udp from any to any port $jvb_port comment 'JVB midia' >/dev/null && sudo ufw route allow proto tcp from any to any port 5222 comment 'XMPP so do Jibri' >/dev/null"
+    if [ "$PROVEDOR" = "netcup" ]; then
+        # Sem o firewall da Hetzner na frente, a 5222 no ufw e so dos gravadores vivos (lista da Vultr, docs/20 §8D).
+        remote "sudo ufw route allow proto udp from any to any port $jvb_port comment 'JVB midia' >/dev/null"
+        fw_ensure "$MEET_NAME"
+    else
+        remote "sudo ufw route allow proto udp from any to any port $jvb_port comment 'JVB midia' >/dev/null && sudo ufw route allow proto tcp from any to any port 5222 comment 'XMPP so do Jibri' >/dev/null"
+    fi
     if remote "$jitsi_compose ps -q web 2>/dev/null | grep -q ."; then
         # Stack ja no ar: recriar containers (imagem ou configuracao nova) derruba quem esta na sala.
         [ "${SEM_LIVE_2H:-}" = "sim" ] || die "O Jitsi ja esta no ar em $server. Um novo deploy-meet recria containers e derruba a sala: confirme que nao ha live nas proximas 2 h com SEM_LIVE_2H=sim nas opcoes (docs/20 §8B.6)."
@@ -165,6 +173,7 @@ else
     fi
     [ -n "$sb_user" ] && { set_env "$target" "$envf" STORAGE_BOX_USER "$sb_user"; set_env "$target" "$envf" STORAGE_BOX_HOST "$sb_host"; }
     fix_restic_path "$envf"
+    [ "$PROVEDOR" != "netcup" ] || netcup_backup_r2 "$target" "$envf" restic-mautic
     log "Stack do Mautic: imagens, compose up, instalacao, smoke"
     if [ -n "${SKIP_MARKETING:-}" ]; then
         remote "docker compose -f infra/mautic/docker-compose.yml -f infra/mautic/compose.colocado.yml pull --quiet && docker compose -f infra/mautic/docker-compose.yml -f infra/mautic/compose.colocado.yml up -d && docker compose -f infra/compose/docker-compose.yml up -d caddy"
