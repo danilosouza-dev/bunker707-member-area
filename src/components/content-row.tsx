@@ -306,9 +306,13 @@ export function CourseModulesHomeSection({
   const releaseNotice = getReleaseRuleNotice(course.releaseRule, course.kind.toLowerCase(), course.releaseState);
   const isReleaseLocked = Boolean(releaseNotice?.isLocked);
   const isCourseLocked = Boolean(course.isLocked || isReleaseLocked);
-  const actionLabel = course.isLocked ? course.purchaseLabel ?? "Comprar" : isReleaseLocked ? "Bloqueado" : "Acessar";
-  const CourseActionIcon = course.status === "Em breve" || isReleaseLocked ? Bell : course.isLocked ? ShoppingCart : Play;
-  const courseActionClassName = course.isLocked
+  // Curso vencido sem link de compra: fechado so com a frase (o botao abre os detalhes).
+  const endedWithoutPurchase = Boolean(course.isLocked && course.accessEndedLabel && !course.purchaseUrl);
+  const actionLabel = endedWithoutPurchase ? "Detalhes" : course.isLocked ? course.purchaseLabel ?? "Comprar" : isReleaseLocked ? "Bloqueado" : "Acessar";
+  const CourseActionIcon = endedWithoutPurchase ? Lock : course.status === "Em breve" || isReleaseLocked ? Bell : course.isLocked ? ShoppingCart : Play;
+  const courseActionClassName = endedWithoutPurchase
+    ? "bg-white/15 text-white hover:bg-white/20"
+    : course.isLocked
     ? "bg-emerald-600 text-white shadow-[0_18px_42px_rgba(5,150,105,0.32)] hover:bg-emerald-500"
     : isReleaseLocked
       ? "bg-white/15 text-white hover:bg-white/20"
@@ -386,7 +390,11 @@ export function CourseModulesHomeSection({
             <h2 className="mt-1 line-clamp-2 text-xl font-medium leading-tight text-white sm:text-2xl">
               {title}
             </h2>
-            {isReleaseLocked ? (
+            {course.isLocked && course.accessEndedLabel ? (
+              <p className="mt-2 line-clamp-2 max-w-md text-xs font-bold leading-5 text-orange-200" data-access-ended="">
+                {course.accessEndedLabel}
+              </p>
+            ) : isReleaseLocked ? (
               <p className="mt-2 line-clamp-2 max-w-md text-xs font-semibold leading-5 text-zinc-400" suppressHydrationWarning>
                 {releaseNotice?.detail ?? "Disponível de acordo com a regra de entrega."}
               </p>

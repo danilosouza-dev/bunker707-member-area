@@ -2,6 +2,7 @@
 // de cada plataforma, mascara do e-mail do comprador, endereco do webhook e o resumo para o hub.
 // Sem "server-only" e sem React: a tela e tests/vendas-hotmart.test.mjs carregam direto.
 
+import { normalizeAccessTerm, replaySaleTerms, sameAccessEnd, type AccessBeforeSale, type SaleTermStep } from "../access/access-term";
 import type { NormalizedSaleType, SalesProvider } from "./types";
 
 export const SALES_PROVIDER_LABELS: Record<SalesProvider, string> = {
@@ -204,7 +205,12 @@ export type SaleGrantLike = {
   created_at: string;
   opened: boolean;
   previous_ends_at: string | null;
+  /** Data da compra aprovada, de onde o prazo conta (migracao 202611280001). Ausente ou nula: vale created_at. */
+  purchased_at?: string | null;
   subscription_code: string | null;
+  /** Prazo que a venda deu neste acesso. Os dois ausentes ou nulos = para sempre (toda venda antiga). */
+  term_amount?: number | null;
+  term_unit?: string | null;
   transaction_id: string;
 };
 
@@ -215,8 +221,12 @@ export type EntitlementAfterSaleDecision =
   | { kind: "keep_team" }
   /** As vendas so estenderam um acesso de outra origem sem prazo: nada a desfazer. */
   | { kind: "keep_other_origin" }
-  /** As vendas so estenderam um acesso de outra origem que tinha prazo: o prazo volta. */
-  | { kind: "restore_deadline"; endsAt: string }
+  /**
+   * O termino de antes volta e o acesso continua: as vendas so tinham estendido um acesso de outra origem
+   * que tinha prazo, ou a venda desfeita tinha somado prazo e outra compra paga ainda sustenta o acesso
+   * (a conta e refeita so com as compras que sobraram). `null` = volta a ser para sempre.
+   */
+  | { kind: "restore_deadline"; endsAt: string | null }
   /** Uma venda abriu o acesso e nada mais o sustenta: fecha (revoga ou suspende). */
   | { kind: "close" };
 
@@ -230,7 +240,11 @@ export type EntitlementAfterSaleDecision =
  * 3. senao, manda o vinculo mais antigo: se ele abriu o acesso e a origem ainda e a plataforma, fecha;
  *    se so estendeu um acesso de outra origem com prazo, devolve esse prazo; se estendeu um acesso de
  *    outra origem sem prazo, fica. Cobrancas de uma assinatura nao se sustentam entre si: a renovacao
- *    reembolsada fecha o acesso que a primeira cobranca abriu, mas nunca o que a equipe deu.
+ *    reembolsada fecha o acesso que a primeira cobranca abriu, mas nunca o que a equipe deu;
+ * 4. prazo (migracao 202611280001): quando outra compra sustenta o acesso e a venda desfeita tinha somado
+ *    prazo, a conta do termino e refeita so com as compras que sobraram (replaySaleTerms), a partir do que
+ *    o aluno tinha antes da primeira venda. So mexe quando o termino gravado e o que as vendas explicam:
+ *    se alguem mudou a data depois (a equipe), fica como esta. Sem `rowEndsAt`, a regra do prazo nao roda.
  */
 export function decideEntitlementAfterSale(input: {
   /** Assinaturas que o evento desfaz (codigo do evento e das transacoes desfeitas). */
@@ -241,6 +255,8 @@ export function decideEntitlementAfterSale(input: {
   eventProvider: string;
   /** Todos os vinculos deste acesso, em qualquer situacao. */
   grants: readonly SaleGrantLike[];
+  /** Termino gravado no acesso agora (entitlements.ends_at; `null` = para sempre). */
+  rowEndsAt?: string | null;
   /** Origem atual do acesso (entitlements.source_provider). */
   rowSourceProvider: string;
 }): EntitlementAfterSaleDecision {
@@ -261,21 +277,67 @@ export function decideEntitlementAfterSale(input: {
     }
   }
 
-  const sustaining = live.some(
+  const sustaining = live.filter(
     (grant) => !isClosing(grant) && grant.closed_at === null && (grant.subscription_code === null || !closingSubscriptions.has(grant.subscription_code))
   );
-
-  if (sustaining) {
-    return { kind: "keep_sustained" };
-  }
-
   const oldest = [...live].sort((left, right) => Date.parse(left.created_at) - Date.parse(right.created_at))[0];
+
+  if (sustaining.length > 0) {
+    return input.rowEndsAt === undefined ? { kind: "keep_sustained" } : sustainedDeadline({ isClosing, live, oldest, rowEndsAt: input.rowEndsAt, sustaining });
+  }
 
   if (oldest.opened) {
     return input.rowSourceProvider === input.eventProvider ? { kind: "close" } : { kind: "keep_team" };
   }
 
   return oldest.previous_ends_at !== null ? { endsAt: oldest.previous_ends_at, kind: "restore_deadline" } : { kind: "keep_other_origin" };
+}
+
+function saleTermStepOf(grant: SaleGrantLike): SaleTermStep {
+  return { purchasedAt: Date.parse(grant.purchased_at ?? grant.created_at), term: normalizeAccessTerm(grant.term_unit, grant.term_amount) };
+}
+
+/**
+ * Outra compra sustenta o acesso: o termino precisa voltar? Refaz a conta com as compras que sobraram e
+ * compara com o que esta gravado.
+ */
+function sustainedDeadline(input: {
+  isClosing: (grant: SaleGrantLike) => boolean;
+  live: readonly SaleGrantLike[];
+  oldest: SaleGrantLike;
+  rowEndsAt: string | null;
+  sustaining: readonly SaleGrantLike[];
+}): EntitlementAfterSaleDecision {
+  const base: AccessBeforeSale = input.oldest.opened ? { open: false } : { endsAt: input.oldest.previous_ends_at, open: true };
+  const target = replaySaleTerms(base, input.sustaining.map(saleTermStepOf)).endsAt;
+
+  // Nada a devolver (a venda desfeita nao tinha mudado o termino), ou ja devolvido numa tentativa anterior.
+  if (sameAccessEnd(input.rowEndsAt, target)) {
+    return { kind: "keep_sustained" };
+  }
+
+  // As vendas que valiam ate este evento: as abertas e as que ele desfaz.
+  const applied = input.live.filter((grant) => grant.closed_at === null || input.isClosing(grant));
+
+  if (sameAccessEnd(input.rowEndsAt, replaySaleTerms(base, applied.map(saleTermStepOf)).endsAt)) {
+    return { endsAt: target, kind: "restore_deadline" };
+  }
+
+  // O termino gravado nao e o que as vendas explicam (a equipe mudou a data no meio). Se as vendas desfeitas
+  // sao as mais novas e a primeira delas guardou o termino de antes, e ele que volta; senao, fica como esta.
+  const closing = applied.filter(input.isClosing).map((grant) => ({ grant, step: saleTermStepOf(grant) })).sort((left, right) => left.step.purchasedAt - right.step.purchasedAt);
+  const newestSustaining = Math.max(...input.sustaining.map((grant) => saleTermStepOf(grant).purchasedAt));
+  const first = closing[0]?.grant;
+
+  if (first && !first.opened && closing.every((item) => item.step.purchasedAt > newestSustaining)) {
+    const afterClosing = replaySaleTerms({ endsAt: first.previous_ends_at, open: true }, closing.map((item) => item.step)).endsAt;
+
+    if (sameAccessEnd(input.rowEndsAt, afterClosing) && !sameAccessEnd(input.rowEndsAt, first.previous_ends_at)) {
+      return { endsAt: first.previous_ends_at, kind: "restore_deadline" };
+    }
+  }
+
+  return { kind: "keep_sustained" };
 }
 
 /** Texto de "Precisa de atencao" enquanto houver venda com erro ou presa aguardando reprocesso. */

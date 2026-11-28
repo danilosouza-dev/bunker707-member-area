@@ -91,9 +91,13 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
   const releaseNotice = getReleaseRuleNotice(item.releaseRule, item.kind.toLowerCase(), item.releaseState);
   const isReleaseLocked = Boolean(releaseNotice?.isLocked);
   const isLocked = Boolean(item.isLocked || isReleaseLocked);
-  const actionLabel = item.isLocked ? item.purchaseLabel ?? "Comprar" : isReleaseLocked ? "Bloqueado" : "Acessar";
-  const ActionIcon = item.status === "Em breve" || isReleaseLocked ? Bell : item.isLocked ? ShoppingCart : Play;
-  const actionClass = item.isLocked
+  // Curso vencido sem link de compra: fechado so com a frase (o botao abre os detalhes, nao oferece compra).
+  const endedWithoutPurchase = Boolean(item.isLocked && item.accessEndedLabel && !item.purchaseUrl);
+  const actionLabel = endedWithoutPurchase ? "Detalhes" : item.isLocked ? item.purchaseLabel ?? "Comprar" : isReleaseLocked ? "Bloqueado" : "Acessar";
+  const ActionIcon = endedWithoutPurchase ? Lock : item.status === "Em breve" || isReleaseLocked ? Bell : item.isLocked ? ShoppingCart : Play;
+  const actionClass = endedWithoutPurchase
+    ? "bg-white/15 text-white hover:bg-white/20"
+    : item.isLocked
     ? "bg-emerald-600 text-white shadow-[0_18px_42px_rgba(5,150,105,0.32)] hover:bg-emerald-500"
     : isReleaseLocked
       ? "bg-white/15 text-white hover:bg-white/20"
@@ -248,7 +252,11 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
             : "absolute inset-0 grid place-items-center p-5 text-center"
           }>
             <h3 className="line-clamp-2 text-[13px] font-bold leading-tight text-white drop-shadow sm:text-sm lg:text-base">{item.title}</h3>
-            {hasCover ? <p className="mt-1.5 line-clamp-2 text-[11px] leading-4 text-zinc-200 drop-shadow sm:mt-2 sm:line-clamp-3 sm:text-xs sm:leading-[1.125rem]">{description}</p> : null}
+            {item.isLocked && item.accessEndedLabel ? (
+              <p className="mt-1.5 line-clamp-2 text-[11px] font-bold leading-4 text-orange-200 drop-shadow sm:mt-2 sm:text-xs sm:leading-[1.125rem]" data-access-ended="">
+                {item.accessEndedLabel}
+              </p>
+            ) : hasCover ? <p className="mt-1.5 line-clamp-2 text-[11px] leading-4 text-zinc-200 drop-shadow sm:mt-2 sm:line-clamp-3 sm:text-xs sm:leading-[1.125rem]">{description}</p> : null}
             {hasCover ? <div className="mt-2 flex items-center gap-1.5 sm:mt-2.5 sm:gap-2 lg:mt-3">
               <button
                 className={`${cardActionClassName} ${actionClass}`}

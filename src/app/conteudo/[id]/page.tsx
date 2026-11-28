@@ -14,6 +14,7 @@ import { HeroGlow } from "@/components/member/hero-glow";
 import { HeroVideo } from "@/components/hero-video";
 import { heroVideoPosterOf, heroVideoSourceOf } from "@/lib/hero-video";
 import { ContentStructureSection } from "@/components/content-structure-section";
+import { AccessEndedNotice } from "@/components/member/access-ended-notice";
 import { MemberFooter } from "@/components/member-footer";
 import { normalizeAccessPreviewMode, withAccessPreviewParam } from "@/lib/access-preview";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
@@ -300,7 +301,7 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
                   {isLocked ? (
                     <span className="inline-flex min-h-12 items-center gap-2 rounded-[8px] border border-white/15 bg-black/35 px-4 py-3 text-sm font-bold text-zinc-200">
                       <Lock className="h-4 w-4" />
-                      Acesso pendente
+                      {item.accessEndedLabel ?? "Acesso pendente"}
                     </span>
                   ) : null}
                 </div>
@@ -311,6 +312,16 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
         </div>
 
         <div className="relative z-20 mt-[var(--member-page-overlap)]">
+          {/* Curso vencido: fechado, com a data do termino e o botao de compra quando ha link. */}
+          {isLocked && item.accessEndedLabel ? (
+            <AccessEndedNotice
+              contentId={item.id}
+              label={item.accessEndedLabel}
+              purchaseLabel={item.purchaseLabel}
+              purchaseTarget={item.purchaseTarget}
+              purchaseUrl={item.purchaseUrl}
+            />
+          ) : null}
           <ContentStructureSection
             accessPreviewMode={accessPreviewMode}
             formationCourseOpenMode={formationCourseOpenMode}

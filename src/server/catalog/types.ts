@@ -12,6 +12,7 @@
 
 import type { z } from "zod";
 import type { ActionResult } from "@/lib/action-result";
+import type { AccessTerm } from "@/server/access/access-term";
 import type { HeroVideoOptions, LessonVideoConfig, LessonVideoProvider } from "@/lib/platform-types";
 import type { VideoDetection } from "@/lib/video-detect";
 import type {
@@ -264,19 +265,26 @@ export type ProductAccess = {
   purchaseTarget: "same_tab" | "new_tab";
   purchaseUrl: string | null;
   release: ReleasePhrase;
+  /** Prazo de acesso de quem compra o produto sozinho pelos codigos acima; `null` = para sempre. */
+  saleAccessTerm: AccessTerm | null;
   studentsWithAccess: number;
   /** Codigo do produto na Ticto; mesma regra, para vendas pela Ticto. */
   tictoProductId: string | null;
 };
 
 export type ComboListItem = {
+  /** O pacote inclui "Todas as formações (as de hoje e as que vierem)". */
+  allFormations: boolean;
+  /** Prazo do item "todas as formacoes"; `null` = para sempre. */
+  allFormationsTerm: AccessTerm | null;
   cohortName: string;
   description: string;
   /** Codigo do pacote na Hotmart; a venda aprovada com esse codigo libera todos os produtos. */
   hotmartProductId: string | null;
   id: string;
   name: string;
-  products: { accent: ProductAccent; coverUrl: string | null; id: string; title: string }[];
+  /** Cada produto com o prazo dele dentro do pacote (`accessTerm` nulo = para sempre). */
+  products: { accent: ProductAccent; accessTerm: AccessTerm | null; coverUrl: string | null; id: string; title: string }[];
   status: "active" | "draft" | "paused";
   /** Codigo do pacote na Ticto; mesma regra, para vendas pela Ticto. */
   tictoProductId: string | null;

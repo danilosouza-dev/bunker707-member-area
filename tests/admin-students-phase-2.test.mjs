@@ -131,7 +131,7 @@ test("importacao: deteccao de colunas, produtos por titulo (ambiguo = erro), pr�
   assert.ok(preview[2].errors.some((error) => /repetido na linha 1/.test(error)));
   assert.ok(preview[2].errors.some((error) => /turma “Turma 9” não existe/.test(error)));
   assert.equal(preview[3].ok, false);
-  assert.match(importModel.importTemplateCsv(), /^﻿Nome;E-mail;Telefone;Produtos;Turma\r\n/);
+  assert.match(importModel.importTemplateCsv(), /^﻿Nome;E-mail;Telefone;Produtos;Turma;Término\r\n/);
 });
 
 test("exportacao: colunas da §1.7.4 e celulas na mesma ordem", () => {

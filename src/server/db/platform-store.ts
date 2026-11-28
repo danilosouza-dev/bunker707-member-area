@@ -25,6 +25,8 @@ import {
   type MemberLibraryModule
 } from "@/lib/member-library";
 import { getSavedItemKey, getSavedTargetTypeForContentKind, savedItemCollectionLabel } from "@/lib/saved-items";
+import { accessEndedLabel } from "@/server/access/access-term";
+import { isListedInStorefront } from "@/server/catalog/model";
 import {
   canOpenProductPage,
   itemsVisibleTo,
@@ -1114,16 +1116,58 @@ function isActiveEntitlement(entitlement: AccessEntitlementRecord) {
   return entitlement.status === "active" && isActiveAccessWindow(entitlement.startsAt, entitlement.endsAt);
 }
 
+/**
+ * As chaves de acesso aberto do aluno e, a parte, os acessos que VENCERAM (`ended`: chave -> termino). O
+ * vencido nao libera nada: so serve para o curso continuar aparecendo, fechado, com "Seu acesso terminou em
+ * dd/mm/aaaa" e o botao de compra (docs/05, "Prazo de acesso por curso"). Acesso revogado ou suspenso
+ * (reembolso, equipe) nao entra: ai o curso volta a ser so um produto que o aluno nao tem.
+ */
+class UserAccessKeys extends Set<string> {
+  readonly ended = new Map<string, string>();
+}
+
+/** Acesso que acabou pelo prazo: ativo (ou marcado como expirado) com a data de termino no passado. */
+function endedAtOf(entitlement: AccessEntitlementRecord, now: number) {
+  if (entitlement.status !== "active" && entitlement.status !== "expired") {
+    return null;
+  }
+
+  const endsAt = parseAccessDateValue(entitlement.endsAt);
+
+  return endsAt && endsAt.getTime() < now ? endsAt.toISOString() : null;
+}
+
 /** Entitlements sao a unica fonte de autorizacao (AGENTS.md): nada mais libera conteudo fechado. */
 function getUserAccessKeys(database: PlatformDatabase, user?: SessionUser | string) {
   const { userId } = getUserIdentity(user);
-  const accessKeys = new Set<string>();
+  const accessKeys = new UserAccessKeys();
 
   if (userId) {
+    const now = Date.now();
+
     for (const entitlement of database.accessEntitlements) {
-      if (entitlement.userId === userId && isActiveEntitlement(entitlement)) {
-        accessKeys.add(getAccessTargetKey(entitlement.targetType, entitlement.targetId));
+      if (entitlement.userId !== userId) {
+        continue;
       }
+
+      const key = getAccessTargetKey(entitlement.targetType, entitlement.targetId);
+
+      if (isActiveEntitlement(entitlement)) {
+        accessKeys.add(key);
+        continue;
+      }
+
+      const endedAt = endedAtOf(entitlement, now);
+      const known = accessKeys.ended.get(key);
+
+      if (endedAt && (!known || Date.parse(endedAt) > Date.parse(known))) {
+        accessKeys.ended.set(key, endedAt);
+      }
+    }
+
+    // Quem tem o mesmo produto aberto por outro acesso nao esta com ele vencido.
+    for (const key of accessKeys) {
+      accessKeys.ended.delete(key);
     }
   }
 
@@ -1160,6 +1204,34 @@ function hasUserEntitlementForItem(item: ContentItem, userAccessKeys: Set<string
   return false;
 }
 
+/**
+ * Quando o acesso do aluno a este item venceu (ISO), ou undefined: o proprio produto ou, no curso interno, a
+ * formacao que o inclui. So para quem nao tem o item aberto por outro caminho.
+ */
+function getAccessEndedAt(item: ContentItem, userAccessKeys: Set<string>) {
+  if (!(userAccessKeys instanceof UserAccessKeys) || userAccessKeys.ended.size === 0 || hasUserEntitlementForItem(item, userAccessKeys)) {
+    return undefined;
+  }
+
+  const own = userAccessKeys.ended.get(getAccessTargetKey(getTargetType(item.kind), item.id));
+
+  if (own) {
+    return own;
+  }
+
+  return item.commerceScope === "included_content" && item.parentContentId
+    ? userAccessKeys.ended.get(getAccessTargetKey("formation", item.parentContentId))
+    : undefined;
+}
+
+/**
+ * O aluno pode ver o item nas listas com curadoria e na pagina do produto mesmo quando ele esta "Oculto por
+ * enquanto": tem acesso, ou teve e o prazo venceu (o curso vencido continua aparecendo, fechado).
+ */
+function hasOrHadPurchaseAccess(item: ContentItem, accessPreviewMode?: AccessPreviewMode, userAccessKeys = new Set<string>()) {
+  return hasPurchaseAccess(item, accessPreviewMode, userAccessKeys) || (!accessPreviewMode && Boolean(getAccessEndedAt(item, userAccessKeys)));
+}
+
 function hasPurchaseAccess(
   item: ContentItem,
   accessPreviewMode?: AccessPreviewMode,
@@ -1191,9 +1263,12 @@ function applyAccessPreviewToItem(
   const isPreviewingUnlocked =
     (accessPreviewMode === "producer" || accessPreviewMode === "student_with_access") && isClosed;
   const isUnlockedForUser = hasUserEntitlementForItem(item, userAccessKeys) && isClosed;
+  // Curso vencido: fechado como qualquer produto sem acesso, com a frase e a data do termino.
+  const accessEndedAt = isPurchaseLocked && !accessPreviewMode ? getAccessEndedAt(item, userAccessKeys) : undefined;
 
   return {
     ...item,
+    ...(accessEndedAt ? { accessEndedAt, accessEndedLabel: accessEndedLabel(accessEndedAt) } : {}),
     accessLabel: isPreviewingUnlocked || isUnlockedForUser ? "Comprado" : item.accessLabel,
     isLocked: isPurchaseLocked || undefined,
     purchaseLabel: isPurchaseLocked ? item.purchaseLabel ?? "Comprar" : item.purchaseLabel,
@@ -1625,8 +1700,14 @@ function getProductsAvailableForSale(
   accessPreviewMode?: AccessPreviewMode,
   userAccessKeys = new Set<string>()
 ) {
-  // "Oculto por enquanto" nunca e oferecido para compra (itemsAvailableForSale em storefront-listing.ts).
-  return onlyListedItems(getSellableItems(database))
+  // "Oculto por enquanto" nunca e oferecido para compra (itemsAvailableForSale em storefront-listing.ts), com uma
+  // excecao: o curso que o aluno ja teve e venceu continua aparecendo para ele, fechado, com a data do termino.
+  const listed = onlyListedItems(getSellableItems(database));
+  const endedHidden = accessPreviewMode
+    ? []
+    : getSellableItems(database).filter((item) => !isListedInStorefront(item) && Boolean(getAccessEndedAt(item, userAccessKeys)));
+
+  return [...listed, ...endedHidden]
     .filter((item) => !hasPurchaseAccess(item, accessPreviewMode, userAccessKeys))
     .map((item) => applyAccessPreviewToItem(item, accessPreviewMode, userAccessKeys));
 }
@@ -1900,7 +1981,7 @@ function resolveConfiguredHomeRows(
   const sellableItems = getSellableItems(database);
   const sellableById = new Map(sellableItems.map((item) => [item.id, item]));
   // "Oculto por enquanto": fora da vitrine; em listas com curadoria, so para quem tem acesso.
-  const canSeeHidden = (item: ContentItem) => hasPurchaseAccess(item, accessPreviewMode, userAccessKeys);
+  const canSeeHidden = (item: ContentItem) => hasOrHadPurchaseAccess(item, accessPreviewMode, userAccessKeys);
   // "Quem pode ver": no "ver como", o modo escolhido; para quem entra de verdade, ter algum acesso ativo e "ja comprou".
   const viewer = homeRowViewerOf(accessPreviewMode, userAccessKeys.size > 0);
 
@@ -2047,7 +2128,7 @@ function getHomeModalStructures(
             applyAccessPreviewToItems(
               itemsVisibleTo(
                 database.formationInternalCourses.filter((course) => course.parentContentId === item.id),
-                (course) => hasPurchaseAccess(course, accessPreviewMode, userAccessKeys)
+                (course) => hasOrHadPurchaseAccess(course, accessPreviewMode, userAccessKeys)
               ),
               accessPreviewMode,
               userAccessKeys
@@ -2568,8 +2649,8 @@ export async function getContentPageData(
   const savedItems = getSavedItemSet(database, userId);
   const userAccessKeys = getUserAccessKeys(database, user);
 
-  // "Oculto por enquanto" sem acesso responde como inexistente.
-  if (!item || !canOpenProductPage(item, hasPurchaseAccess(item, accessPreviewMode, userAccessKeys))) {
+  // "Oculto por enquanto" sem acesso responde como inexistente; quem teve e venceu ve a pagina fechada.
+  if (!item || !canOpenProductPage(item, hasOrHadPurchaseAccess(item, accessPreviewMode, userAccessKeys))) {
     return null;
   }
 
@@ -2594,7 +2675,7 @@ export async function getContentPageData(
           item.kind === "Formacao"
             ? database.formationInternalCourses.filter((course) => course.parentContentId === item.id)
             : database.formationInternalCourses,
-          (course) => hasPurchaseAccess(course, accessPreviewMode, userAccessKeys)
+          (course) => hasOrHadPurchaseAccess(course, accessPreviewMode, userAccessKeys)
         ),
         accessPreviewMode,
         userAccessKeys

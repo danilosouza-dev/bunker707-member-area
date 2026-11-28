@@ -40,8 +40,10 @@ export default async function LessonPage({ params, searchParams }: LessonPagePro
   // A aula conta como visita a pagina do produto (docs/23 §5.2), antes de qualquer redirect.
   await trackMemberPageVisit({ accessPreviewMode, pageKey: contentPageKey(lessonPageData.item.id), userId: user.id });
 
+  // Sem acesso, a aula nunca abre. Curso vencido volta para a pagina dele, que mostra a data do termino e o
+  // botao de compra; os demais casos voltam para a Home.
   if (lessonPageData.item.isLocked) {
-    redirect("/");
+    redirect(lessonPageData.item.accessEndedLabel ? `/conteudo/${lessonPageData.item.id}` : "/");
   }
 
   const { allModules, initialLessonReactions, initialLessonWatchStates, item, returnContent, selectedModule } = lessonPageData;

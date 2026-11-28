@@ -175,7 +175,7 @@ test("tick route authenticates first, bounds the body and records job_runs", () 
   // §11.3; nada no modo off), as vendas guardadas (docs/32 §2.2; nada no modo off), a venda do Bunker Members que vira
   // Licenca (docs/32 §11.10; nada sem a API interna do Emissor) e, por ultimo, a limpeza diaria dos arquivos da
   // Comunicacao sem uso (usa so o que sobra do tick).
-  assert.match(registrySource, /export const jobRegistry: readonly Job\[\] = \[emailOutboxJob, communicationsJob, webinarSessionsJob, webinarSimulationSummariesJob, webinarRemindersJob, webinarRecordingsJob, webinarOfferConversionsJob, licenseCheckInJob, heldSalesJob, licenseSalesJob, communicationMediaJob\];/);
+  assert.match(registrySource, /export const jobRegistry: readonly Job\[\] = \[emailOutboxJob, communicationsJob, webinarSessionsJob, webinarSimulationSummariesJob, webinarRemindersJob, webinarRecordingsJob, webinarOfferConversionsJob, licenseCheckInJob, heldSalesJob, licenseSalesJob, allFormationsJob, communicationMediaJob\];/);
   assert.match(jobRunsSource, /\.from\("job_runs"\)/);
 });
 

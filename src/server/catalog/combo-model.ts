@@ -2,6 +2,7 @@
 // (./combos.ts) usa para mapear as linhas do banco, a tela usa para rotular e montar
 // o formulario, e tests/admin-combos.test.mjs carrega direto pelo Node.
 
+import { accessTermLabel, normalizeAccessTerm, sameAccessTerm, type AccessTerm } from "../access/access-term";
 import type { ComboListItem, ProductOption } from "./types";
 import {
   formatFromKind,
@@ -14,6 +15,10 @@ import {
  * ---------------------------------------------------------------------------------------------- */
 
 export type ComboRow = {
+  /** O item "todas as formacoes" e o prazo dele (migracao 202611280001); ausentes = pacote sem o item. */
+  all_formations?: boolean | null;
+  all_formations_amount?: number | null;
+  all_formations_unit?: string | null;
   cohort_name: string | null;
   description: string | null;
   id: string;
@@ -22,7 +27,8 @@ export type ComboRow = {
   updated_at: string | null;
 };
 
-export type ComboItemRow = { combo_id: string; product_id: string; sort_order: number | null };
+/** `access_unit`/`access_amount`: o prazo do produto dentro do pacote; ausentes ou nulos = para sempre. */
+export type ComboItemRow = { access_amount?: number | null; access_unit?: string | null; combo_id: string; product_id: string; sort_order: number | null };
 
 export type ComboProductRow = {
   id: string;
@@ -52,7 +58,7 @@ export const COMBO_STATUS_LABELS: Record<ComboStatus, string> = {
 
 /** Efeito de cada situacao, em uma frase (aparece abaixo das pilulas). */
 export const COMBO_STATUS_HINTS: Record<ComboStatus, string> = {
-  active: "Vendas deste pacote liberam todos os produtos dele.",
+  active: "Vendas deste pacote liberam todos os produtos dele, cada um com o prazo escolhido.",
   draft: "Ainda em montagem: vendas deste pacote não liberam nada.",
   paused: "Vendas novas deste pacote não liberam nada até você reativar."
 };
@@ -106,6 +112,8 @@ export function mapComboRows(input: {
       const items = (itemsByCombo.get(combo.id) ?? []).slice().sort((left, right) => (left.sort_order ?? 0) - (right.sort_order ?? 0));
 
       return {
+        allFormations: combo.all_formations === true,
+        allFormationsTerm: combo.all_formations === true ? normalizeAccessTerm(combo.all_formations_unit, combo.all_formations_amount) : null,
         cohortName: combo.cohort_name?.trim() || DEFAULT_COHORT_NAME,
         description: combo.description ?? "",
         hotmartProductId: hotmartByCombo.get(combo.id) ?? null,
@@ -118,6 +126,7 @@ export function mapComboRows(input: {
             ? [
                 {
                   accent: resolveProductAccent(product.id, accentById.get(product.id)),
+                  accessTerm: normalizeAccessTerm(item.access_unit, item.access_amount),
                   coverUrl: product.image?.trim() ? product.image.trim() : null,
                   id: product.id,
                   title: product.title
@@ -162,47 +171,122 @@ export function mapComboProductOptions(products: readonly ComboProductRow[], acc
  * ---------------------------------------------------------------------------------------------- */
 
 export type ComboFormState = {
+  /** O item especial "Todas as formações (as de hoje e as que vierem)". */
+  allFormations: boolean;
+  /** Prazo do item "todas as formacoes"; `null` = para sempre. */
+  allFormationsTerm: AccessTerm | null;
   cohortName: string;
   description: string;
   /** Codigo do pacote na Hotmart; "" = sem ligacao. */
   hotmartProductId: string;
   name: string;
   productIds: string[];
+  /** Prazo de cada produto do pacote, pelo id; produto fora do mapa = para sempre. */
+  productTerms: Record<string, AccessTerm>;
   status: ComboStatus;
   /** Codigo do pacote na Ticto; "" = sem ligacao. */
   tictoProductId: string;
 };
 
+/** O rotulo do item especial do pacote (o mesmo de all-formations.ts, que e "server-only"). */
+export const ALL_FORMATIONS_ITEM_LABEL = "Todas as formações (as de hoje e as que vierem)";
+
+/** O efeito do item especial, em frases simples (abaixo da chave). */
+export const ALL_FORMATIONS_ITEM_HINT =
+  "Quem compra recebe todas as formações publicadas e, enquanto o acesso valer, toda formação publicada depois entra sozinha, com o mesmo término. Só formações: mentorias e outros tipos de produto ficam de fora.";
+
+/** Os prazos escolhidos, so dos produtos que estao no pacote e so os que nao sao "para sempre". */
+function pickProductTerms(productIds: readonly string[], terms: Readonly<Record<string, AccessTerm | null | undefined>>) {
+  const picked: Record<string, AccessTerm> = {};
+
+  for (const id of productIds) {
+    const term = terms[id];
+
+    if (term) {
+      picked[id] = term;
+    }
+  }
+
+  return picked;
+}
+
+/** Muda o prazo de um produto no formulario (`null` = para sempre). */
+export function withProductTerm(terms: Readonly<Record<string, AccessTerm>>, productId: string, term: AccessTerm | null) {
+  const next = { ...terms };
+
+  if (term) {
+    next[productId] = term;
+  } else {
+    delete next[productId];
+  }
+
+  return next;
+}
+
+/** Resumo dos prazos de um pacote para a linha da tabela: "Para sempre", "Por 1 ano" ou "Prazos diferentes". */
+export function summarizeComboTerms(combo: Pick<ComboListItem, "allFormations" | "allFormationsTerm" | "products">) {
+  const terms = [...combo.products.map((product) => product.accessTerm), ...(combo.allFormations ? [combo.allFormationsTerm] : [])];
+
+  if (terms.length === 0) {
+    return "";
+  }
+
+  return terms.every((term) => sameAccessTerm(term, terms[0])) ? accessTermLabel(terms[0]) : "Prazos diferentes";
+}
+
 export function comboToForm(combo?: ComboListItem | null): ComboFormState {
   return combo
     ? {
+        allFormations: combo.allFormations === true,
+        allFormationsTerm: combo.allFormations === true ? (combo.allFormationsTerm ?? null) : null,
         cohortName: combo.cohortName === DEFAULT_COHORT_NAME ? "" : combo.cohortName,
         description: combo.description,
         hotmartProductId: combo.hotmartProductId ?? "",
         name: combo.name,
         productIds: combo.products.map((product) => product.id),
+        productTerms: pickProductTerms(
+          combo.products.map((product) => product.id),
+          Object.fromEntries(combo.products.map((product) => [product.id, product.accessTerm ?? null]))
+        ),
         status: combo.status,
         tictoProductId: combo.tictoProductId ?? ""
       }
-    : { cohortName: "", description: "", hotmartProductId: "", name: "", productIds: [], status: "draft", tictoProductId: "" };
+    : {
+        allFormations: false,
+        allFormationsTerm: null,
+        cohortName: "",
+        description: "",
+        hotmartProductId: "",
+        name: "",
+        productIds: [],
+        productTerms: {},
+        status: "draft",
+        tictoProductId: ""
+      };
 }
 
 /** Entrada de saveCombo (comboSchema): turma vazia vira a turma padrao no servidor. */
 export function formToComboInput(form: ComboFormState, id?: string) {
+  const productIds = Array.from(new Set(form.productIds));
+
   return {
+    allFormations: form.allFormations,
+    allFormationsTerm: form.allFormations ? form.allFormationsTerm : null,
     cohortName: form.cohortName.trim(),
     description: form.description.trim(),
     hotmartProductId: form.hotmartProductId.trim(),
     ...(id ? { id } : {}),
     name: form.name.trim(),
-    productIds: Array.from(new Set(form.productIds)),
+    productIds,
+    productTerms: pickProductTerms(productIds, form.productTerms),
     status: form.status,
     tictoProductId: form.tictoProductId.trim()
   };
 }
 
 export function isComboFormDirty(left: ComboFormState, right: ComboFormState) {
-  return JSON.stringify(left) !== JSON.stringify(right);
+  // Pela entrada que vai para o servidor: o prazo de um produto que saiu do pacote nao conta como mudanca.
+  return JSON.stringify(formToComboInput(left)) !== JSON.stringify(formToComboInput(right));
 }
 
 /** Primeiras capas da linha da tabela e quantos produtos ficaram de fora. */

@@ -287,6 +287,11 @@ export const importRowSchema = z.object({
   /** Linha do arquivo (1 = primeira linha de dados), so para o resumo. */
   index: z.number().int().min(1).max(100_000),
   phone: studentPhoneSchema,
+  /**
+   * Termino do acesso por produto (a migracao de alunos de outras plataformas): "AAAA-MM-DD" ou `null`
+   * (vitalicio). Produto fora do mapa segue o "Acesso até" escolhido na tela (o `endsAt` do lote).
+   */
+  productEndsAt: z.record(catalogIdSchema, z.iso.date({ error: "Data de término inválida." }).nullable()).default({}),
   productIds: productIdsSchema.default([])
 });
 

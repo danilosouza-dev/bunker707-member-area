@@ -2,6 +2,7 @@
 // Sem React e so imports de tipo: tests/admin-products-ui.test.mjs carrega direto.
 // Os formularios enviam so os campos que mudaram (escrita granular) e o servidor confere o resto.
 
+import type { AccessTerm } from "@/server/access/access-term";
 import type { ProductAccess, ProductDetails } from "@/server/catalog/types";
 import type { ProductAccent, ProductAudience, ProductFormat, ReleasePhrase } from "@/server/catalog/model";
 
@@ -145,6 +146,8 @@ export type AccessDraft = {
   purchaseTarget: "same_tab" | "new_tab";
   purchaseUrl: string;
   release: ReleasePhrase;
+  /** Prazo de acesso de quem compra o produto sozinho pelos codigos; `null` = para sempre. */
+  saleAccessTerm: AccessTerm | null;
   /** Codigo do produto na Ticto; "" = sem ligacao. */
   tictoProductId: string;
 };
@@ -152,7 +155,7 @@ export type AccessDraft = {
 export function accessDraftFrom(access: Pick<
   ProductAccess,
   "audience" | "maxStudents" | "purchaseLabel" | "purchaseTarget" | "purchaseUrl" | "release"
-> & Partial<Pick<ProductAccess, "hotmartProductId" | "tictoProductId">>): AccessDraft {
+> & Partial<Pick<ProductAccess, "hotmartProductId" | "saleAccessTerm" | "tictoProductId">>): AccessDraft {
   return {
     audience: access.audience,
     hotmartProductId: access.hotmartProductId ?? "",
@@ -161,8 +164,18 @@ export function accessDraftFrom(access: Pick<
     purchaseTarget: access.purchaseTarget,
     purchaseUrl: access.purchaseUrl ?? "",
     release: access.release,
+    saleAccessTerm: access.saleAccessTerm ? { amount: access.saleAccessTerm.amount, unit: access.saleAccessTerm.unit } : null,
     tictoProductId: access.tictoProductId ?? ""
   };
+}
+
+/** O prazo so tem onde ficar gravado com um codigo de venda preenchido (Hotmart ou Ticto). */
+export function canChooseSaleAccessTerm(draft: Pick<AccessDraft, "hotmartProductId" | "tictoProductId">) {
+  return Boolean(draft.hotmartProductId.trim() || draft.tictoProductId.trim());
+}
+
+function saleTermKey(term: AccessTerm | null) {
+  return term ? `${term.unit}:${term.amount}` : "";
 }
 
 /** Mesma frase de liberacao? (compara so os campos que o modo usa). */
@@ -219,6 +232,7 @@ export type AccessPatch = {
   purchaseTarget?: "same_tab" | "new_tab";
   purchaseUrl?: string | null;
   release?: ReleasePhrase;
+  saleAccessTerm?: AccessTerm | null;
   tictoProductId?: string | null;
 };
 
@@ -233,6 +247,7 @@ export function buildAccessPatch(initial: AccessDraft, draft: AccessDraft): Acce
   if (draft.purchaseTarget !== initial.purchaseTarget) patch.purchaseTarget = draft.purchaseTarget;
   if (draft.purchaseUrl.trim() !== initial.purchaseUrl.trim()) patch.purchaseUrl = emptyToNull(draft.purchaseUrl);
   if (!sameReleasePhrase(draft.release, initial.release)) patch.release = draft.release;
+  if (saleTermKey(draft.saleAccessTerm) !== saleTermKey(initial.saleAccessTerm)) patch.saleAccessTerm = draft.saleAccessTerm;
 
   return patch;
 }

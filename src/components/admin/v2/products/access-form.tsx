@@ -11,6 +11,7 @@ import { PRODUCT_AUDIENCES, PRODUCT_AUDIENCE_LABELS } from "@/server/catalog/mod
 import { updateProductAccess } from "@/server/catalog/product-actions";
 import { purchaseUrlSchema, updateProductAccessSchema } from "@/server/catalog/schemas";
 import type { ProductAccess } from "@/server/catalog/types";
+import { AccessTermSelect } from "../access-term-select";
 import { ErrorBanner } from "../error-banner";
 import { AdminField, PillGroup, adminInputClass, fieldDescribedBy } from "../form";
 import { ReleasePhraseField } from "../release-phrase-field";
@@ -25,6 +26,7 @@ import {
   PURCHASE_TARGET_OPTIONS,
   accessDraftFrom,
   buildAccessPatch,
+  canChooseSaleAccessTerm,
   describeStudentCount,
   firstErrorsByField,
   firstServerFieldErrors,
@@ -49,6 +51,9 @@ const comboTone = { active: "success", draft: "neutral", paused: "muted" } as co
 
 const HOTMART_CODE_HINT =
   "O número do produto em Hotmart › Produtos (aparece no endereço da página dele). Com ele, a venda aprovada libera este produto sozinha; reembolso e chargeback tiram o acesso. A Hotmart precisa estar conectada em Configurações › Vendas.";
+const SALE_TERM_HINT =
+  "Vale para quem compra este produto sozinho, pelos códigos acima. O prazo conta da data da compra; quem compra de novo soma o prazo ao que ainda tem. Em pacote, o prazo é o que está escolhido no pacote.";
+const SALE_TERM_NEEDS_CODE_HINT = "Preencha o código da Hotmart ou da Ticto para escolher o prazo. Sem prazo escolhido, a venda libera para sempre.";
 const TICTO_CODE_HINT =
   "O número (ID) do produto no painel da Ticto. Com ele, a venda aprovada libera este produto sozinha; reembolso e chargeback tiram o acesso. A Ticto precisa estar conectada em Configurações › Vendas.";
 
@@ -241,6 +246,25 @@ export function ProductAccessForm({ access }: { access: ProductAccess }) {
           </AdminField>
 
           <AdminField
+            error={errors.saleAccessTerm}
+            hint={canChooseSaleAccessTerm(draft) ? SALE_TERM_HINT : SALE_TERM_NEEDS_CODE_HINT}
+            id="acesso-prazo-venda"
+            label="Por quanto tempo a venda libera"
+          >
+            <AccessTermSelect
+              ariaLabel="quem compra este produto sozinho"
+              describedBy={fieldDescribedBy("acesso-prazo-venda", {
+                error: errors.saleAccessTerm,
+                hint: canChooseSaleAccessTerm(draft) ? SALE_TERM_HINT : SALE_TERM_NEEDS_CODE_HINT
+              })}
+              disabled={readOnly || !canChooseSaleAccessTerm(draft)}
+              id="acesso-prazo-venda"
+              onChange={(term) => update("saleAccessTerm", term)}
+              value={draft.saleAccessTerm}
+            />
+          </AdminField>
+
+          <AdminField
             error={errors.purchaseLabel}
             hint="Vazio usa “Comprar”."
             id="acesso-texto-botao"
@@ -319,8 +343,8 @@ export function ProductAccessForm({ access }: { access: ProductAccess }) {
           <p className="text-[13px] leading-5 text-[var(--text-secondary)]">Nenhum pacote inclui este produto.</p>
         )}
         <p className="text-[13px] leading-5 text-[var(--text-secondary)]">
-          Quando a venda de um pacote chega da Hotmart ou da Ticto, liberamos todos os produtos dele de uma vez. Produto incluído
-          depois não é liberado para quem já comprou o pacote.
+          Quando a venda de um pacote chega da Hotmart ou da Ticto, liberamos todos os produtos dele de uma vez, cada um com o prazo
+          escolhido no pacote. Produto incluído depois não é liberado para quem já comprou o pacote.
         </p>
       </div>
 

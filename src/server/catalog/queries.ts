@@ -7,7 +7,7 @@ import "server-only";
 import { cache } from "react";
 import { normalizeLessonVideoConfig } from "@/lib/video-embed";
 import { PendingMigrationError, isMissingSchemaObjectError } from "@/server/db/pending-migration";
-import { fetchSalesLinksFor } from "@/server/payments/store";
+import { accessTermOfSalesLink, fetchSalesLinksFor } from "@/server/payments/store";
 import { CatalogNotFoundError } from "./errors";
 import {
   audienceFromColumns,
@@ -437,6 +437,8 @@ export const getProductAccess: GetProductAccess = async (productId) => {
     purchaseTarget: row.purchase_target === "new_tab" ? "new_tab" : "same_tab",
     purchaseUrl: row.purchase_url?.trim() || null,
     release: releaseRuleToPhrase(row.release_rule),
+    // Um prazo so por produto, gravado nos codigos de venda dele (o primeiro que tiver prazo; sem nenhum = para sempre).
+    saleAccessTerm: salesLinks.map(accessTermOfSalesLink).find((term) => term !== null) ?? null,
     studentsWithAccess,
     tictoProductId: codeOn("ticto")
   };

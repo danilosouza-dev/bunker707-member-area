@@ -178,18 +178,24 @@ test("tirar da formacao e reordenar cursos tambem sao uma RPC cada", async () =>
 test("salvar pacote troca os produtos numa transacao; pacote sumido vira 404", async () => {
   const product = { bucket: "courses", commerce_scope: "sellable_product", id: "curso-prompts" };
   const db = createFakeDb({
-    rpcResults: { admin_save_combo: { data: null, error: { code: "P0001", message: "combo_not_found" } } },
+    rpcResults: { admin_save_combo_v2: { data: null, error: { code: "P0001", message: "combo_not_found" } } },
     tables: { content_items: [product] }
   });
   actionStubs.db = db;
 
-  const result = await saveCombo({ id: "combo-ia", name: "Pacote IA", productIds: [product.id, product.id] });
+  const result = await saveCombo({
+    id: "combo-ia",
+    name: "Pacote IA",
+    productIds: [product.id, product.id],
+    productTerms: { [product.id]: { amount: 1, unit: "years" } }
+  });
 
   assert.equal(result.ok, false);
   assert.equal(result.status, 404);
-  const call = db.calls.rpc.find((entry) => entry.name === "admin_save_combo");
+  const call = db.calls.rpc.find((entry) => entry.name === "admin_save_combo_v2");
   assert.equal(call?.args.p_create, false);
-  assert.deepEqual(call?.args.p_product_ids, [product.id], "sem produto repetido");
+  assert.deepEqual(call?.args.p_items, [{ amount: 1, productId: product.id, unit: "years" }], "sem produto repetido, com o prazo do item");
+  assert.equal(call?.args.p_all_formations, false);
   assert.deepEqual(writesOutsideRpc(db), [], "nao apaga os itens antes de gravar os novos");
 });
 
@@ -462,10 +468,10 @@ test("reimportar a playlist preserva situacao, capa e o que o produtor excluiu o
   assert.match(importBody, /security definer\s+set search_path = public/);
 });
 
-test("salvar pacote antes da migracao 202610110012 ainda funciona, em passos", async () => {
+test("salvar pacote sem a funcao admin_save_combo_v2 no banco ainda funciona, em passos", async () => {
   const product = { bucket: "courses", commerce_scope: "sellable_product", id: "curso-prompts" };
   const db = createFakeDb({
-    rpcResults: { admin_save_combo: { data: null, error: { code: "PGRST202", message: "Could not find the function public.admin_save_combo" } } },
+    rpcResults: { admin_save_combo_v2: { data: null, error: { code: "PGRST202", message: "Could not find the function public.admin_save_combo_v2" } } },
     tables: {
       content_items: [product],
       product_combo_items: [],

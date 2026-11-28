@@ -600,6 +600,8 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
       ? "bg-white/15 text-white"
     : "bg-white text-black hover:bg-zinc-200";
   const canPurchase = Boolean(item.purchaseUrl);
+  // Curso vencido sem link de compra: fechado so com a frase, sem botao de compra.
+  const endedWithoutPurchase = Boolean(item.isLocked && item.accessEndedLabel && !canPurchase);
   const isCourseLike = ["Curso", "Bootcamp", "Mentoria", "Webinario", "Produto"].includes(item.kind);
   const isFormation = item.kind === "Formacao";
   const itemModules = structure?.modules ?? [];
@@ -643,7 +645,7 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
   const statusNoticeLabel = isReleaseLocked
     ? releaseNotice?.title ?? "Liberacao pendente"
     : item.isLocked
-      ? "Acesso bloqueado"
+      ? item.accessEndedLabel ?? "Acesso bloqueado"
       : item.status === "Em breve"
         ? "Em breve"
         : null;
@@ -847,18 +849,20 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
               {item.title}
             </h2>
             <div className="mt-5 flex flex-wrap items-center gap-3">
-              <button
-                className={`inline-flex min-h-12 items-center gap-2 rounded-[8px] px-6 py-3 text-sm font-extrabold transition ${actionClass} disabled:cursor-not-allowed disabled:opacity-45`}
-                disabled={(!item.isLocked && isReleaseLocked) || (item.isLocked && !canPurchase)}
-                onFocus={prefetchPrimaryAction}
-                onMouseEnter={prefetchPrimaryAction}
-                onClick={handlePrimaryAction}
-                onTouchStart={prefetchPrimaryAction}
-                type="button"
-              >
-                <ActionIcon className="h-4 w-4 fill-current" />
-                {actionLabel}
-              </button>
+              {endedWithoutPurchase ? null : (
+                <button
+                  className={`inline-flex min-h-12 items-center gap-2 rounded-[8px] px-6 py-3 text-sm font-extrabold transition ${actionClass} disabled:cursor-not-allowed disabled:opacity-45`}
+                  disabled={(!item.isLocked && isReleaseLocked) || (item.isLocked && !canPurchase)}
+                  onFocus={prefetchPrimaryAction}
+                  onMouseEnter={prefetchPrimaryAction}
+                  onClick={handlePrimaryAction}
+                  onTouchStart={prefetchPrimaryAction}
+                  type="button"
+                >
+                  <ActionIcon className="h-4 w-4 fill-current" />
+                  {actionLabel}
+                </button>
+              )}
               {!isLocked ? (
                 <SavedItemButton
                   className="grid h-12 w-12 place-items-center rounded-full border-2 transition"
@@ -873,6 +877,10 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
             {isReleaseLocked ? (
               <p className="mt-3 max-w-md text-xs font-semibold leading-5 text-zinc-300" suppressHydrationWarning>
                 {releaseNotice?.detail ?? "Conteúdo indisponível de acordo com a regra de entrega."}
+              </p>
+            ) : item.isLocked && item.accessEndedLabel ? (
+              <p className="mt-3 max-w-md text-sm font-bold leading-5 text-orange-200" data-access-ended="">
+                {item.accessEndedLabel}
               </p>
             ) : item.isLocked && !canPurchase ? (
               <p className="mt-3 max-w-md text-xs font-semibold leading-5 text-zinc-300">

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
+// payments/model.ts importa as regras do prazo (access-term.ts) por caminho relativo sem extensao.
+import "./support/resolve-extensionless-ts.mjs";
 
 // Guarda da venda guardada (docs/32 §2.2 e §11.3; docs/18 §1.2): o que se le na migracao 202611110002 e no codigo.
 // - a migracao: duas secoes MCP, idempotente; o unico drop e o do check de webhook_events.outcome, trocado pelo mesmo com
@@ -149,7 +151,7 @@ test("quem toca em held_sales: o store e a leitura das telas; as regras ficam pu
 test("a tarefa vendas-guardadas está no registro logo depois da conferência da licença e no comentário dos jobs", () => {
   const registry = read("src/server/jobs/registry.ts");
 
-  assert.match(registry, /, licenseCheckInJob, heldSalesJob, licenseSalesJob, communicationMediaJob\];/);
+  assert.match(registry, /, licenseCheckInJob, heldSalesJob, licenseSalesJob, allFormationsJob, communicationMediaJob\];/);
   assert.match(registry, /- `vendas-guardadas` \(/);
   assert.match(read("src/server/jobs/held-sales-job.ts"), /export const HELD_SALES_JOB_NAME = "vendas-guardadas";/);
 });

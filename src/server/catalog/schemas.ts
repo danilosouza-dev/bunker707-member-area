@@ -3,6 +3,7 @@
 // tests/catalog-schemas.test.mjs carrega direto pelo Node. Mensagens em portugues do produtor.
 
 import { z } from "zod";
+import { ACCESS_TERM_MAX_AMOUNT, ACCESS_TERM_UNITS } from "../access/access-term";
 import { externalProductIdSchema } from "../payments/schemas";
 import { extractYouTubePlaylistId } from "../../lib/youtube-course-import";
 import { detectLessonVideo } from "../../lib/video-detect";
@@ -187,6 +188,20 @@ export const updateProductDetailsSchema = z.object({
   title: productTitleSchema.optional()
 });
 
+/**
+ * Prazo de acesso com quantidade (docs/05, "Prazo de acesso por curso"): dias, meses ou anos. "Para sempre"
+ * e `null`, no campo que usa este schema. O mesmo campo vale no item do pacote, no codigo de venda de um
+ * produto sozinho e no item "todas as formacoes".
+ */
+export const accessTermSchema = z.object({
+  amount: z
+    .number({ error: "Informe a quantidade." })
+    .int("Use um número inteiro.")
+    .min(1, "Use pelo menos 1.")
+    .max(ACCESS_TERM_MAX_AMOUNT, `Use no máximo ${ACCESS_TERM_MAX_AMOUNT}.`),
+  unit: z.enum(ACCESS_TERM_UNITS, { error: "Escolha dias, meses ou anos." })
+});
+
 /** Aba Acesso e venda. */
 export const updateProductAccessSchema = z.object({
   audience: productAudienceSchema.optional(),
@@ -198,6 +213,11 @@ export const updateProductAccessSchema = z.object({
   purchaseLabel: z.string().trim().max(40, "Use no máximo 40 caracteres.").nullish(),
   purchaseTarget: z.enum(["same_tab", "new_tab"]).optional(),
   purchaseUrl: purchaseUrlSchema.optional(),
+  /**
+   * Prazo de acesso de quem compra este produto sozinho, pelos codigos acima (sales_product_links): `null` =
+   * para sempre; ausente = nao muda.
+   */
+  saleAccessTerm: accessTermSchema.nullable().optional(),
   /** Codigo do produto na Ticto (sales_product_links); "" ou null tira a ligacao. */
   tictoProductId: externalProductIdSchema.optional(),
   release: releasePhraseSchema.optional()
@@ -396,18 +416,31 @@ export const reorderFormationCoursesSchema = z.object({
  * Pacotes (antigos combos)
  * ---------------------------------------------------------------------------------------------- */
 
-export const comboSchema = z.object({
-  cohortName: z.string().trim().max(80, "Use no máximo 80 caracteres.").default(""),
-  description: z.string().trim().max(300, "Use no máximo 300 caracteres.").default(""),
-  /** Codigo do pacote na Hotmart (sales_product_links); "" ou null tira a ligacao. */
-  hotmartProductId: externalProductIdSchema.optional(),
-  id: catalogIdSchema.optional(),
-  name: z.string().trim().min(2, "Dê um nome ao pacote.").max(80, "Use no máximo 80 caracteres."),
-  productIds: z.array(catalogIdSchema).min(1, "Escolha pelo menos um produto.").max(50),
-  status: z.enum(["active", "draft", "paused"]).default("draft"),
-  /** Codigo do pacote na Ticto (sales_product_links); "" ou null tira a ligacao. */
-  tictoProductId: externalProductIdSchema.optional()
-});
+export const comboSchema = z
+  .object({
+    /** O item especial "Todas as formações (as de hoje e as que vierem)". So formacoes; outros tipos nunca entram. */
+    allFormations: z.boolean().default(false),
+    /** Prazo do item "todas as formacoes"; `null` = para sempre. */
+    allFormationsTerm: accessTermSchema.nullable().default(null),
+    cohortName: z.string().trim().max(80, "Use no máximo 80 caracteres.").default(""),
+    description: z.string().trim().max(300, "Use no máximo 300 caracteres.").default(""),
+    /** Codigo do pacote na Hotmart (sales_product_links); "" ou null tira a ligacao. */
+    hotmartProductId: externalProductIdSchema.optional(),
+    id: catalogIdSchema.optional(),
+    name: z.string().trim().min(2, "Dê um nome ao pacote.").max(80, "Use no máximo 80 caracteres."),
+    productIds: z.array(catalogIdSchema).max(50),
+    /** Prazo de cada produto do pacote, pelo id; produto fora do mapa (ou `null`) = para sempre. */
+    productTerms: z.record(catalogIdSchema, accessTermSchema.nullable()).default({}),
+    status: z.enum(["active", "draft", "paused"]).default("draft"),
+    /** Codigo do pacote na Ticto (sales_product_links); "" ou null tira a ligacao. */
+    tictoProductId: externalProductIdSchema.optional()
+  })
+  .superRefine((value, context) => {
+    // O pacote so com "todas as formacoes" vale sem produto escolhido.
+    if (value.productIds.length === 0 && !value.allFormations) {
+      context.addIssue({ code: "custom", message: "Escolha pelo menos um produto.", path: ["productIds"] });
+    }
+  });
 
 export const deleteComboSchema = z.object({ id: catalogIdSchema });
 

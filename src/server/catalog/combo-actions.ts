@@ -3,7 +3,9 @@
 // Escritas de Pacotes (frente E; mesmas assinaturas de SaveComboAction e DeleteComboAction em types.ts).
 // Granular, sem ler o banco inteiro:
 // uma linha em product_combos e a troca dos itens daquele pacote, numa transacao. Papel: catalog.access.
-// Mudar os produtos de um pacote nao mexe no acesso de quem ja comprou (D7: nada retroativo).
+// Mudar os produtos de um pacote nao mexe no acesso de quem ja comprou (D7: nada retroativo). O mesmo vale
+// para o prazo de cada produto e para o item "todas as formacoes" (docs/05, "Prazo de acesso por curso e
+// todas as formacoes"; migracao 202611280001): valem para as proximas vendas.
 
 import { DEFAULT_COHORT_NAME, COMBO_PRODUCT_BUCKETS } from "./combo-model";
 import { runAdminAction } from "@/server/actions/run-action";
@@ -26,12 +28,23 @@ function failOnError(error: { message: string } | null, context: string) {
   }
 }
 
-type ComboFields = { cohort_name: string; description: string; name: string; status: string };
+type ComboFields = {
+  all_formations: boolean;
+  all_formations_amount: number | null;
+  all_formations_unit: string | null;
+  cohort_name: string;
+  description: string;
+  name: string;
+  status: string;
+};
 
-/** Caminho antigo (sem transacao), so enquanto a migracao 202610110012 nao foi aplicada. */
+/** Um produto do pacote com o prazo dele (`unit` e `amount` nulos = para sempre). */
+type ComboItem = { amount: number | null; productId: string; unit: string | null };
+
+/** Caminho em passos (sem transacao), so enquanto a funcao admin_save_combo_v2 nao esta no banco. */
 async function saveComboInSteps(
   db: ReturnType<typeof getSupabaseAdminClient>,
-  input: { comboId: string; create: boolean; fields: ComboFields; productIds: string[] }
+  input: { comboId: string; create: boolean; fields: ComboFields; items: ComboItem[] }
 ): Promise<{ message: string } | null> {
   if (input.create) {
     const { error } = await db.from("product_combos").insert({ ...input.fields, id: input.comboId });
@@ -57,9 +70,13 @@ async function saveComboInSteps(
     return deleteError;
   }
 
+  if (input.items.length === 0) {
+    return null;
+  }
+
   const { error: insertError } = await db
     .from("product_combo_items")
-    .insert(input.productIds.map((productId, index) => ({ combo_id: input.comboId, product_id: productId, sort_order: index })));
+    .insert(input.items.map((item, index) => ({ access_amount: item.amount, access_unit: item.unit, combo_id: input.comboId, product_id: item.productId, sort_order: index })));
 
   return insertError;
 }
@@ -70,12 +87,10 @@ export async function saveCombo(raw: ComboInput): Promise<ActionResult<ComboList
     const productIds = Array.from(new Set(input.productIds));
 
     // So produtos vendidos sozinhos entram num pacote.
-    const { data: productData, error: productError } = await db
-      .from("content_items")
-      .select("id")
-      .in("id", productIds)
-      .eq("commerce_scope", "sellable_product")
-      .in("bucket", [...COMBO_PRODUCT_BUCKETS]);
+    const { data: productData, error: productError } =
+      productIds.length > 0
+        ? await db.from("content_items").select("id").in("id", productIds).eq("commerce_scope", "sellable_product").in("bucket", [...COMBO_PRODUCT_BUCKETS])
+        : { data: [], error: null };
     failOnError(productError, "Produtos do pacote");
 
     const found = new Set(((productData ?? []) as { id: string }[]).map((row) => row.id));
@@ -91,27 +106,41 @@ export async function saveCombo(raw: ComboInput): Promise<ActionResult<ComboList
     // Codigo da Hotmart ou da Ticto ja usado por outro alvo: recusa ANTES de criar ou gravar o pacote
     // (senao o pacote novo nasceria sem codigo e o proximo Salvar criaria outro).
     await assertSalesLinksAvailable(db, { codes: { hotmart: input.hotmartProductId, ticto: input.tictoProductId }, comboId });
-    const fields = {
+    // O prazo do item "todas as formacoes" so existe com o item ligado.
+    const allFormationsTerm = input.allFormations ? input.allFormationsTerm : null;
+    const fields: ComboFields = {
+      all_formations: input.allFormations,
+      all_formations_amount: allFormationsTerm?.amount ?? null,
+      all_formations_unit: allFormationsTerm?.unit ?? null,
       cohort_name: input.cohortName || DEFAULT_COHORT_NAME,
       description: input.description,
       name: input.name,
       status: input.status
     };
-    const transaction = await db.rpc("admin_save_combo", {
+    // Cada produto com o prazo dele; produto sem prazo escolhido = para sempre.
+    const items: ComboItem[] = productIds.map((productId) => {
+      const term = input.productTerms[productId] ?? null;
+
+      return { amount: term?.amount ?? null, productId, unit: term?.unit ?? null };
+    });
+    const transaction = await db.rpc("admin_save_combo_v2", {
+      p_all_formations: fields.all_formations,
+      p_all_formations_amount: fields.all_formations_amount,
+      p_all_formations_unit: fields.all_formations_unit,
       p_cohort_name: fields.cohort_name,
       p_combo_id: comboId,
       p_create: !input.id,
       p_description: fields.description,
+      p_items: items,
       p_name: fields.name,
-      p_product_ids: productIds,
       p_status: fields.status
     });
     let error: { code?: string; message: string } | null = transaction.error;
 
-    // Pacotes funcionam antes da migracao 202610110012 (as leituras nao dependem dela): sem a funcao,
-    // grava em passos, como antes, ate o banco ser atualizado.
+    // Sem a funcao admin_save_combo_v2 no banco (cache do PostgREST ainda sem ela): grava em passos. As
+    // colunas do prazo vem da mesma migracao (202611280001): sem ela, o passo falha com o erro do banco.
     if (error && isMissingSchemaObjectError(error)) {
-      error = await saveComboInSteps(db, { comboId, create: !input.id, fields, productIds });
+      error = await saveComboInSteps(db, { comboId, create: !input.id, fields, items });
     }
 
     if (error?.message.includes("combo_not_found")) {
@@ -120,6 +149,10 @@ export async function saveCombo(raw: ComboInput): Promise<ActionResult<ComboList
 
     if (error?.message.includes("combo_product_unavailable")) {
       throw new CatalogRuleError(PRODUCT_UNAVAILABLE);
+    }
+
+    if (error?.message.includes("combo_items_invalid")) {
+      throw new CatalogRuleError("Escolha pelo menos um produto ou ligue “Todas as formações”.");
     }
 
     failOnError(error, "Pacote");

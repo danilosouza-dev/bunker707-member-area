@@ -142,6 +142,7 @@ Regras:
 
 - combo pode incluir cursos, formacoes, mentorias, webinarios, produtos genericos e bootcamps;
 - remover um item do combo nao deve revogar automaticamente acessos ja concedidos sem uma operacao administrativa explicita;
+- desde 28/11/2026 cada item tem prazo proprio (`access_unit`, `access_amount`; nulos = para sempre) e o pacote aceita o item "todas as formacoes" (`product_combos.all_formations`): ver "Prazo de acesso por curso e todas as formacoes" na secao Webhooks;
 - a auditoria deve registrar alteracoes em combos ativos.
 
 ### entitlements
@@ -1199,7 +1200,7 @@ Curso incluido = `content_items.commerce_scope = 'included_content'` + `content_
 - `admin_product_students_with_access(p_content_id)`: alunos distintos com acesso ativo agora;
 - `admin_patch_product_settings(p_content_id, p_set, p_unset)` (migracao `202610110012`): muda so as chaves pedidas de `content_page_settings.settings` num UPDATE atomico (`(settings - p_unset) || p_set`); sem chaves, a linha sai. Nenhuma escrita do admin novo le e regrava o JSON inteiro;
 - `admin_add_course_to_formation`, `admin_remove_course_from_formation`, `admin_reorder_formation_courses`: `commerce_scope`, `sort_order` e `parentFormationId` do curso mudam na mesma transacao, com a formacao travada; conjunto divergente levanta `stale_structure` (409);
-- `admin_save_combo(...)`: dados do pacote e troca de `product_combo_items` na mesma transacao.
+- `admin_save_combo(...)`: dados do pacote e troca de `product_combo_items` na mesma transacao. Desde 28/11/2026 o app chama `admin_save_combo_v2(...)` (migracao `202611280001`), que tambem grava o prazo de cada item e o item "todas as formacoes".
 
 Reordenar aceita a estrutura que ja existe ate o limite da importacao de playlist (100 modulos, 500 aulas por modulo); os limites de criacao (50 modulos, 100 aulas por modulo) valem so para criar.
 
@@ -1357,6 +1358,7 @@ Codigo do produto na plataforma de venda ligado a um produto ou a um pacote da e
 - provider: hotmart, ticto, kiwify;
 - external_product_id (Hotmart: o numero do produto, `data.product.id`; Ticto: o id do produto, `item.product_id`, qualquer que seja a oferta; os order bumps da Ticto, `bumps[].product_id`, sao ligados do mesmo jeito, cada um ao proprio produto ou pacote);
 - product_id -> content_items (cascade) ou combo_id -> product_combos (cascade), exatamente um;
+- access_unit, access_amount (migracao `202611280001`): o prazo de quem compra o produto sozinho por este codigo; nulos = para sempre;
 - created_by, created_at, updated_at.
 
 Indices unicos: (provider, external_product_id), (provider, product_id) e (provider, combo_id), inteiros (nulos nao conflitam) para o upsert do servidor. Gravado por "Codigo do produto na Hotmart" e "Codigo do produto na Ticto" em Produtos > Acesso e venda (`updateProductAccess`, `catalog.access`) e em Pacotes (`saveCombo`); um codigo por plataforma em cada alvo, e o mesmo numero pode existir nas duas plataformas. Codigo ja ligado a outro alvo e recusado no campo antes de gravar o produto ou o pacote (`assertSalesLinksAvailable`). Venda de pacote libera todos os produtos dele; reembolso ou chargeback de pacote tira todos (docs/17 §1.6.8); pacote em rascunho ou pausado nao libera nada.
@@ -1375,12 +1377,77 @@ Migracao `202610170008_sale_grants.sql`. Vinculo venda -> acesso: um acesso (um 
 - user_id -> auth.users (cascade); entitlement_id -> entitlements (cascade); product_id;
 - opened: true quando a venda abriu o acesso (nao existia ou estava fechado); false quando so estendeu um acesso aberto;
 - previous_ends_at: prazo que o acesso tinha antes (so quando estendeu), para o reembolso devolver;
+- term_unit, term_amount, purchased_at (migracao `202611280001`): o prazo que a venda deu neste acesso e a data da compra aprovada; nulos = para sempre (toda venda anterior);
 - webhook_event_id -> webhook_events (set null); closed_at, closed_by (refund, chargeback, subscription_canceled, admin);
 - created_at (o vinculo mais antigo do acesso e o que manda na decisao).
 
 `closed_by = admin`: a equipe revogou, suspendeu, reativou ou reabriu o acesso (`src/server/students/access.ts`); TODOS os vinculos dele, abertos ou ja fechados por uma venda, passam a `admin` e deixam de mandar nos reembolsos (o reembolso repetido de uma compra antiga nao fecha o que a equipe acabou de reabrir).
 
 Indices: unico (provider, transaction_id, entitlement_id); (entitlement_id); (provider, subscription_code). So `service_role`. Nenhum dado pessoal (so ids). Regras de decisao em `decideEntitlementAfterSale` (`src/server/payments/model.ts`) e em docs/04. A mesma migracao acrescenta o resultado `access_restored` ("Prazo devolvido") em `webhook_events.outcome` e preenche um vinculo (`opened = true`) para cada acesso ativo que uma compra aprovada ja registrada em `webhook_events` liberou antes da tabela existir (pelo `transaction_id` da 0005; nada em producao hoje).
+
+### Prazo de acesso por curso e todas as formacoes (migracao `202611280001`, 28/11/2026)
+
+Decisao do produtor em 28/11/2026. O pacote da plataforma de venda e um produto com codigo proprio e produtos dentro; aqui, cada curso dentro do pacote pode ter prazo proprio (exemplo dele: Black Friday com 5 cursos para sempre e 5 por 1 ano na mesma compra). Ninguem comprou ainda: nada retroativo.
+
+**O que a pesquisa mostrou** (ajuda oficial da Hotmart, da Ticto e da Kiwify, consultada em 28/11/2026):
+
+- nenhuma das tres avisa por webhook quando o prazo de acesso de uma compra unica acaba. Os eventos sao compra aprovada, reembolso, chargeback e os de assinatura (cancelada, atrasada, renovada). O prazo de acesso delas vale so na area de membros delas. Por isso o prazo e contado AQUI, em `entitlements.ends_at`;
+- nenhuma documenta soma ou reinicio do prazo em compra repetida. A Ticto tem a "extensao" de assinatura, que soma (anual + 6 meses = 1 ano e 6 meses); foi a regra que o produtor escolheu para todas as compras;
+- na Hotmart, o Combo Fixo da os produtos que estavam no combo na hora da compra, e o Combo Flexivel (so assinatura) tambem da os que entrarem depois. Aqui, o pacote continua como o Combo Fixo (D7: nada retroativo) e "todas as formacoes" faz o papel do Flexivel, so para formacoes.
+
+O webhook de pedido 2.0.0 da Hotmart, lido no mesmo dia (https://developers.hotmart.com/docs/pt-BR/2.0.0/webhook/purchase-webhook/):
+
+- nao existe campo de duracao nem de fim do acesso no payload. As datas sao `product.warranty_date` (garantia), `purchase.approved_date`, `purchase.order_date` e `purchase.date_next_charge` (assinatura). As APIs de produtos, de ofertas e de alunos do Club tambem nao devolvem prazo de acesso;
+- a venda de um combo chega como UM evento: `data.product` e o proprio combo e `data.product.content.products[]` lista os produtos de dentro (`id`, `ucode`, `name`). Aqui quem manda e o pacote cadastrado (o codigo do combo ligado ao pacote), nao essa lista. O adaptador (`redactHotmartPayload`) guarda do produto so `id` e `name`: a lista de dentro NAO e gravada hoje;
+- `purchase.offer.code` identifica a oferta, e o mesmo produto pode ser vendido em ofertas com prazos diferentes. O vinculo de venda daqui e por codigo do PRODUTO (um por plataforma em cada alvo): nao distingue oferta, e o codigo da oferta tambem nao e gravado.
+
+Proximos passos possiveis, fora desta entrega: guardar `content.products[]` e avisar o produtor quando a lista do combo na Hotmart e a do pacote daqui nao baterem; ligar o prazo ao codigo da oferta, para o mesmo produto vendido com prazos diferentes (hoje a saida e um pacote por oferta, cada um com o proprio codigo de produto na plataforma).
+
+**O prazo** e um par (unidade, quantidade): `days`, `months` ou `years` e um inteiro de 1 a 3650. Os dois nulos = para sempre (o padrao, igual ao que sempre foi). E o MESMO campo em quatro lugares:
+
+- `product_combo_items.access_unit` / `access_amount`: o prazo daquele produto dentro do pacote;
+- `sales_product_links.access_unit` / `access_amount`: o prazo de quem compra o produto sozinho por aquele codigo. A tela tem um prazo so por produto, gravado nos codigos dele (Hotmart e Ticto); em codigo de pacote a coluna nao e usada;
+- `product_combos.all_formations` (boolean, padrao false) + `all_formations_unit` / `all_formations_amount`: o item especial "Todas as formacoes (as de hoje e as que vierem)" e o prazo dele;
+- `sale_grants.term_unit` / `term_amount` + `purchased_at`: o prazo que aquela venda deu naquele acesso e a data da compra aprovada, de onde ele conta. Vinculo antigo (sem prazo) = para sempre, e `purchased_at` nulo vale `created_at`.
+
+Regras (puras, em `src/server/access/access-term.ts`; o plano de uma venda para um acesso em `src/server/payments/sale-access.ts`):
+
+- o termino = data da compra aprovada + prazo, ate o fim daquele dia no fuso da escola (23:59:59.999 de Sao Paulo). Dias sao 24 h; meses e anos andam no calendario e, quando o dia nao existe no mes de chegada, param no ultimo dia dele;
+- compra repetida SOMA: quem tem acesso aberto com data de termino fica com o termino atual + o prazo comprado (ainda tem 3 meses e compra 1 ano = 1 ano e 3 meses). Quem ja venceu (ou teve o acesso tirado) conta a partir da compra. "Para sempre" vence qualquer prazo, dos dois lados. Nenhuma venda encurta;
+- a concessao manual pela equipe nao mudou: fica o maior prazo (`nextAccessEndOnGrant`), e "sem prazo" vence data;
+- a mesma compra processada de novo (reprocesso, reenvio, outro aviso da mesma compra) nao soma duas vezes: o vinculo ja gravado manda, com o prazo e a data que ele guardou;
+- reembolso e chargeback: a regra de sempre (`decideEntitlementAfterSale`), mais uma. Quando outra compra paga ainda sustenta o acesso e a venda desfeita tinha somado prazo, a conta do termino e refeita so com as compras que sobraram, na ordem em que foram feitas, a partir do que o aluno tinha antes da primeira (`replaySaleTerms`). Vale para a compra mais nova reembolsada (volta o termino de antes) e para a mais antiga (sobra o prazo da outra, contado da compra dela). O termino so muda quando o que esta gravado e o que as vendas explicam: se a equipe mudou a data depois, fica como esta (com uma excecao: a venda mais nova desfeita, que guardou o `previous_ends_at`, devolve exatamente ele);
+- quando o prazo de um curso vence, fecha so aquele curso. O acesso nao e apagado nem revogado (`status` continua `active`, com `ends_at` no passado); as regras que ja existiam em `lesson-access.ts`, `learning-catalog.ts` e `platform-store.ts` negam no servidor. A area do aluno marca o item vencido com `accessEndedAt` e `accessEndedLabel` ("Seu acesso terminou em dd/mm/aaaa") e ele continua aparecendo, fechado, pelo bloqueio que ja existia (`isLocked`), inclusive quando o produto esta "Oculto por enquanto". Acesso revogado ou suspenso (reembolso, equipe) nao ganha a frase.
+
+#### all_formations_grants
+
+A venda de "acesso a todas as formacoes". Os acessos continuam em `entitlements` (a unica verdade); esta tabela diz quem recebe as formacoes publicadas depois, ate quando, de que venda veio e com que turma.
+
+- id uuid; user_id -> auth.users (cascade);
+- provider, transaction_id (a compra, igual a `sale_grants.transaction_id`), subscription_code, webhook_event_id -> webhook_events (set null);
+- combo_id -> product_combos (set null); cohort_name (a turma do pacote na hora da compra, ex.: Black 2026);
+- term_unit, term_amount (nulos = para sempre); purchased_at;
+- ends_at: ate quando o aluno recebe formacoes novas, e o termino de cada formacao que entra depois. E um so por aluno: a soma das concessoes abertas dele, na ordem das compras; refeito quando uma entra, sai ou volta. Nulo = para sempre;
+- status (`active`, `closed`), closed_at, closed_by (refund, chargeback, subscription_canceled, admin);
+- formation_ids text[]: as formacoes que a concessao ja cobriu. A que esta na lista nao entra de novo (a formacao que a equipe tirou de um aluno nao volta sozinha);
+- created_at, updated_at.
+
+Indices: unico (provider, transaction_id, user_id); parcial (ends_at) onde `status = 'active'`; (user_id); (provider, subscription_code). RLS ligada, nada para `anon` e `authenticated`, so `service_role`. Nenhum dado pessoal (so ids e o nome da turma).
+
+Como vira acesso (`src/server/payments/all-formations.ts`):
+
+- **na venda** (`process-sale.ts`): as formacoes publicadas e vendidas como produto (`kind = Formacao`, `commerce_scope = sellable_product`, `publication_status = published`) entram como produtos daquela compra, com o prazo do item e vinculo em `sale_grants`, e a concessao e gravada (`recordAllFormationsGrant`). So formacoes: mentorias, bootcamps, cursos avulsos e outros tipos nunca entram por este item. O produto que tambem esta listado no pacote fica com o maior dos dois prazos;
+- **ao publicar uma formacao** (`publishProduct`): `materializeAllFormations` da a formacao a quem tem concessao aberta e valendo, com o termino da concessao, com vinculo da MESMA compra e sem e-mail de compra. Espera ate 4 s; o resto fica com o tick. Nunca derruba a publicacao;
+- **no tick** (`todas-as-formacoes`, `src/server/jobs/all-formations-job.ts`): a rede de seguranca. Sem concessao aberta, uma consulta; com concessao e nada faltando, duas; ate 40 acessos por rodada;
+- **reembolso, chargeback e cancelamento**: fecham a concessao (`closeAllFormationsGrantsOfSale`) e, pelos vinculos da compra, tiram tudo o que ela abriu (inclusive as formacoes que entraram depois) sem tirar o que o aluno tem por outra compra. Depois disso nenhuma formacao nova entra por ela.
+
+`admin_save_combo_v2(p_combo_id, p_create, p_name, p_description, p_cohort_name, p_status, p_items jsonb, p_all_formations, p_all_formations_unit, p_all_formations_amount)`: `security invoker`, so `service_role`; grava o pacote, o item "todas as formacoes" e os itens com o prazo de cada um (`[{ productId, unit, amount }]`) na mesma transacao. O pacote so com "todas as formacoes" vale sem itens. A `admin_save_combo` antiga continua no banco, sem uso pelo app.
+
+Importacao de alunos (a migracao de outras plataformas, `src/server/students/import-model.ts`): cada linha aceita a data de termino, ou "vitalício", por produto: depois do nome na celula de Produtos (`Curso A = 31/12/2027 | Curso B = vitalício`) ou na coluna Término, que vale para os produtos da linha sem termino proprio. O que nao traz termino segue o "Acesso até" da tela. Vai para o servidor em `productEndsAt` (id -> `AAAA-MM-DD` ou nulo) e vira `ends_at` no fim daquele dia. Sem migracao.
+
+**Deploy:** a migracao `202611280001` entra ANTES do app (aplicar antes do merge). Sem ela, a venda de pacote falha com o erro do banco e fica para Reprocessar (nunca libera sem o prazo), e a tela de Pacotes nao abre. Fora desta entrega: adaptador da Kiwify, avisos antes de vencer (Comunicacao), oferta so para quem tem outro produto, e a turma do pacote virar `cohort_memberships` na venda (hoje fica guardada no pacote e na concessao).
+
+Nao conferido em banco de verdade nesta maquina (sem Supabase local): a migracao e as consultas rodam nos testes de integracao da CI (`tests/integration/prazo-de-acesso.test.mjs`). Nao conferido com payload real: se a Ticto manda a data do pedido ORIGINAL nas cobrancas seguintes de uma assinatura (o prazo contaria do pedido original, e a soma compensa enquanto o acesso estiver aberto).
 
 ### admin_access_origins(p_start, p_end, p_content_id)
 
