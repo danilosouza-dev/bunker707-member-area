@@ -17,6 +17,16 @@ const { slug, titulo } = JIT_DE_TESTE;
 const JIT = WEBINAR_COPY.jit.aluno;
 const ORIGEM_DA_BUNNY = "https://iframe.mediadelivery.net";
 const QUINZE_MIN = 15 * 60_000;
+/** O passo do relogio da pagina (useTickingNow). */
+const PASSO_DO_RELOGIO = 15_000;
+/**
+ * Quanto esperar pela frase "A próxima sessão começa em {n} min": dois passos do relogio da pagina e uma folga. Nos
+ * primeiros 15 s de um horario (:00, :15, :30, :45) o relogio da pagina, que anda em passos de 15 s, ainda marca o
+ * instante exato do horario; com a Entrada atrasada em 0 esse instante ainda aceita entrada, e a pagina mostra "A sessão
+ * das {hora} já começou. Entre agora." ate o passo seguinte. A frase da proxima volta sozinha nesse passo, entao o teste
+ * espera por ela em vez de falhar quando roda logo depois da virada.
+ */
+const ESPERA_DA_FRASE = 2 * PASSO_DO_RELOGIO + 5_000;
 const SALA = new RegExp(`/webinarios/${slug}/sala\\?sessao=([0-9a-f-]{36})`);
 
 /** "A próxima sessão começa em {n} min" com o n capturado (a frase vem de WEBINAR_COPY, nunca reescrita). */
@@ -80,7 +90,7 @@ test("a página mostra A próxima sessão começa em {n} min, sem Garantir vaga,
   const abriu = Date.now();
   await abrirPagina(page);
   const frase = page.getByText(fraseDaProxima());
-  await expect(frase).toBeVisible();
+  await expect(frase).toBeVisible({ timeout: ESPERA_DA_FRASE });
   const minutos = Number(fraseDaProxima().exec((await frase.textContent())?.trim() ?? "")?.[1]);
   const leu = Date.now();
   expect(minutos).toBeGreaterThanOrEqual(1);
@@ -137,7 +147,7 @@ test("o aluno sem acesso entra em seguida pelo outro navegador e cai na mesma se
 test("a 375 px a página cabe sem rolar de lado e o Entrar tem 44 px", async ({ page }) => {
   await page.setViewportSize({ height: 812, width: 375 });
   await abrirPagina(page);
-  await expect(page.getByText(fraseDaProxima())).toBeVisible();
+  await expect(page.getByText(fraseDaProxima())).toBeVisible({ timeout: ESPERA_DA_FRASE });
   const botao = page.getByRole("button", { exact: true, name: JIT.entrar });
   expect((await botao.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
   await expect.poll(() => page.evaluate(() => (document.scrollingElement?.scrollWidth ?? 0) <= window.innerWidth)).toBe(true);
