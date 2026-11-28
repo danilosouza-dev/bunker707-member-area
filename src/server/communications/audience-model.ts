@@ -27,6 +27,13 @@
 // uma acao do follow-up so vale para quem garantiu vaga ou passou pela live (a regra da 4b; "não comprou pelo card"
 // nunca alcanca a escola inteira; o construtor diz isso embaixo da regra). Rollback: a imagem de antes da uniao
 // (o Quem pode por regras) le uma acao do follow-up como "attended"; docs/22 §3 diz o que tirar do ar antes de voltar.
+//
+// Vencimento do acesso (docs/22 §3.1, 28/11/2026): "access_ending" (o acesso vence em ate N dias) passa a olhar ate quando
+// o aluno tem o produto de fato, pelo maior fim entre os acessos abertos que cobrem o produto (o do produto e o da
+// plataforma inteira; um sem prazo = nunca vence), e ganha a irma "access_expired" (o acesso venceu ha ate N dias):
+// um acesso que acabou pelo prazo (facts.endedAccesses; nunca o removido por reembolso nem o suspenso) e o aluno segue
+// sem nenhum acesso aberto que cubra o produto (quem renovou nao esta vencido). Tipo novo, como as regras da live: o
+// app de antes avalia o tipo que nao conhece como false. Valem no segmento e em todo lugar dos fluxos.
 
 import { FIXED_PAGE_KEYS, FIXED_PAGE_LABELS, pageKeyOfTarget, type FixedPageKey } from "../member-area/page-visit-model";
 import { STUDENT_PACE_LABELS, STUDENT_PACES, type StudentListParams, type StudentPace } from "../students/model";
@@ -49,7 +56,9 @@ export const AUDIENCE_RULE_TYPES = [
   // Quem pode da live por regras (docs/30 §1.6): valem no segmento e nos fluxos (as acoes do follow-up de "webinar",
   // so no segmento comum).
   "access_recent",
-  "webinar"
+  "webinar",
+  // Vencimento do acesso (docs/22 §3): no segmento e nos fluxos, como "access_ending".
+  "access_expired"
 ] as const;
 export type AudienceRuleType = (typeof AUDIENCE_RULE_TYPES)[number];
 
@@ -62,7 +71,13 @@ export type AudienceRule =
   | { op: "gte" | "lte"; percent: number; productId: string | null; type: "progress" }
   | { count: number; days: AudienceWindow; op: "gte" | "lte" | "none" | "top"; type: "comments" }
   | { days: number; op: "lt" | "gt"; productId: string | null; type: "access_age" }
+  /** O acesso vence em ate N dias (`productId` null = qualquer produto). Acesso sem prazo nunca combina. */
   | { days: number; productId: string | null; type: "access_ending" }
+  /**
+   * O acesso venceu ha ate N dias (`productId` null = qualquer produto): acabou pelo prazo e o aluno continua sem
+   * acesso aberto ao produto. Removido por reembolso ou suspenso nao conta como vencido.
+   */
+  | { days: number; productId: string | null; type: "access_expired" }
   | { days: number; op: "within" | "not_within"; type: "last_study" }
   | { days: number; op: "never" | "within" | "not_within"; type: "sign_in" }
   | { paces: StudentPace[]; type: "pace" }
@@ -177,6 +192,12 @@ export function isAudienceGroup(node: AudienceNode): node is AudienceGroup {
  */
 export type AudienceAccessFact = { endsAt: number | null; gainedAt?: number; productId: string; startsAt: number };
 
+/**
+ * Acesso que acabou pelo prazo (a data de termino ja passou), em ms. O acesso a plataforma inteira usa productId
+ * "platform". Nunca o removido por reembolso (revogado) nem o suspenso: esses nao venceram.
+ */
+export type AudienceEndedAccessFact = { endedAt: number; productId: string };
+
 /** O que um aluno fez com uma notificacao (linha do sino), em ms. */
 export type MessageFact = {
   audioCompletedAt: number | null;
@@ -200,6 +221,11 @@ export type AudienceCommentCounts = { d7: number; d30: number; d90: number; tota
 
 export type AudienceStudentFacts = {
   accesses: AudienceAccessFact[];
+  /**
+   * Acessos que acabaram pelo prazo (regra "access_expired"). Opcional: fatos montados sem eles (testes, quem so le
+   * os acessos abertos) valem como nenhum, e a regra nao combina.
+   */
+  endedAccesses?: AudienceEndedAccessFact[];
   cohortIds: string[];
   comments: AudienceCommentCounts;
   /** Aulas publicadas concluidas por conteudo (lesson_progress). */
@@ -397,10 +423,28 @@ function evaluateRule(rule: AudienceRule, facts: AudienceStudentFacts, context: 
 
     case "access_ending": {
       const limit = rule.days * DAY_MS;
+      const endsSoon = (productId: string) => {
+        const end = coverageEnd(facts, productId);
 
-      return accessesFor(facts, rule.productId).some(
-        (access) => access.endsAt !== null && access.endsAt - now >= 0 && access.endsAt - now <= limit
-      );
+        return typeof end === "number" && end - now >= 0 && end - now <= limit;
+      };
+
+      return rule.productId ? endsSoon(rule.productId) : facts.accesses.some((access) => endsSoon(access.productId));
+    }
+
+    case "access_expired": {
+      const limit = rule.days * DAY_MS;
+
+      return (facts.endedAccesses ?? []).some((ended) => {
+        if (rule.productId && !coversProduct(ended, rule.productId)) {
+          return false;
+        }
+
+        const age = now - ended.endedAt;
+
+        // Quem renovou (ou tem a plataforma inteira aberta) nao esta vencido.
+        return age >= 0 && age <= limit && coverageEnd(facts, rule.productId ?? ended.productId) === undefined;
+      });
     }
 
     case "last_study": {
@@ -475,9 +519,31 @@ export function accessRecentSince(period: AccessRecentPeriod, now: number) {
   return period.kind === "today" ? saoPauloDayBounds(now).start : now - period.hours * HOUR_MS;
 }
 
-/** O acesso aberto vale para o produto: o proprio produto ou a plataforma inteira. */
-function coversProduct(access: AudienceAccessFact, productId: string) {
+/** O acesso vale para o produto: o proprio produto ou a plataforma inteira. */
+function coversProduct(access: { productId: string }, productId: string) {
   return access.productId === productId || access.productId === PLATFORM_ACCESS_ID;
+}
+
+/**
+ * Ate quando o aluno tem o produto, pelos acessos abertos que o cobrem (o do produto e o da plataforma inteira): o
+ * maior fim, em ms; null = algum deles nao tem prazo (nunca vence); undefined = nenhum acesso aberto cobre o produto.
+ */
+function coverageEnd(facts: AudienceStudentFacts, productId: string): number | null | undefined {
+  let end: number | undefined;
+
+  for (const access of facts.accesses) {
+    if (!coversProduct(access, productId)) {
+      continue;
+    }
+
+    if (access.endsAt === null) {
+      return null;
+    }
+
+    end = end === undefined ? access.endsAt : Math.max(end, access.endsAt);
+  }
+
+  return end;
 }
 
 /**
@@ -743,12 +809,13 @@ export type AnchoredAudienceFacts = { accesses: readonly AudienceAccessFact[]; c
  * mesmo se sair dele pelo que vence com o tempo ou muda com o que o aluno faz, mas o produto pago e a turma sao sempre
  * conferidos de novo. Sobre os acessos abertos e as turmas de agora:
  * - cada regra que exige ter um produto (Produto "tem", "Ganhou acesso recentemente" nao negada, Tempo de acesso,
- *   Acesso terminando e Progresso) vira "tem um acesso aberto a um destes produtos, ou a plataforma inteira"
+ *   Acesso perto de vencer e Progresso) vira "tem um acesso aberto a um destes produtos, ou a plataforma inteira"
  *   ("qualquer produto", e o Progresso geral, = algum acesso aberto);
  * - a Turma vale como agora (quem foi tirado da turma sai);
  * - o resto vale como verdadeiro: o que vence com o tempo ou com a atividade (entrada, ultimo estudo, ritmo,
- *   comentarios, lives, o que fez com uma notificacao, "Ganhou acesso recentemente" negada) e "nao tem o produto"
- *   (comprar o produto durante a live nao tira ninguem da sala).
+ *   comentarios, lives, o que fez com uma notificacao, "Ganhou acesso recentemente" negada, "O acesso venceu ha ate
+ *   N dias", que e de quem esta sem o produto) e "nao tem o produto" (comprar o produto durante a live nao tira
+ *   ninguem da sala).
  * Os grupos "todas" e "qualquer" continuam valendo. Nunca da menos que evaluateAudience sobre os mesmos acessos e
  * turmas: quem esta no segmento agora tambem passa aqui (e quem perdeu o produto ou a turma que o segmento pede, nao).
  */
@@ -1048,7 +1115,8 @@ function normalizeRule(rule: AudienceRule): AudienceRule | null {
     case "access_age":
       return { days: days(rule.days), op: rule.op, productId: rule.productId?.trim() || null, type: "access_age" };
     case "access_ending":
-      return { days: days(rule.days), productId: rule.productId?.trim() || null, type: "access_ending" };
+    case "access_expired":
+      return { days: days(rule.days), productId: rule.productId?.trim() || null, type: rule.type };
     case "last_study":
       return { days: days(rule.days), op: rule.op, type: "last_study" };
     case "sign_in":
@@ -1225,7 +1293,12 @@ export function describeAudienceRule(rule: AudienceRule, names: AudienceNames): 
     case "access_ending": {
       const scope = rule.productId ? ` a ${productName(names, rule.productId)}` : "";
 
-      return `têm acesso${scope} terminando em até ${daysLabel(rule.days)}`;
+      return `têm acesso${scope} que vence em até ${daysLabel(rule.days)}`;
+    }
+    case "access_expired": {
+      const scope = rule.productId ? ` a ${productName(names, rule.productId)}` : "";
+
+      return `estão com o acesso${scope} vencido há até ${daysLabel(rule.days)}`;
     }
     case "last_study":
       return rule.op === "within"

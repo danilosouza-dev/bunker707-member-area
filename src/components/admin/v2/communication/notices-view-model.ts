@@ -1695,7 +1695,9 @@ export function draftToPopupItem(
 
 export const AUDIENCE_RULE_LABELS: Record<AudienceRuleType, string> = {
   access_age: "Tempo de acesso",
-  access_ending: "Acesso terminando",
+  access_ending: "Acesso perto de vencer",
+  // Vencimento do acesso (docs/22 §3)
+  access_expired: "Acesso vencido",
   cohort: "Turma",
   comments: "Comentários",
   last_study: "Último estudo",
@@ -1720,6 +1722,7 @@ export const AUDIENCE_RULE_ORDER: readonly AudienceRuleType[] = [
   "access_age",
   "access_recent",
   "access_ending",
+  "access_expired",
   "last_study",
   "sign_in",
   "pace",
@@ -2084,6 +2087,14 @@ export const ACCESS_RECENT_SCOPE_CHOICES = [
   { label: "um destes produtos", value: "chosen" }
 ] as const;
 
+/** Atalhos de dias das regras de vencimento do acesso (outro numero vai no campo). */
+export const ACCESS_DEADLINE_SHORTCUTS = [7, 30, 90] as const;
+
+export const ACCESS_ENDING_HINT =
+  "Só entra quem tem data de término. Acesso sem prazo nunca entra. Com mais de um acesso ao mesmo produto (ou à plataforma inteira), vale o que termina por último.";
+export const ACCESS_EXPIRED_HINT =
+  "Só entra quem continua sem acesso ao produto: quem renovou sai. Acesso removido por reembolso ou suspenso não conta como vencido.";
+
 export const ACCESS_RECENT_HINT = "Conta a data de início do acesso. Hoje vai de meia-noite a meia-noite, no horário de Brasília. Quem já tinha o produto antes não entra.";
 export const ACCESS_RECENT_PICK_HINT = "Sem produto escolhido, vale qualquer produto.";
 
@@ -2301,6 +2312,7 @@ export function defaultAudienceRule(type: AudienceRuleType, input: { messageRef?
     case "access_age":
       return { days: 7, op: "lt", productId: null, type };
     case "access_ending":
+    case "access_expired":
       return { days: 30, productId: null, type };
     case "last_study":
       return { days: 14, op: "not_within", type };

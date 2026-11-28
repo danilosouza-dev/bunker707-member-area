@@ -226,7 +226,7 @@ function collectIds(definition: AudienceDefinition, products: Set<string>, cohor
       node.productIds.forEach((id) => products.add(id));
     } else if (node.type === "cohort") {
       node.cohortIds.forEach((id) => cohorts.add(id));
-    } else if ((node.type === "progress" || node.type === "access_age" || node.type === "access_ending") && node.productId) {
+    } else if ((node.type === "progress" || node.type === "access_age" || node.type === "access_ending" || node.type === "access_expired") && node.productId) {
       products.add(node.productId);
     } else if (node.type === "page_visit" && (node.page.kind === "content" || node.page.kind === "checkout") && node.page.productId) {
       products.add(node.page.productId);

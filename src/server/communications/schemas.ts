@@ -165,6 +165,8 @@ const ruleSchema = z.discriminatedUnion(
     }),
     z.object({ days: daysSchema, op: z.enum(["lt", "gt"]), productId: optionalProductSchema, type: z.literal("access_age") }),
     z.object({ days: daysSchema, productId: optionalProductSchema, type: z.literal("access_ending") }),
+    // Vencimento do acesso (docs/22 §3): "venceu ha ate N dias", no segmento e nos fluxos. Sem produto = qualquer um.
+    z.object({ days: daysSchema, productId: optionalProductSchema, type: z.literal("access_expired") }),
     z.object({ days: daysSchema, op: z.enum(["within", "not_within"]), type: z.literal("last_study") }),
     z.object({ days: daysSchema, op: z.enum(["never", "within", "not_within"]), type: z.literal("sign_in") }),
     z.object({

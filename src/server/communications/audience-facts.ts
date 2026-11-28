@@ -21,6 +21,10 @@ import "server-only";
 // (loadWebinarFollowUpFacts em src/server/webinars/follow-up-queries.ts, a RPC webinar_follow_up_facts; opcao
 // `webinarFollowUpIds`; marca context.webinarFollowUpsLoaded so com as lives lidas). Sem a leitura (ou num banco sem a
 // migracao, ou live apagada) a regra nunca combina, nem negada.
+//
+// Vencimento do acesso (docs/22 §3, 28/11/2026): alem dos acessos abertos, os fatos levam os que acabaram pelo prazo
+// (endedAccessFactsOf, em facts.endedAccesses; regra "O acesso venceu ha ate N dias"), das mesmas linhas ja lidas:
+// nenhuma leitura nova, nem aqui nem no lote do motor dos fluxos (o RPC de fatos do lote ja devolve todos os acessos).
 
 import { sanitizeProfileAvatarUrl } from "@/server/member-area/student-pages-model";
 import { accessStateOf, isAccessOpen, paceOf } from "@/server/students/model";
@@ -44,6 +48,7 @@ import {
   type AudienceAccessFact,
   type AudienceCommentCounts,
   type AudienceContext,
+  type AudienceEndedAccessFact,
   type AudienceStudentFacts,
   type AudienceWebinarFacts,
   type MessageFact
@@ -232,6 +237,23 @@ export function accessFactsOf(openRows: readonly AudienceEntitlementRow[]): Audi
 }
 
 /**
+ * Acessos de um aluno que acabaram pelo prazo: a data de termino ja passou e o acesso estava valendo ate ela (ativo,
+ * ou marcado como expirado). Revogado (reembolso, ou tirado pela equipe) e suspenso nao venceram: ficam de fora. Sem
+ * data de termino nao ha quando contar: fica de fora tambem.
+ */
+export function endedAccessFactsOf(rows: readonly AudienceEntitlementRow[], now: number): AudienceEndedAccessFact[] {
+  return rows.flatMap((row) => {
+    const endedAt = timeOf(row.ends_at);
+
+    if ((row.status !== "active" && row.status !== "expired") || endedAt === null || endedAt > now) {
+      return [];
+    }
+
+    return [{ endedAt, productId: row.target_type === "platform" ? "platform" : row.target_id }];
+  });
+}
+
+/**
  * Fatos so com os acessos (sem perfil, progresso, turmas, entrada nem comentarios), para quando nenhuma regra usa o
  * resto: o lote do motor dos fluxos e o "Quem pode" da live com regras so de acesso ou de lives.
  */
@@ -242,6 +264,7 @@ export function accessOnlyFacts(userId: string, rows: readonly AudienceEntitleme
     comments: ZERO_COMMENTS,
     completedByContent: {},
     completedLessons: 0,
+    endedAccesses: endedAccessFactsOf(rows, now),
     lastSignInAt: null,
     lastStudiedAt: null,
     pace: "never_started",
@@ -269,6 +292,16 @@ export type StudentFactsSources = {
 export function buildStudentFacts(sources: StudentFactsSources): { facts: AudienceStudentFacts[]; people: Map<string, AudiencePerson> } {
   const { lessonIndex, now } = sources;
   const openByUser = groupBy(openAccessRows(sources.entitlements, now), (row) => row.user_id);
+  // Os que acabaram pelo prazo, por aluno (regra "O acesso venceu ha ate N dias").
+  const endedByUser = new Map<string, AudienceEndedAccessFact[]>();
+
+  for (const row of sources.entitlements) {
+    const [ended] = endedAccessFactsOf([row], now);
+
+    if (ended) {
+      endedByUser.set(row.user_id, [...(endedByUser.get(row.user_id) ?? []), ended]);
+    }
+  }
   const progressByUser = groupBy(sources.progressRows, (row) => row.user_id);
   const membershipsByUser = groupBy(sources.memberships, (row) => row.user_id);
   const facts: AudienceStudentFacts[] = [];
@@ -304,6 +337,7 @@ export function buildStudentFacts(sources: StudentFactsSources): { facts: Audien
       completedLessons,
       // v3b-2: o "No primeiro acesso" do pop-up (a coluna ja vem em PROFILE_COLUMNS: nenhuma leitura nova).
       createdAt: timeOf(profile.created_at),
+      endedAccesses: endedByUser.get(profile.id) ?? [],
       lastSignInAt: timeOf(profile.last_sign_in_at),
       lastStudiedAt: timeOf(lastStudiedAt),
       pace: paceOf({ completedLessons, lastStudiedAt, now, totalLessons }),

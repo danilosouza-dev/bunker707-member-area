@@ -31,6 +31,9 @@ import { ProductPicker, type ProductPickerItem } from "../storefront/product-pic
 import { StudentAvatar } from "../students/student-avatar";
 import { adminTransition } from "../styles";
 import {
+  ACCESS_DEADLINE_SHORTCUTS,
+  ACCESS_ENDING_HINT,
+  ACCESS_EXPIRED_HINT,
   ACCESS_RECENT_HINT,
   ACCESS_RECENT_PERIOD_CHOICES,
   ACCESS_RECENT_PICK_HINT,
@@ -573,6 +576,57 @@ function WebinarRuleFields({
   );
 }
 
+/**
+ * "Acesso a [qualquer produto | produto] vence em até [30] dias" e "… venceu há até [30] dias", com os atalhos de 7, 30
+ * e 90 dias (docs/22 §3). O atalho so preenche o campo: qualquer numero de 1 a 3650 vale.
+ */
+function AccessDeadlineFields({
+  context,
+  onChange,
+  rule
+}: {
+  context: RuleContext;
+  onChange: (rule: AudienceRule) => void;
+  rule: Extract<AudienceRule, { type: "access_ending" | "access_expired" }>;
+}) {
+  const { disabled } = context;
+  const ending = rule.type === "access_ending";
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <span className={textClass}>Acesso a</span>
+        <InlineSelect
+          ariaLabel="Produto do acesso"
+          className="w-full sm:w-56"
+          disabled={disabled || !context.productsLoaded}
+          onChange={(productId) => onChange({ ...rule, productId })}
+          options={productOptionsWith(context.productOptions, "qualquer produto")}
+          value={rule.productId}
+        />
+        <span className={textClass}>{ending ? "vence em até" : "venceu há até"}</span>
+        <NumberField ariaLabel="Dias" disabled={disabled} max={3650} min={1} onChange={(days) => onChange({ ...rule, days })} value={rule.days} />
+        <span className={textClass}>{rule.days === 1 ? "dia" : "dias"}</span>
+      </div>
+      <div aria-label="Atalhos de dias" className="flex min-w-0 flex-wrap gap-2" role="group">
+        {ACCESS_DEADLINE_SHORTCUTS.map((days) => (
+          <button
+            aria-pressed={rule.days === days}
+            className={cn(adminPillClasses(rule.days === days), disabled && "cursor-not-allowed opacity-60")}
+            disabled={disabled}
+            key={days}
+            onClick={() => onChange({ ...rule, days })}
+            type="button"
+          >
+            {days} dias
+          </button>
+        ))}
+      </div>
+      <p className={hintClass}>{ending ? ACCESS_ENDING_HINT : ACCESS_EXPIRED_HINT}</p>
+    </div>
+  );
+}
+
 /** Campos de cada tipo de regra, em frase ("Concluíram pelo menos 50 % das aulas de ..."). */
 function RuleFields({ context, onChange, rule, ruleKey }: { context: RuleContext; onChange: (rule: AudienceRule) => void; rule: AudienceRule; ruleKey: string }) {
   const { disabled } = context;
@@ -702,22 +756,8 @@ function RuleFields({ context, onChange, rule, ruleKey }: { context: RuleContext
         </div>
       );
     case "access_ending":
-      return (
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className={textClass}>Acesso a</span>
-          <InlineSelect
-            ariaLabel="Produto do acesso"
-            className="w-full sm:w-56"
-            disabled={disabled || !context.productsLoaded}
-            onChange={(productId) => onChange({ ...rule, productId })}
-            options={productOptionsWith(context.productOptions, "qualquer produto")}
-            value={rule.productId}
-          />
-          <span className={textClass}>terminando em até</span>
-          <NumberField ariaLabel="Dias" disabled={disabled} max={3650} min={1} onChange={(days) => onChange({ ...rule, days })} value={rule.days} />
-          <span className={textClass}>{daysLabel(rule.days)}</span>
-        </div>
-      );
+    case "access_expired":
+      return <AccessDeadlineFields context={context} onChange={onChange} rule={rule} />;
     case "last_study":
       return (
         <div className="flex min-w-0 flex-wrap items-center gap-2">

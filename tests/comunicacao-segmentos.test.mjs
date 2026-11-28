@@ -289,8 +289,8 @@ test("frase do segmento: progresso, comentarios, tempo de acesso e acesso termin
   assert.equal(frase({ count: 100, days: 7, op: "top", type: "comments" }), "Alunos que estão entre os 100 que mais comentaram nos últimos 7 dias");
   assert.equal(frase({ days: 7, op: "lt", productId: "b", type: "access_age" }), "Alunos que ganharam acesso a Curso Agentes há menos de 7 dias");
   assert.equal(frase({ days: 1, op: "gt", productId: null, type: "access_age" }), "Alunos que ganharam acesso há mais de 1 dia");
-  assert.equal(frase({ days: 30, productId: null, type: "access_ending" }), "Alunos que têm acesso terminando em até 30 dias");
-  assert.equal(frase({ days: 15, productId: "c", type: "access_ending" }), "Alunos que têm acesso a Mentoria terminando em até 15 dias");
+  assert.equal(frase({ days: 30, productId: null, type: "access_ending" }), "Alunos que têm acesso que vence em até 30 dias");
+  assert.equal(frase({ days: 15, productId: "c", type: "access_ending" }), "Alunos que têm acesso a Mentoria que vence em até 15 dias");
 });
 
 test("frase do segmento: estudo, entrada, ritmo, turma e grupos com E/OU entre parenteses", () => {
