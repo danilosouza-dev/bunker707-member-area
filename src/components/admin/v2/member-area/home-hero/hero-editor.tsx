@@ -560,7 +560,7 @@ export function HeroEditor({ canEdit, data }: HeroEditorProps) {
                 })}
                 <p className="flex items-start gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-2)] px-3 py-2.5 text-[13px] leading-5 text-[var(--text-secondary)]">
                   <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-                  Tela sem capa própria usa a do tamanho maior mais próximo. Sem nenhuma capa aqui, todas as telas usam a imagem do destaque.
+                  Com pelo menos uma capa aqui, a home mostra cada capa inteira, sem cortar as laterais. Tela sem capa própria usa a do tamanho maior mais próximo. Sem nenhuma capa aqui, todas as telas usam a imagem do destaque, cortada nas laterais.
                 </p>
               </div>
             </SectionCard>

@@ -47,14 +47,21 @@ export const HERO_TEXT_LIMITS = { badge: 40, ctaLabel: 32, description: 240, tit
  * acima de 1535 px vale a imagem principal (1920 × 720). Tela sem capa propria usa a do tamanho maior mais
  * proximo que existir. A capa de tablet vai ate 1199 px para pegar o iPad grande em pe (1032 px) e os iPads deitados
  * (1024 a 1194 px): nessas larguras a caixa do destaque e quase quadrada e a capa de notebook (2:1) perdia o texto nas
- * laterais. `field` e o campo do rascunho, `key` a chave gravada em `hero.images` e `slot` a medida
+ * laterais. `ratio` e a proporcao da capa: com capas por tamanho de tela, a caixa do destaque toma a proporcao da capa
+ * que a tela desenha (capa inteira, sem cortar as laterais; regras em src/app/globals.css). `field` e o campo do rascunho, `key` a chave gravada em `hero.images` e `slot` a medida
  * do recorte e do envio (IMAGE_SPECS / IMAGE_UPLOAD_SPECS).
  */
 export const HERO_IMAGE_SIZES = [
-  { field: "imageMobile", key: "mobile", label: "Celular", maxWidth: 639, slot: "heroMobile" },
-  { field: "imageTablet", key: "tablet", label: "Tablet", maxWidth: 1199, slot: "heroTablet" },
-  { field: "imageNotebook", key: "notebook", label: "Notebook", maxWidth: 1535, slot: "heroNotebook" }
+  { field: "imageMobile", key: "mobile", label: "Celular", maxWidth: 639, ratio: "9 / 16", slot: "heroMobile" },
+  { field: "imageTablet", key: "tablet", label: "Tablet", maxWidth: 1199, ratio: "5 / 4", slot: "heroTablet" },
+  { field: "imageNotebook", key: "notebook", label: "Notebook", maxWidth: 1535, ratio: "2 / 1", slot: "heroNotebook" }
 ] as const;
+
+/** Proporcao (largura / altura) da imagem principal do destaque, 1920 × 720. */
+export const HERO_MAIN_IMAGE_RATIO = "8 / 3";
+
+/** Altura maxima do destaque no estilo discreto (--member-hero-min-h em src/app/globals.css), usada na previa do admin. */
+export const HERO_MAX_HEIGHT = 680;
 
 export type HeroImageSizeField = (typeof HERO_IMAGE_SIZES)[number]["field"];
 
@@ -564,6 +571,42 @@ export function heroImageSources(hero: Pick<HomeHeroConfig, "images" | "mediaTyp
 /** A capa que uma tela de `width` px desenha (mesma regra do navegador com os `<source>` de heroImageSources). */
 export function heroImageForWidth(hero: Pick<HomeHeroConfig, "image" | "images" | "mediaType">, width: number) {
   return heroImageSources(hero).find((source) => width <= source.maxWidth)?.src ?? hero.image;
+}
+
+/**
+ * Capa inteira: com pelo menos uma capa por tamanho de tela, a caixa do destaque deixa a altura quase fixa e fica com
+ * a altura que a proporcao da capa pede naquela largura, ate a altura maxima do estilo. Assim a home nunca corta as laterais (onde a
+ * arte costuma ter o texto); quando a altura maxima limita, o corte e so em cima e embaixo. Sem nenhuma capa por
+ * tamanho de tela, o destaque continua com a altura de sempre.
+ */
+export function heroShowsWholeCover(hero: Pick<HomeHeroConfig, "images" | "mediaType">) {
+  return heroImageSources(hero).length > 0;
+}
+
+/** Proporcao da caixa do destaque numa tela de `width` px; null quando a altura e a de sempre. */
+export function heroAspectRatioForWidth(hero: Pick<HomeHeroConfig, "images" | "mediaType">, width: number) {
+  if (!heroShowsWholeCover(hero)) {
+    return null;
+  }
+
+  return HERO_IMAGE_SIZES.find((size) => width <= size.maxWidth && hero.images?.[size.key])?.ratio ?? HERO_MAIN_IMAGE_RATIO;
+}
+
+/**
+ * Altura (px) da caixa do destaque numa "tela" de `width` px da previa do admin: a largura dividida pela proporcao da
+ * capa, ate a altura maxima. Mesma conta da regra de globals.css, que na home usa a largura da janela. null quando a
+ * altura e a de sempre.
+ */
+export function heroPreviewHeightForWidth(hero: Pick<HomeHeroConfig, "images" | "mediaType">, width: number) {
+  const ratio = heroAspectRatioForWidth(hero, width);
+
+  if (!ratio) {
+    return null;
+  }
+
+  const [ratioWidth, ratioHeight] = ratio.split("/").map(Number);
+
+  return Math.min(HERO_MAX_HEIGHT, Math.round((width * ratioHeight) / ratioWidth));
 }
 
 /** Mesma regra da home (src/app/page.tsx): o destaque aparece ligado e com imagem ou video. */

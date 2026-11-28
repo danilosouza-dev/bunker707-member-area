@@ -6,7 +6,7 @@ import { withAccessPreviewParam, type AccessPreviewMode } from "@/lib/access-pre
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import type { HomeHeroConfig } from "@/lib/platform-types";
 import { isSafeHeroCtaHref } from "@/server/member-area/home-hero-links";
-import { heroImageForWidth, heroImageSources } from "@/server/member-area/home-hero-model";
+import { heroImageForWidth, heroImageSources, heroPreviewHeightForWidth, heroShowsWholeCover } from "@/server/member-area/home-hero-model";
 
 // Destaque do topo da home do aluno (editado em Area de membros > Destaque).
 // Responde por container query (`@container` na section + `@min-[...]:`) e nao pela janela, para a
@@ -17,6 +17,10 @@ import { heroImageForWidth, heroImageSources } from "@/server/member-area/home-h
 // telas grandes e cada capa menor entra como um `<source media="(max-width: N px)">` do mesmo `<picture>`; o
 // navegador baixa so a que serve para a janela. Na previa do admin a janela e a do admin, entao a capa e escolhida
 // pela largura da "tela" da moldura (`previewWidth`).
+//
+// Capa inteira: com capas por tamanho de tela, a caixa fica com a altura que a proporcao da capa pede naquela largura
+// (`data-hero-fit` e `data-capa-*`, regras em globals.css), ate a altura maxima do estilo; as laterais nunca sao
+// cortadas. Na previa a altura vem da largura da moldura.
 //
 // Sem selo, titulo, descricao nem botao por cima, a imagem aparece como foi enviada: o escurecimento lateral e o
 // do alto so existem para dar leitura ao texto (docs/02, Hero). O esfumacado de baixo do estilo discreto continua,
@@ -105,12 +109,21 @@ export function HeroSection({ accessPreviewMode, hero, preview = false, previewW
   // tela tambem nao ha preload: ele baixaria a imagem grande no celular, que desenha outra.
   const preloadHeroImage = !preview && sources.length === 0 && !/^(?:data|blob):/i.test(hero.image);
   const poster = hero.mediaType === "video" && hero.poster ? hero.poster : null;
+  const wholeCover = heroShowsWholeCover(hero);
+  const previewHeight = preview && previewWidth ? heroPreviewHeightForWidth(hero, previewWidth) : null;
 
   return (
     // flow-root: a margem de cima do destaque fica dentro do bloco, entao a luz comeca no topo da pagina.
     <div className="relative flow-root">
       <HeroGlow color={hero.glowColor} src={hero.mediaType === "video" ? poster : hero.image} />
-      <section className="@container relative z-[1] min-h-[var(--member-hero-min-h)] overflow-hidden rounded-[var(--member-hero-radius)] mx-[var(--member-hero-inset)] mt-[var(--member-hero-top)]">
+      <section
+        className="@container relative z-[1] min-h-[var(--member-hero-min-h)] overflow-hidden rounded-[var(--member-hero-radius)] mx-[var(--member-hero-inset)] mt-[var(--member-hero-top)]"
+        data-capa-mobile={wholeCover && hero.images?.mobile ? "" : undefined}
+        data-capa-notebook={wholeCover && hero.images?.notebook ? "" : undefined}
+        data-capa-tablet={wholeCover && hero.images?.tablet ? "" : undefined}
+        data-hero-fit={wholeCover ? "full" : undefined}
+        style={previewHeight ? { minHeight: previewHeight } : undefined}
+      >
       {hero.mediaType === "video" ? (
         <>
           <video

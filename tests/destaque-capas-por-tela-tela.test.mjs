@@ -95,3 +95,33 @@ test("editor do Destaque: as três capas opcionais aparecem com imagem, somem co
   const withVideo = editor({ mediaType: "video", poster: IMAGE, videoUrl: "https://vz-123.b-cdn.net/abc/play_720p.mp4" });
   assert.doesNotMatch(withVideo, /Capas por tamanho de tela/, "com vídeo não há capas por tamanho de tela");
 });
+
+test("capa inteira: com capas por tamanho de tela a caixa segue a proporção da capa; sem elas, a altura é a de sempre", () => {
+  const sectionOf = (html) => html.match(/<section[^>]*>/)[0];
+
+  const withCovers = sectionOf(draw(heroWith({ images: { mobile: MOBILE, tablet: TABLET } })));
+  assert.match(withCovers, /data-hero-fit="full"/);
+  assert.match(withCovers, /data-capa-mobile=""/);
+  assert.match(withCovers, /data-capa-tablet=""/);
+  assert.doesNotMatch(withCovers, /data-capa-notebook/, "sem capa de notebook, essa faixa fica com a proporção da imagem principal");
+  assert.doesNotMatch(withCovers, /style=/, "na home a altura vem das regras por largura de janela");
+
+  const plain = sectionOf(draw(heroWith()));
+  assert.doesNotMatch(plain, /data-hero-fit|data-capa-/, "só a imagem principal: nada muda");
+
+  const video = sectionOf(draw(model.resolveHomeHero({ image: "https://vz-123.b-cdn.net/abc/play_720p.mp4", images: { mobile: MOBILE }, mediaType: "video", poster: IMAGE })));
+  assert.doesNotMatch(video, /data-hero-fit/, "vídeo não tem capas por tamanho de tela");
+});
+
+test("capa inteira na prévia do admin: a altura vem da largura da moldura e da proporção da capa, até 680 px", () => {
+  const all = heroWith({ images: { mobile: MOBILE, notebook: NOTEBOOK, tablet: TABLET } });
+  const heightAt = (hero, previewWidth) => draw(hero, { preview: true, previewWidth }).match(/<section[^>]*style="min-height:(\d+)px"/)?.[1];
+
+  // 390 × 16/9 = 693 e 1199 × 4/5 = 959 passam da altura máxima; 768 × 4/5 = 614; 1280 / 2 = 640; 1920 × 3/8 = 720.
+  assert.deepEqual([390, 768, 1199, 1280, 1920].map((width) => heightAt(all, width)), ["680", "614", "680", "640", "680"]);
+  assert.deepEqual([390, 768, 1280].map((width) => model.heroAspectRatioForWidth(heroWith({ images: { tablet: TABLET } }), width)), ["5 / 4", "5 / 4", "8 / 3"], "tela sem capa própria: proporção da capa maior mais próxima");
+  assert.equal(model.heroPreviewHeightForWidth(heroWith({ images: { tablet: TABLET } }), 1280), 480, "1280 × 3/8");
+  assert.equal(heightAt(heroWith(), 390), undefined, "sem capas por tamanho de tela, a prévia também fica com a altura de sempre");
+  assert.equal(model.heroAspectRatioForWidth(all, 1536), model.HERO_MAIN_IMAGE_RATIO);
+  assert.equal(model.heroShowsWholeCover(heroWith()), false);
+});
