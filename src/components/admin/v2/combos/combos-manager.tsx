@@ -10,18 +10,21 @@ import { deleteCombo, saveCombo } from "@/server/catalog/combo-actions";
 import { PRODUCT_FORMAT_LABELS, PRODUCT_SITUATION_LABELS } from "@/server/catalog/model";
 import { comboSchema } from "@/server/catalog/schemas";
 import type { ComboListItem, ProductOption } from "@/server/catalog/types";
+import { AccessTermSelect } from "../access-term-select";
 import type { DataTableColumn } from "../data-table";
 import { ErrorBanner } from "../error-banner";
 import { AdminField, PillGroup, adminInputClass, adminTextareaClass, fieldDescribedBy } from "../form";
 import { PageHeader } from "../page-header";
 import { ProductThumb } from "../product-thumb";
-import { ConfirmDialog, ResponsiveTable, RowMenu } from "../settings/kit";
+import { AdminSwitch, ConfirmDialog, ResponsiveTable, RowMenu } from "../settings/kit";
 import { AdminSheet, AdminSheetSection } from "../sheet";
 import { StatusChip } from "../status-chip";
 import { adminCard } from "../styles";
 import { adminToast } from "../toast";
 import { ProductPicker, type ProductPickerItem } from "../storefront/product-picker";
 import {
+  ALL_FORMATIONS_ITEM_HINT,
+  ALL_FORMATIONS_ITEM_LABEL,
   COMBO_STATUSES,
   COMBO_STATUS_HINTS,
   COMBO_STATUS_LABELS,
@@ -32,13 +35,15 @@ import {
   formatRelativeDate,
   isComboFormDirty,
   summarizeComboProducts,
+  summarizeComboTerms,
+  withProductTerm,
   type ComboFormState
 } from "@/server/catalog/combo-model";
 
 // Pacotes (docs/17 §1.6.8): varios produtos vendidos juntos. Tabela no desktop, cartoes abaixo de
 // 768 px; criar e editar num painel que sobrepoe a pagina; excluir pede confirmacao (nao ha desfazer).
 
-const SALE_PHRASE = "Quando a venda deste pacote chegar da Hotmart/Ticto, liberamos todos os produtos de uma vez.";
+const SALE_PHRASE = "Quando a venda deste pacote chegar da Hotmart/Ticto, liberamos todos os produtos de uma vez, cada um com o prazo que você escolher.";
 const FORM_ID = "pacote-form";
 
 type CombosManagerProps = {
@@ -73,9 +78,18 @@ function fieldErrorsFrom(failure: ActionFailure): FieldErrors {
     description: pick("description"),
     hotmartProductId: pick("hotmartProductId"),
     name: pick("name"),
+    allFormationsTerm: pick("allFormationsTerm") ?? pick("allFormationsTerm.amount"),
     productIds: pick("productIds") ?? pick("productIds.0"),
+    productTerms: Object.entries(failure.fieldErrors ?? {}).find(([key]) => key.startsWith("productTerms"))?.[1]?.[0],
     tictoProductId: pick("tictoProductId")
   };
+}
+
+/** "3 produtos", "Todas as formações + 2 produtos". */
+function describeComboContents(combo: ComboListItem) {
+  const products = combo.products.length === 1 ? "1 produto" : `${combo.products.length} produtos`;
+
+  return combo.allFormations ? (combo.products.length > 0 ? `Todas as formações + ${products}` : "Todas as formações") : products;
 }
 
 function ProductStack({ combo }: { combo: ComboListItem }) {
@@ -93,8 +107,12 @@ function ProductStack({ combo }: { combo: ComboListItem }) {
           </span>
         ) : null}
       </span>
-      <span className="truncate text-[13px] text-[var(--text-secondary)] tabular-nums">
-        {combo.products.length === 1 ? "1 produto" : `${combo.products.length} produtos`}
+      <span className="flex min-w-0 flex-col">
+        <span className="truncate text-[13px] text-[var(--text-secondary)] tabular-nums" title={describeComboContents(combo)}>
+          {describeComboContents(combo)}
+        </span>
+        {/* "Para sempre", "Por 1 ano" ou "Prazos diferentes": o prazo de cada um esta no painel do pacote. */}
+        <span className="truncate text-xs text-[var(--text-tertiary)]">{summarizeComboTerms(combo)}</span>
       </span>
     </span>
   );
@@ -420,6 +438,9 @@ function ComboForm({ canEdit, cohorts, combo, onDirtyChange, onSaved, onSavingCh
   const hotmartHint = "O número do produto em Hotmart › Produtos. Com ele, a venda aprovada libera todos os produtos do pacote; reembolso e chargeback tiram o acesso a todos.";
   const tictoHint = "O número (ID) do produto no painel da Ticto. Com ele, a venda aprovada libera todos os produtos do pacote; reembolso e chargeback tiram o acesso a todos.";
   const productsHint = "Só produtos vendidos sozinhos entram num pacote.";
+  const termsHint = "O prazo conta da data da compra. Quem compra de novo soma o prazo ao que ainda tem. Quando o prazo de um curso acaba, só aquele curso fecha.";
+  // O titulo de cada produto escolhido: os que estao a venda e os que o pacote ja tinha.
+  const titleById = new Map([...(combo?.products ?? []).map((product) => [product.id, product.title] as const), ...pickerItems.map((item) => [item.id, item.title] as const)]);
 
   function update<Key extends keyof ComboFormState>(field: Key, value: ComboFormState[Key]) {
     const next = { ...form, [field]: value };
@@ -527,6 +548,54 @@ function ComboForm({ canEdit, cohorts, combo, onDirtyChange, onSaved, onSavingCh
               value={form.productIds}
             />
           </AdminField>
+          {form.productIds.length > 0 ? (
+            <div className="flex min-w-0 flex-col gap-2">
+              <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">Por quanto tempo cada um fica liberado</span>
+              <ul aria-label="Prazo de acesso de cada produto" className="flex min-w-0 flex-col divide-y divide-[var(--border-subtle)] rounded-lg border border-[var(--border-subtle)]">
+                {form.productIds.map((productId) => {
+                  const title = titleById.get(productId) ?? productId;
+
+                  return (
+                    <li className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2.5" key={productId}>
+                      <span className="min-w-0 flex-1 basis-40 truncate text-sm text-[var(--text-primary)]" title={title}>
+                        {title}
+                      </span>
+                      <AccessTermSelect
+                        ariaLabel={title}
+                        id={`pacote-prazo-${productId}`}
+                        onChange={(term) => update("productTerms", withProductTerm(form.productTerms, productId, term))}
+                        value={form.productTerms[productId] ?? null}
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+              {errors.productTerms ? <p className="text-[13px] leading-5 text-[var(--error)]">{errors.productTerms}</p> : null}
+              <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{termsHint}</p>
+            </div>
+          ) : null}
+        </AdminSheetSection>
+
+        <AdminSheetSection title="Todas as formações">
+          <AdminSwitch
+            checked={form.allFormations}
+            description={ALL_FORMATIONS_ITEM_HINT}
+            disabled={!canEdit}
+            id="pacote-todas-as-formacoes"
+            label={ALL_FORMATIONS_ITEM_LABEL}
+            onCheckedChange={(checked) => update("allFormations", checked)}
+          />
+          {form.allFormations ? (
+            <AdminField error={errors.allFormationsTerm} id="pacote-todas-as-formacoes-prazo" label="Por quanto tempo">
+              <AccessTermSelect
+                ariaLabel="todas as formações"
+                describedBy={fieldDescribedBy("pacote-todas-as-formacoes-prazo", { error: errors.allFormationsTerm })}
+                id="pacote-todas-as-formacoes-prazo"
+                onChange={(term) => update("allFormationsTerm", term)}
+                value={form.allFormationsTerm}
+              />
+            </AdminField>
+          ) : null}
         </AdminSheetSection>
 
         <AdminSheetSection title="Turma e situação">
@@ -596,7 +665,7 @@ function ComboForm({ canEdit, cohorts, combo, onDirtyChange, onSaved, onSavingCh
             />
           </AdminField>
           <p className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-2)] px-3 py-2.5 text-[13px] leading-5 text-[var(--text-secondary)]">
-            Mudar os produtos vale para as próximas vendas: quem já comprou continua com o que recebeu.
+            Mudar os produtos ou os prazos vale para as próximas vendas: quem já comprou continua com o que recebeu.
           </p>
         </AdminSheetSection>
       </fieldset>

@@ -115,6 +115,14 @@ export type GrantProductAccessInput = AccessContext & {
  */
 export type SaleReleaseOptions = {
   purchaseEmailKeyTag?: string | null;
+  /**
+   * So vendas (docs/05, "Prazo de acesso por curso"): o termino ja calculado de cada produto, com a soma do
+   * prazo comprado (`null` = para sempre). O produto que esta no mapa recebe exatamente esse termino; o que
+   * nao esta segue `endsAt` e a regra de sempre (fica o maior prazo).
+   */
+  saleEndsAtByProduct?: Readonly<Record<string, string | null>>;
+  /** A formacao que entrou depois para quem tem "todas as formacoes": nao e compra nova, nao manda e-mail de compra. */
+  skipPurchaseEmail?: boolean;
   sourceEventPerProduct?: boolean;
 };
 
@@ -129,7 +137,8 @@ export type GrantProductAccessResult = {
 /**
  * Um acesso por (aluno, produto). Quem ja tem acesso aberto nunca e encurtado: fica com o maior prazo
  * (sem prazo vence data). Quem nao tem acesso aberto (revogado, suspenso, expirado ou nunca teve) passa
- * a ter, a partir de agora, com o prazo pedido.
+ * a ter, a partir de agora, com o prazo pedido. Nas vendas, o termino de cada produto ja vem calculado
+ * com a soma do prazo comprado (`saleEndsAtByProduct`; src/server/payments/sale-access.ts).
  */
 export async function grantProductAccess(input: GrantProductAccessInput, db: StudentsDb = studentsDb()): Promise<GrantProductAccessResult> {
   const uniqueIds = Array.from(new Set(input.productIds));
@@ -186,6 +195,8 @@ export async function grantResolvedProducts(
       }
     }
 
+    // Venda: o termino deste produto ja foi calculado (prazo do item do pacote ou do codigo, com a soma).
+    const saleEnd = input.saleEndsAtByProduct && Object.hasOwn(input.saleEndsAtByProduct, productId) ? { endsAt: input.saleEndsAtByProduct[productId] } : null;
     let row: EntitlementRow;
     // Um evento de venda pode liberar varios produtos (pacote): o id do evento e unico por (aluno,
     // source_event_id), entao cada produto a mais leva o proprio id no sufixo (e todo produto, na liberacao de uma venda
@@ -198,7 +209,7 @@ export async function grantResolvedProducts(
 
     if (existing) {
       row = await updateEntitlement(db, existing.id, {
-        ends_at: nextAccessEndOnGrant({ existingEndsAt: existing.ends_at, requestedEndsAt: input.endsAt, wasOpen }),
+        ends_at: saleEnd ? saleEnd.endsAt : nextAccessEndOnGrant({ existingEndsAt: existing.ends_at, requestedEndsAt: input.endsAt, wasOpen }),
         // Acesso fechado reaberto por uma venda passa a pertencer a essa venda: o reembolso dela o fecha de
         // novo, e um acesso aberto (da equipe ou de outra compra) que so ganhou prazo continua da origem antiga.
         ...(!wasOpen && input.source === "webhook" ? { source_event_id: sourceEventId, source_provider: input.sourceProvider } : {}),
@@ -213,7 +224,7 @@ export async function grantResolvedProducts(
       }
     } else {
       row = await insertEntitlement(db, {
-        ends_at: input.endsAt,
+        ends_at: saleEnd ? saleEnd.endsAt : input.endsAt,
         product_id: productId,
         source_event_id: sourceEventId,
         source_provider: input.sourceProvider,
@@ -243,7 +254,7 @@ export async function grantResolvedProducts(
   await recordEvents(db, events);
 
   // Venda por webhook: um e-mail por compra com o que acabou de abrir. Acoes da equipe nao avisam o aluno.
-  if (input.source === "webhook" && opened.length > 0) {
+  if (input.source === "webhook" && opened.length > 0 && !input.skipPurchaseEmail) {
     await notifyPurchase(db, input, opened);
   }
 
@@ -411,6 +422,7 @@ export async function provisionStudentAccess(input: ProvisionStudentAccessInput,
       endsAt: accessEndDateToIso(input.endsAt),
       productIds: input.productIds,
       purchaseEmailKeyTag: input.purchaseEmailKeyTag,
+      saleEndsAtByProduct: input.saleEndsAtByProduct,
       siteOrigin,
       source: input.source,
       sourceEventId: input.sourceEventId,
@@ -527,6 +539,25 @@ export async function applyAccessAction(input: ApplyAccessActionInput, db: Stude
  * seguem sendo criadas sem e-mail e a linha sai como "e-mail pendente".
  * ---------------------------------------------------------------------------------------------- */
 
+/**
+ * Os produtos de uma linha da importacao agrupados pelo termino (ISO; `null` = sem prazo): o termino por
+ * produto da planilha ("AAAA-MM-DD" ou `null` = vitalicio) vence o termino do lote.
+ */
+export function groupImportProductsByEnd(row: Pick<ImportRowInput, "productEndsAt" | "productIds">, batchEndsAt: string | null) {
+  const groups = new Map<string, { endsAt: string | null; productIds: string[] }>();
+
+  for (const productId of row.productIds) {
+    const own = row.productEndsAt && Object.hasOwn(row.productEndsAt, productId) ? { endsAt: accessEndDateToIso(row.productEndsAt[productId]) } : null;
+    const endsAt = own ? own.endsAt : batchEndsAt;
+    const group = groups.get(endsAt ?? "") ?? { endsAt, productIds: [] };
+
+    group.productIds.push(productId);
+    groups.set(endsAt ?? "", group);
+  }
+
+  return [...groups.values()];
+}
+
 export type ImportRowOutcome =
   | { emailSent: boolean; status: "created" | "existing"; userId: string }
   | { error: string; status: "failed" };
@@ -623,12 +654,9 @@ export async function importStudentRow(
     });
   }
 
-  if (input.row.productIds.length > 0) {
-    await grantResolvedProducts(
-      { ...input, endsAt: input.endsAt, productIds: input.row.productIds, skipIfOpen: true, userId },
-      input.contents,
-      db
-    );
+  // Cada produto com o termino dele: o da planilha (data ou vitalicio) ou, sem ele, o "Acesso até" do lote.
+  for (const group of groupImportProductsByEnd(input.row, input.endsAt)) {
+    await grantResolvedProducts({ ...input, endsAt: group.endsAt, productIds: group.productIds, skipIfOpen: true, userId }, input.contents, db);
   }
 
   if (input.row.cohortId && input.row.productIds.length > 0) {

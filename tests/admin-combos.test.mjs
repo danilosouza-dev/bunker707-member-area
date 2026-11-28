@@ -82,25 +82,42 @@ test("formulario: ida e volta sem perder nada, turma padrao fica em branco", () 
   const form = combos.comboToForm(ia);
 
   assert.deepEqual(form, {
+    allFormations: false,
+    allFormationsTerm: null,
     cohortName: "Turma B",
     description: "Tudo de IA",
     hotmartProductId: "",
     name: "Pacote IA",
     productIds: ["form-a", "curso-b"],
+    productTerms: {},
     status: "active",
     tictoProductId: ""
   });
   assert.equal(combos.comboToForm({ ...ia, cohortName: "Turma A" }).cohortName, "", "turma padrao aparece como placeholder");
-  assert.deepEqual(combos.comboToForm(null), { cohortName: "", description: "", hotmartProductId: "", name: "", productIds: [], status: "draft", tictoProductId: "" });
+  assert.deepEqual(combos.comboToForm(null), {
+    allFormations: false,
+    allFormationsTerm: null,
+    cohortName: "",
+    description: "",
+    hotmartProductId: "",
+    name: "",
+    productIds: [],
+    productTerms: {},
+    status: "draft",
+    tictoProductId: ""
+  });
 
   const input = combos.formToComboInput({ ...form, name: "  Pacote IA 2 ", productIds: ["form-a", "form-a", "curso-b"] }, "combo-ia");
   assert.deepEqual(input, {
+    allFormations: false,
+    allFormationsTerm: null,
     cohortName: "Turma B",
     description: "Tudo de IA",
     hotmartProductId: "",
     id: "combo-ia",
     name: "Pacote IA 2",
     productIds: ["form-a", "curso-b"],
+    productTerms: {},
     status: "active",
     tictoProductId: ""
   });

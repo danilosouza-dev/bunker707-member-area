@@ -63,6 +63,35 @@ test("acesso que terminou ontem: o curso sai de Minhas compras e volta para a ve
   assert.deepEqual((await getPurchasesPageData(undefined, alunaAcessoExpirado)).purchasedProducts, []);
 });
 
+test("curso vencido continua aparecendo, fechado, com a data do término e o link de compra; quem nunca teve não vê a frase", async () => {
+  // docs/05, "Prazo de acesso por curso": o vencimento fecha so aquele curso, e a aluna ve por que ele fechou.
+  const { homeRows } = await getHomePageData(undefined, alunaAcessoExpirado);
+  const vencido = fileira(homeRows, "Produtos a venda").items.find((item) => item.id === curso.id);
+
+  assert.equal(vencido.isLocked, true, "fechado como qualquer produto sem acesso");
+  assert.match(vencido.accessEndedLabel ?? "", /^Seu acesso terminou em \d{2}\/\d{2}\/\d{4}$/);
+  assert.ok(Date.parse(vencido.accessEndedAt) < Date.now());
+  assert.equal(vencido.purchaseUrl, "https://exemplo.test/comprar/agentes", "com o botao de compra do produto");
+
+  const pagina = await getContentPageData(curso.id, alunaAcessoExpirado);
+  assert.ok(pagina, "a pagina do curso vencido abre");
+  assert.equal(pagina.item.isLocked, true);
+  assert.equal(pagina.item.accessEndedLabel, vencido.accessEndedLabel);
+  assert.ok(
+    pagina.courseModules.every((courseModule) => courseModule.lessons.every((lesson) => lesson.video === undefined)),
+    "nenhum video de aula sai para o curso vencido"
+  );
+
+  // Quem nunca teve o curso ve o produto fechado, sem a frase do termino.
+  const semCompra = fileira((await getHomePageData(undefined, alunoSemAcesso)).homeRows, "Produtos a venda").items.find((item) => item.id === curso.id);
+  assert.equal(semCompra.isLocked, true);
+  assert.equal(semCompra.accessEndedLabel, undefined);
+  assert.equal((await getContentPageData(curso.id, alunoSemAcesso)).item.accessEndedLabel, undefined);
+
+  // E quem tem o curso valendo tambem nao.
+  assert.equal((await getContentPageData(curso.id, aluna)).item.accessEndedLabel, undefined);
+});
+
 test("Minhas compras (pagina) lista os mesmos produtos da fileira", async () => {
   const { purchasedProducts } = await getPurchasesPageData(undefined, aluna);
 

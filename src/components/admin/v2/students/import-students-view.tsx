@@ -272,7 +272,8 @@ export function ImportStudentsView({ cohorts, products, today }: ImportStudentsV
           <div>
             <h2 className={sectionTitle}>1. Arquivo</h2>
             <p className="mt-1 text-[13px] leading-5 text-[var(--text-secondary)]">
-              CSV com até {IMPORT_MAX_ROWS.toLocaleString("pt-BR")} linhas e 2 MB. Colunas: Nome, E-mail e, se quiser, Telefone, Produtos e Turma.
+              CSV com até {IMPORT_MAX_ROWS.toLocaleString("pt-BR")} linhas e 2 MB. Colunas: Nome, E-mail e, se quiser, Telefone, Produtos, Turma e Término. Para trazer alunos de outra plataforma com o prazo de cada um,
+              escreva o término na coluna Término (31/12/2027 ou vitalício) ou depois de cada produto: “Curso A = 31/12/2027 | Curso B = vitalício”.
             </p>
           </div>
           <Button className="gap-1.5 px-3" onClick={() => downloadTextFile("modelo-alunos.csv", importTemplateCsv())} type="button" variant="ghost">
@@ -435,7 +436,7 @@ export function ImportStudentsView({ cohorts, products, today }: ImportStudentsV
               : "As contas ficam prontas sem e-mail. Depois, envie o convite pelo perfil ou em massa pela lista."}
             {pendingRows.length > EMAIL_WARNING_ROWS && delivery === "invite" ? ` São ${pendingRows.length} e-mails: confira o limite antes.` : ""}
           </p>
-          <AdminField hint="Vale para os produtos da planilha. Em branco, o acesso não vence." id="importar-prazo" label="Acesso até" optional>
+          <AdminField hint="Vale para os produtos sem término na planilha. Em branco, o acesso não vence." id="importar-prazo" label="Acesso até" optional>
             <Input aria-describedby={fieldDescribedBy("importar-prazo", { hint: true })} className={cn(adminInputClass, "max-w-[220px] [color-scheme:dark]")} disabled={Boolean(resuming)} id="importar-prazo" min={today} onChange={(event) => setEndsAt(event.target.value)} type="date" value={endsAt} />
           </AdminField>
           <div className="flex flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] pt-5">

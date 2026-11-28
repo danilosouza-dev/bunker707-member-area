@@ -128,6 +128,13 @@ export type LessonWatchState = {
 };
 
 export type ContentItem = {
+  /**
+   * O acesso do aluno a este item venceu (ISO do termino). Calculado no servidor para o aluno da requisicao;
+   * o item vem fechado (`isLocked`) e a tela mostra `accessEndedLabel` no lugar de "Acesso pendente".
+   */
+  accessEndedAt?: string;
+  /** "Seu acesso terminou em dd/mm/aaaa". */
+  accessEndedLabel?: string;
   accessLabel?: string;
   accessModel?: ContentAccessModel;
   commerceScope?: CommerceScope;

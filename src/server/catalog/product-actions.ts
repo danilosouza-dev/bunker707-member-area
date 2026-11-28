@@ -10,7 +10,8 @@ import type { ActionResult } from "@/lib/action-result";
 import { runAdminAction } from "@/server/actions/run-action";
 import { can, isActionScoped } from "@/server/auth/roles";
 import { invalidateCatalog } from "@/server/catalog/cache";
-import { assertSalesLinksAvailable, setSalesLink } from "@/server/payments/store";
+import { materializeAllFormations } from "@/server/payments/all-formations";
+import { accessTermOfSalesLink, assertSalesLinksAvailable, fetchSalesLinksFor, setSalesLink, setSalesLinkTermForProduct } from "@/server/payments/store";
 import { deleteContentItem } from "@/server/db/platform-store";
 import { addCreatedCourseToScope, assertCreatorScopeRoom } from "./creator-scope";
 import { CatalogFieldError, CatalogNotFoundError, CatalogRuleError } from "./errors";
@@ -90,6 +91,8 @@ import type {
 } from "./types";
 
 const PRODUCT_NOT_FOUND = "Não encontramos este produto. Ele pode ter sido excluído.";
+/** Quanto a publicacao de uma formacao espera pelos acessos de "todas as formacoes"; o resto fica com o tick. */
+const ALL_FORMATIONS_PUBLISH_BUDGET_MS = 4_000;
 
 /** Formatos que aceitam "Como abre" e "Ao clicar quando bloqueado" (mesma regra do legado). */
 function supportsPresentationSettings(kind: string) {
@@ -343,12 +346,27 @@ export async function updateProductAccess(input: UpdateProductAccessInput): Prom
 
     // Codigo na Hotmart e na Ticto (sales_product_links): depois da linha do produto, para uma versao
     // velha (409) nao trocar a ligacao. Codigo repetido vira erro do campo da plataforma.
+    // O prazo de quem compra o produto sozinho mora no codigo de venda. Codigo novo nasce com o prazo
+    // escolhido agora ou, sem mudanca no campo, com o prazo que o outro codigo do produto ja tem.
+    const codeChanged = data.hotmartProductId !== undefined || data.tictoProductId !== undefined;
+    const saleAccessTerm =
+      data.saleAccessTerm !== undefined
+        ? data.saleAccessTerm
+        : codeChanged
+          ? ((await fetchSalesLinksFor(db, { productIds: [data.id] })).map(accessTermOfSalesLink).find((term) => term !== null) ?? null)
+          : null;
+
     if (data.hotmartProductId !== undefined) {
-      await setSalesLink(db, { createdBy: user.id, externalProductId: data.hotmartProductId, productId: data.id, provider: "hotmart" });
+      await setSalesLink(db, { accessTerm: saleAccessTerm, createdBy: user.id, externalProductId: data.hotmartProductId, productId: data.id, provider: "hotmart" });
     }
 
     if (data.tictoProductId !== undefined) {
-      await setSalesLink(db, { createdBy: user.id, externalProductId: data.tictoProductId, productId: data.id, provider: "ticto" });
+      await setSalesLink(db, { accessTerm: saleAccessTerm, createdBy: user.id, externalProductId: data.tictoProductId, productId: data.id, provider: "ticto" });
+    }
+
+    // Um prazo so por produto: vale para os dois codigos (o que nao mudou nesta gravacao tambem).
+    if (data.saleAccessTerm !== undefined) {
+      await setSalesLinkTermForProduct(db, data.id, data.saleAccessTerm);
     }
 
     invalidateCatalog({ from: "action" });
@@ -605,6 +623,17 @@ export async function publishProduct(input: PublishProductInput): Promise<Action
     if (draftIds.length > 0) {
       const { error } = await db.from("content_items").update({ publication_status: "published" }).in("id", draftIds);
       failOnError(error, "Publicando cursos da formacao");
+    }
+
+    // Formacao publicada: entra sozinha para quem comprou "todas as formacoes" e ainda tem o acesso valendo, com o
+    // mesmo termino (docs/05). Ate alguns segundos aqui; o que sobrar (e qualquer falha) fica com a tarefa do tick
+    // `todas-as-formacoes`. Nunca derruba a publicacao.
+    if (productFormatOf(current) === "formacao") {
+      try {
+        await materializeAllFormations(db, { budgetMs: ALL_FORMATIONS_PUBLISH_BUDGET_MS, formationIds: [row.id] });
+      } catch (error) {
+        console.error(`[catalogo] todas as formacoes: a formacao ${row.id} fica para a tarefa do tick: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
 
     invalidateCatalog({ from: "action" });

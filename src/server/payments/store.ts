@@ -8,6 +8,7 @@ import "server-only";
 // O segredo de cada plataforma so sai daqui por fetchIntegrationSecret, usada pelo webhook; a tela le
 // fetchIntegrationRows, que nao traz a coluna.
 
+import { normalizeAccessTerm, type AccessTerm } from "@/server/access/access-term";
 import { PENDING_MIGRATION_MESSAGE, isMissingSchemaObjectError, toDbError } from "@/server/db/pending-migration";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import { SALES_CODE_FIELDS, STUCK_RECEIVED_MINUTES, type IntegrationStatus, type SaleOutcome, type WebhookProcessingStatus, pendingAttentionMessage } from "./model";
@@ -456,7 +457,8 @@ export async function listWebhookEvents(db: SalesDb, input: { limit: number; pro
  * sale_grants: vinculo venda -> acesso (migracao 202610170008)
  * ---------------------------------------------------------------------------------------------- */
 
-const SALE_GRANT_COLUMNS = "id,provider,transaction_id,subscription_code,user_id,entitlement_id,product_id,opened,previous_ends_at,closed_at,closed_by,created_at";
+const SALE_GRANT_COLUMNS =
+  "id,provider,transaction_id,subscription_code,user_id,entitlement_id,product_id,opened,previous_ends_at,term_unit,term_amount,purchased_at,closed_at,closed_by,created_at";
 
 export type SaleGrantRow = {
   closed_at: string | null;
@@ -468,7 +470,12 @@ export type SaleGrantRow = {
   previous_ends_at: string | null;
   product_id: string;
   provider: SalesProvider;
+  /** Data da compra aprovada, de onde o prazo conta (migracao 202611280001); nula nas vendas antigas. */
+  purchased_at: string | null;
   subscription_code: string | null;
+  /** Prazo que a venda deu neste acesso; os dois nulos = para sempre. */
+  term_amount: number | null;
+  term_unit: string | null;
   transaction_id: string;
   user_id: string;
 };
@@ -479,7 +486,11 @@ export type SaleGrantInsert = {
   previousEndsAt: string | null;
   productId: string;
   provider: SalesProvider;
+  /** Data da compra aprovada (ISO), de onde o prazo conta. */
+  purchasedAt: string;
   subscriptionCode: string | null;
+  /** Prazo que a venda deu neste acesso; `null` = para sempre. */
+  term: AccessTerm | null;
   transactionId: string;
   userId: string;
   webhookEventId: string | null;
@@ -507,7 +518,10 @@ export async function insertSaleGrants(db: SalesDb, grants: readonly SaleGrantIn
       previous_ends_at: grant.previousEndsAt,
       product_id: grant.productId,
       provider: grant.provider,
+      purchased_at: grant.purchasedAt,
       subscription_code: grant.subscriptionCode,
+      term_amount: grant.term?.amount ?? null,
+      term_unit: grant.term?.unit ?? null,
       transaction_id: grant.transactionId,
       user_id: grant.userId,
       webhook_event_id: grant.webhookEventId
@@ -526,7 +540,16 @@ export async function reopenSubscriptionCanceledGrants(db: SalesDb, grants: read
   for (const grant of grants) {
     const { error } = await db
       .from("sale_grants")
-      .update({ closed_at: null, closed_by: null, opened: grant.opened, previous_ends_at: grant.previousEndsAt, webhook_event_id: grant.webhookEventId })
+      .update({
+        closed_at: null,
+        closed_by: null,
+        opened: grant.opened,
+        previous_ends_at: grant.previousEndsAt,
+        purchased_at: grant.purchasedAt,
+        term_amount: grant.term?.amount ?? null,
+        term_unit: grant.term?.unit ?? null,
+        webhook_event_id: grant.webhookEventId
+      })
       .eq("provider", grant.provider)
       .eq("transaction_id", grant.transactionId)
       .eq("entitlement_id", grant.entitlementId)
@@ -574,9 +597,12 @@ export async function closeSaleGrants(db: SalesDb, ids: readonly string[], close
  * sales_product_links
  * ---------------------------------------------------------------------------------------------- */
 
-const LINK_COLUMNS = "id,provider,external_product_id,product_id,combo_id,updated_at";
+const LINK_COLUMNS = "id,provider,external_product_id,product_id,combo_id,access_unit,access_amount,updated_at";
 
 export type SalesLinkRow = {
+  /** Prazo de quem compra o produto sozinho por este codigo (migracao 202611280001); os dois nulos = para sempre. */
+  access_amount: number | null;
+  access_unit: string | null;
   combo_id: string | null;
   external_product_id: string;
   id: string;
@@ -720,7 +746,13 @@ export async function assertSalesLinksAvailable(
  */
 export async function setSalesLink(
   db: SalesDb,
-  input: SalesLinkTarget & { createdBy: string | null; externalProductId: string | null; provider: SalesProvider }
+  input: SalesLinkTarget & {
+    /** Prazo de quem compra por este codigo; ausente = nao mexe no que esta gravado (`null` = para sempre). */
+    accessTerm?: AccessTerm | null;
+    createdBy: string | null;
+    externalProductId: string | null;
+    provider: SalesProvider;
+  }
 ) {
   const targetColumn = input.productId ? "product_id" : "combo_id";
   const targetId = input.productId ?? input.comboId;
@@ -746,7 +778,8 @@ export async function setSalesLink(
         created_by: input.createdBy,
         external_product_id: external,
         product_id: input.productId ?? null,
-        provider: input.provider
+        provider: input.provider,
+        ...(input.accessTerm !== undefined ? { access_amount: input.accessTerm?.amount ?? null, access_unit: input.accessTerm?.unit ?? null } : {})
       },
       { onConflict: `provider,${targetColumn}` }
     );
@@ -760,4 +793,78 @@ export async function setSalesLink(
   }
 
   failOnError(error, "Guardar o código da plataforma");
+}
+
+/** O prazo gravado num codigo de venda (`null` = para sempre). */
+export function accessTermOfSalesLink(link: Pick<SalesLinkRow, "access_amount" | "access_unit">): AccessTerm | null {
+  return normalizeAccessTerm(link.access_unit, link.access_amount);
+}
+
+/**
+ * Muda o prazo de quem compra o produto sozinho, em todos os codigos dele (Hotmart e Ticto): o produtor
+ * escolhe um prazo so por produto. Sem codigo gravado nao ha onde guardar: nada muda.
+ */
+export async function setSalesLinkTermForProduct(db: SalesDb, productId: string, term: AccessTerm | null) {
+  const { error } = await db
+    .from("sales_product_links")
+    .update({ access_amount: term?.amount ?? null, access_unit: term?.unit ?? null })
+    .eq("product_id", productId);
+
+  if (error && isMissingSchemaObjectError(error)) {
+    throw new SalesLinksUnavailableError();
+  }
+
+  failOnError(error, "Guardar o prazo de acesso do código");
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * O pacote de uma venda: os produtos com o prazo de cada um e o item "todas as formacoes"
+ * ---------------------------------------------------------------------------------------------- */
+
+export type ComboForSale = {
+  /** O item "todas as formacoes" do pacote, com o prazo dele; `null` = o pacote nao tem o item. */
+  allFormations: { term: AccessTerm | null } | null;
+  /** A turma do pacote (ex.: Black 2026). */
+  cohortName: string | null;
+  id: string;
+  /** Os produtos do pacote, na ordem gravada, cada um com o prazo dele (`null` = para sempre). */
+  items: { productId: string; term: AccessTerm | null }[];
+  name: string;
+  status: string;
+};
+
+/** O pacote ligado a um codigo de venda, como a regra de acesso precisa dele (process-sale.ts). `null` = nao existe mais. */
+export async function fetchComboForSale(db: SalesDb, comboId: string): Promise<ComboForSale | null> {
+  const [{ data: combo, error: comboError }, { data: items, error: itemsError }] = await Promise.all([
+    db.from("product_combos").select("id,name,status,cohort_name,all_formations,all_formations_unit,all_formations_amount").eq("id", comboId).maybeSingle(),
+    db.from("product_combo_items").select("product_id,sort_order,access_unit,access_amount").eq("combo_id", comboId).order("sort_order", { ascending: true })
+  ]);
+  failOnError(comboError, "Pacote da venda");
+  failOnError(itemsError, "Produtos do pacote da venda");
+
+  const row = (combo ?? null) as {
+    all_formations: boolean | null;
+    all_formations_amount: number | null;
+    all_formations_unit: string | null;
+    cohort_name: string | null;
+    id: string;
+    name: string;
+    status: string | null;
+  } | null;
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    allFormations: row.all_formations === true ? { term: normalizeAccessTerm(row.all_formations_unit, row.all_formations_amount) } : null,
+    cohortName: row.cohort_name?.trim() || null,
+    id: row.id,
+    items: ((items ?? []) as { access_amount: number | null; access_unit: string | null; product_id: string }[]).map((item) => ({
+      productId: item.product_id,
+      term: normalizeAccessTerm(item.access_unit, item.access_amount)
+    })),
+    name: row.name,
+    status: row.status ?? "draft"
+  };
 }

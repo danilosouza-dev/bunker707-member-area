@@ -20,7 +20,7 @@ import type { ComboListItem, ListCombos, ProductOption } from "./types";
 type DbError = { message: string } | null;
 type Db = ReturnType<typeof getSupabaseAdminClient>;
 
-const COMBO_COLUMNS = "id,name,description,cohort_name,status,updated_at";
+const COMBO_COLUMNS = "id,name,description,cohort_name,status,all_formations,all_formations_unit,all_formations_amount,updated_at";
 
 function failOnError(error: DbError, context: string) {
   if (error) {
@@ -60,7 +60,7 @@ async function readCombos(db: Db, comboId?: string): Promise<ComboListItem[]> {
 
   const { data: itemData, error: itemError } = await db
     .from("product_combo_items")
-    .select("combo_id,product_id,sort_order")
+    .select("combo_id,product_id,sort_order,access_unit,access_amount")
     .in(
       "combo_id",
       combos.map((combo) => combo.id)

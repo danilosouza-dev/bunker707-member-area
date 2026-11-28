@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { FeatureKey } from "@/server/licensing/features";
+import { allFormationsJob } from "./all-formations-job";
 import { communicationMediaJob } from "./communication-media-job";
 import { communicationsJob } from "./communications-job";
 import { emailOutboxJob } from "./email-outbox-job";
@@ -78,6 +79,10 @@ import { webinarSimulationSummariesJob } from "./webinar-simulation-summaries-jo
 //   Com ela (a nossa escola): uma consulta por minuto a fila license_requests e ate 10 pedidos por rodada ao Emissor, na
 //   ordem, com reivindicacao por linha e nova tentativa com espera. Fica no fim, antes da limpeza: o Emissor lento so
 //   atrasa a propria fila;
+// - `todas-as-formacoes` (a formacao publicada depois entra para quem comprou "todas as formacoes" e ainda tem o
+//   acesso valendo, docs/05 "Prazo de acesso por curso e todas as formacoes"; src/server/jobs/all-formations-job.ts).
+//   E a rede de seguranca da publicacao (product-actions.ts ja faz na hora). Sem concessao aberta, uma consulta; com
+//   concessao e nada faltando, duas; ate 40 acessos por rodada;
 // - `comunicacao-limpeza-de-arquivos` (arquivos da Comunicacao sem uso ha 30 dias saem do Storage,
 //   src/server/jobs/communication-media-job.ts). Roda a cada minuto, mas so trabalha uma vez por dia (06:53 UTC),
 //   com ate 500 arquivos por rodada; fica por ultimo para usar so o que sobra do tick.
@@ -108,4 +113,4 @@ export type Job = {
   run(ctx: JobContext): Promise<void>;
 };
 
-export const jobRegistry: readonly Job[] = [emailOutboxJob, communicationsJob, webinarSessionsJob, webinarSimulationSummariesJob, webinarRemindersJob, webinarRecordingsJob, webinarOfferConversionsJob, licenseCheckInJob, heldSalesJob, licenseSalesJob, communicationMediaJob];
+export const jobRegistry: readonly Job[] = [emailOutboxJob, communicationsJob, webinarSessionsJob, webinarSimulationSummariesJob, webinarRemindersJob, webinarRecordingsJob, webinarOfferConversionsJob, licenseCheckInJob, heldSalesJob, licenseSalesJob, allFormationsJob, communicationMediaJob];

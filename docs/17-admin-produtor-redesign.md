@@ -247,6 +247,8 @@ Três abas, sempre em segundo plano com progresso em números absolutos ("12 de 
 
 **Pacotes** (`/admin/produtos/pacotes`) são os antigos combos: nome, produtos incluídos, turma, situação, com a frase "Quando a venda deste pacote chegar da Hotmart/Ticto, liberamos todos os produtos de uma vez". Até as vendas automáticas existirem, **Liberar pacote para um aluno** faz isso à mão. Regras definidas agora para o futuro: reembolso ou chargeback de um pacote revoga o acesso a todos os produtos daquele pacote; produto adicionado ao pacote depois da venda **não** é liberado retroativamente por padrão, mas há o botão "Liberar para quem já tem o pacote" (ver decisão em aberto D7).
 
+Atualização (28/11/2026): cada produto do pacote tem o próprio prazo e o pacote aceita o item "Todas as formações (as de hoje e as que vierem)"; ver 1.6.10.
+
 **Home do aluno** (`/admin/home`) mantém o editor atual da vitrine (seções, arrastar, rascunho e publicar) como aba **Vitrine**, agora mostrando ao lado de cada fileira as impressões e a taxa de clique dos últimos 30 dias; aba **Destaque** (o hero da home ganha botão com link e a opção "usar um Webinário ou Promoção como destaque por um período"); aba **Marca** (logo e capa). Os editores de Página de login e Página de produtos saem até existir persistência de verdade.
 
 Atualização (11/10/2026, rodada Área de membros): a área se chama **Área de membros** (`/admin/area-de-membros`) e tem cinco abas que gravam de verdade e mudam a área do aluno na próxima visita. **Vitrine** (fileiras; o tipo "Destaque de um produto" passou a se chamar **Fileira de módulos**); **Destaque** (o banner do topo da home: imagem ou vídeo com capa, selo, título, descrição, um botão com link para um produto, uma página da área ou um link externo e, desde 13/10/2026, a luz de fundo: automática, na cor da imagem, ou uma cor escolhida); **Módulos** (por curso: como abre, a fileira de módulos na home e quantos módulos têm capa própria; a capa de cada módulo se troca na aba Conteúdo do produto); **Login** (um dos quatro modelos prontos, imagem, frase, tom do formulário, botão do Google e a linha de ajuda); **Marca** (a logo e, desde 13/10/2026, o **Estilo** da área do aluno: cantos das capas discretos ou arredondados, botões discretos ou pílula, menu na barra lateral ou no cabeçalho; o banner foi para Destaque). A medição de impressões e cliques por fileira e "usar um Webinário ou Promoção como destaque por um período" continuam para as fases 3 e 5. O editor de Página de produtos continua só como prévia no admin antigo.
@@ -263,6 +265,32 @@ Regras, escritas uma vez:
 - O Desempenho da formação soma os cursos; cada curso mantém o seu.
 
 É isso que hoje vaza para a interface como "Escopo", "sellable_product" e "included_content"; esses termos somem.
+
+#### 1.6.10 Prazo de acesso por curso e "todas as formações" (28/11/2026)
+
+Decisão do produtor em 28/11/2026, antes da primeira venda. O que ele cadastra na plataforma de venda como combo, ele espelha aqui em **Pacotes**; a diferença é que aqui cada curso do pacote tem o próprio prazo.
+
+**O que a pesquisa mostrou** (ajuda oficial da Hotmart, da Ticto e da Kiwify, consultada em 28/11/2026): nenhuma das três avisa quando o prazo de acesso de uma compra única acaba. Elas avisam compra aprovada, reembolso, chargeback e o que acontece com assinatura (cancelada, atrasada, renovada). O prazo que o produtor escolhe lá vale só na área de membros delas. Por isso o prazo é contado aqui. Nenhuma diz o que acontece com o prazo quando a pessoa compra de novo; a Ticto tem a "extensão" de assinatura, que soma (anual + 6 meses = 1 ano e 6 meses). Na Hotmart, o Combo Fixo dá os produtos que estavam no combo na hora da compra e o Combo Flexível (só assinatura) também dá os que entrarem depois.
+
+Na documentação do webhook da Hotmart (lida no mesmo dia), o pedido não traz prazo de acesso, só a garantia; a venda de um combo chega como um evento só, com a lista dos produtos de dentro; e cada oferta tem um código próprio. Aqui quem manda é o pacote cadastrado; a lista da Hotmart não é usada nem guardada hoje, e o prazo é ligado ao código do produto, não ao da oferta. Avisar quando a lista do combo de lá e a do pacote daqui não baterem, e ter prazo por oferta, ficam como próximos passos.
+
+**O campo do prazo** é um só, em frases: **Para sempre** (o padrão), **Por 30 dias**, **Por 3 meses**, **Por 6 meses**, **Por 1 ano**, **Por 2 anos** ou **Outro prazo…** (uma quantidade em dias, meses ou anos). Ele aparece em três lugares:
+
+- **Pacotes › Produtos**: abaixo dos produtos escolhidos, a lista "Por quanto tempo cada um fica liberado", com o prazo de cada curso. Exemplo dele: Black Friday com 5 cursos para sempre e 5 por 1 ano na mesma compra;
+- **Pacotes › Todas as formações**: a chave "Todas as formações (as de hoje e as que vierem)" com "Por quanto tempo". Quem compra recebe todas as formações publicadas e, enquanto o acesso valer, toda formação publicada depois entra sozinha para esse aluno, com o mesmo término. Só formações: mentorias e outros tipos de produto ficam de fora. Serve para a venda de "acesso completo" (1 ano, 2 anos ou para sempre) e para turmas (o campo Turma do pacote continua valendo, ex.: "Black 2026"). O pacote pode ter só esta chave, sem produto escolhido;
+- **Produtos › Acesso e venda**: "Por quanto tempo a venda libera", para quem compra o produto sozinho pelo código da Hotmart ou da Ticto. O campo só abre com um código preenchido. Em pacote, vale o prazo do pacote.
+
+Regras, escritas uma vez:
+
+- o prazo conta da data da compra aprovada e vale até o fim daquele dia;
+- **compra repetida soma**: quem ainda tem 3 meses e compra mais 1 ano fica com 1 ano e 3 meses. Quem já venceu conta a partir da compra nova. **Para sempre vence qualquer prazo.** Nenhuma compra encurta o que o aluno tem;
+- **quando o prazo de um curso vence, fecha só aquele curso.** O aluno continua entrando e usando o resto. O curso vencido continua aparecendo para ele, fechado, com a frase **"Seu acesso terminou em dd/mm/aaaa"** e o botão **Comprar** quando o produto tem link de compra (sem link, aparece fechado só com a frase). Vale na Home, nos detalhes, na página do curso e na aula (que volta para a página do curso). O curso sai de Minhas compras;
+- **reembolso e chargeback**: a compra que tinha somado prazo devolve o término de antes, e o aluno continua com o que a outra compra pagou; com duas compras somadas e a mais antiga reembolsada, sobra o prazo da segunda, contado da compra dela. Reembolso de "todas as formações" tira tudo o que ela abriu (inclusive as formações que entraram depois), sem tirar o que o aluno tem por outra compra, e nenhuma formação nova entra mais por ela;
+- mudar os produtos ou os prazos de um pacote vale para as próximas vendas (D7): quem já comprou continua com o que recebeu. "Todas as formações" é a exceção combinada à D7, e só para formações;
+- **Liberar acesso** pela equipe não mudou: fica o maior prazo, e sem prazo vence data;
+- **Importar alunos** (a migração de outras plataformas): cada linha aceita a data de término, ou "vitalício", por produto. Na coluna **Término** (31/12/2027 ou vitalício) ou depois de cada produto: `Curso A = 31/12/2027 | Curso B = vitalício`. O que não traz término segue o "Acesso até" da tela.
+
+Fora desta entrega: adaptador da Kiwify; avisos antes de vencer (ficam na Comunicação); mostrar oferta só para quem tem outro produto; qualquer mudança no checkout, que é externo. Modelo de dados e regras técnicas em `docs/05-modelo-dados.md`, "Prazo de acesso por curso e todas as formacoes".
 
 ### 1.7 Alunos
 
@@ -289,7 +317,7 @@ Regras, escritas uma vez:
 
 `/admin/alunos/novo`: Nome, E-mail, Telefone (opcional), **Produtos a liberar**, Turma (opcional), **Como entregar o acesso** (Convite por e-mail / Senha temporária / Não enviar agora). Botão **Adicionar e liberar acesso**. Confirmação com próximo passo ("Convite enviado para ana@… Ver aluno"). Documento, cidade e UF ficam recolhidos em "Mais dados".
 
-`/admin/alunos/importar`: enviar arquivo (modelo para baixar) → mapear colunas → prévia com erros por linha ("linha 12: e-mail inválido") → escolher entrega de acesso → **Importar N alunos**. Até 2.000 linhas, em segundo plano.
+`/admin/alunos/importar`: enviar arquivo (modelo para baixar) → mapear colunas → prévia com erros por linha ("linha 12: e-mail inválido") → escolher entrega de acesso → **Importar N alunos**. Até 2.000 linhas, em segundo plano. Desde 28/11/2026, cada linha aceita a data de término, ou "vitalício", por produto (coluna Término, ou depois do produto: `Curso A = 31/12/2027`), para trazer alunos de outras plataformas com o prazo de cada um (1.6.10).
 
 #### 1.7.3 Perfil do aluno (`/admin/alunos/[id]`)
 
@@ -1092,6 +1120,9 @@ Pedido explícito do produtor (20/10/2026), olhando a prévia do sino: trocar o 
 | Aluno / Sem conta | `profiles` (`auth.users`) / `students` sem `user_id` |
 | Turma | `cohorts` + `cohort_memberships` |
 | Pacote | `product_combos` + `product_combo_items` |
+| Por quanto tempo (Para sempre, Por 1 ano…) | `access_unit` + `access_amount` em `product_combo_items` (item do pacote) e em `sales_product_links` (produto sozinho); nulos = para sempre; o término fica em `entitlements.ends_at` |
+| Todas as formações (as de hoje e as que vierem) | `product_combos.all_formations` + prazo; por aluno, `all_formations_grants` (os acessos continuam em `entitlements`) |
+| Seu acesso terminou em dd/mm/aaaa | `entitlements` ativo com `ends_at` no passado; na área do aluno, `ContentItem.accessEndedLabel` |
 | Segmento / Público | `audiences` avaliadas sobre `student_facts`; nos avisos, desde 20/10/2026, `campaigns.audience` (regras E/OU avaliadas em `src/server/communications/audience-model.ts`) |
 | Aviso (Pop-up, Faixa, Card, Destaque, Toast) | `campaigns.kind` (hoje `inbox` = Notificação e `popup` = Pop-up) |
 | Avisos recebidos (aba do perfil) | `campaign_deliveries` + `notifications` do aluno e os `message_*` / `notification_*` em `student_events` |

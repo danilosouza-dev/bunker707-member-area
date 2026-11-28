@@ -6,7 +6,12 @@ import "server-only";
 // (src/server/students/access.ts), a mesma do admin. Nada do payload libera conteudo por si.
 //
 // Resultados:
-// - compra aprovada: conta criada ou encontrada pelo e-mail e produto(s) liberados sem prazo (pacote =
+// - compra aprovada: conta criada ou encontrada pelo e-mail e produto(s) liberados com o prazo de cada um
+//   (docs/05, "Prazo de acesso por curso e todas as formacoes"): o do item do pacote, ou o do codigo de
+//   venda do produto sozinho; sem prazo escolhido = para sempre, como sempre foi. O termino = data da
+//   compra aprovada + prazo; compra repetida SOMA ao termino de quem ainda tem acesso aberto, e "para
+//   sempre" vence qualquer prazo (sale-access.ts). O pacote com o item "todas as formacoes" libera as
+//   formacoes publicadas e grava a concessao que da as proximas (all-formations.ts). (pacote =
 //   todos os produtos dele, de uma vez, num e-mail so; produtos vendidos junto no mesmo pedido, os order
 //   bumps da Ticto, entram na mesma liberacao quando o codigo deles esta ligado, e o que nao esta ligado
 //   fica escrito no detalhe sem bloquear o resto). Cada (venda, acesso) vira um vinculo em
@@ -24,7 +29,10 @@ import "server-only";
 //   assim a ordem dos reembolsos nao muda o resultado. Outra compra paga sustenta -> fica; o vinculo
 //   mais antigo abriu o acesso -> revoga (ou suspende, no cancelamento); so estendeu um acesso de outra
 //   origem com prazo -> o prazo volta; sem prazo -> fica; a equipe ja revogou, suspendeu ou reabriu o
-//   acesso depois (vinculos fechados por `admin`) -> fica com a equipe. Primeiro age, e so depois fecha
+//   acesso depois (vinculos fechados por `admin`) -> fica com a equipe. A compra que tinha SOMADO prazo,
+//   com outra compra paga sustentando o acesso: o termino e refeito so com as compras que sobraram (a
+//   mais antiga reembolsada tambem). A concessao "todas as formacoes" da compra e fechada antes.
+//   Primeiro age, e so depois fecha
 //   os vinculos da venda: uma falha no meio deixa tudo para o reprocesso refazer. O cancelamento com o
 //   codigo da assinatura desfaz a assinatura inteira, mesmo quando tambem traz a transacao (Ticto);
 // - o que nao da para fazer (evento que nao muda acesso, produto sem codigo ligado, pacote em rascunho
@@ -42,6 +50,7 @@ import "server-only";
 // reembolso, o chargeback e a assinatura cancelada passam sempre e descartam a venda guardada da mesma compra antes de
 // decidir o resto: ela nunca e liberada. No modo "off" nada disso le ou grava nada: o comportamento de sempre.
 
+import { formatAccessDate, longerAccessTerm, sameAccessEnd, type AccessTerm } from "@/server/access/access-term";
 import { getConfiguredSiteOrigin } from "@/server/auth/site-origin";
 import { licensingMode } from "@/server/licensing/build-config";
 import { requestLicensesAfterSale } from "@/server/licensing/interno/sale-requests";
@@ -49,7 +58,7 @@ import { readCurrentLicenseState } from "@/server/licensing/current-state";
 import type { LicenseState } from "@/server/licensing/state";
 import { findAccountByEmail, normalizeEmail } from "@/server/students/accounts";
 import { applyAccessAction, provisionStudentAccess, restoreEntitlements } from "@/server/students/access";
-import { accessStateOf, isAccessOpen, targetTypeForContentKind } from "@/server/students/model";
+import { targetTypeForContentKind } from "@/server/students/model";
 import {
   fetchContentKinds,
   fetchEntitlements,
@@ -59,6 +68,7 @@ import {
   type EntitlementRow,
   type StudentsDb
 } from "@/server/students/store";
+import { ALL_FORMATIONS_LABEL, closeAllFormationsGrantsOfSale, fetchPublishedFormationIds, recordAllFormationsGrant } from "./all-formations";
 import {
   heldSaleDetail,
   heldSaleDiscardNote,
@@ -78,9 +88,12 @@ import {
   resolveHeldSaleOfEvent
 } from "./held-sales-store";
 import { SALES_PROVIDER_LABELS, decideEntitlementAfterSale, type EntitlementAfterSaleDecision, type SaleGrantLike, type SaleOutcome } from "./model";
+import { entitlementBelongsToTransaction, isAccessRowOpen, planSaleAccess, salePurchasedAt, type SaleAccessPlan } from "./sale-access";
 import {
+  accessTermOfSalesLink,
   assertSaleGrantsAvailable,
   closeSaleGrants,
+  fetchComboForSale,
   fetchSaleGrantsBySubscription,
   fetchSaleGrantsByTransaction,
   fetchSaleGrantsForEntitlements,
@@ -119,9 +132,22 @@ export type SaleProcessingResult = {
   nothingToUndo?: boolean;
 };
 
+/** O item "todas as formacoes" de um pacote: o prazo, a turma do pacote e as formacoes publicadas agora. */
+type AllFormationsTarget = { cohortName: string | null; formationIds: string[]; term: AccessTerm | null };
+
 type ResolvedTarget =
-  | { comboId: null; kind: "product"; productId: string; productIds: string[] }
-  | { comboId: string; kind: "combo"; productId: null; productIds: string[]; status: string; name: string };
+  | { allFormations: null; comboId: null; kind: "product"; productId: string; productIds: string[]; terms: Map<string, AccessTerm | null> }
+  | {
+      allFormations: AllFormationsTarget | null;
+      comboId: string;
+      kind: "combo";
+      productId: null;
+      productIds: string[];
+      status: string;
+      name: string;
+      /** O prazo de cada produto do pacote (`null` = para sempre). */
+      terms: Map<string, AccessTerm | null>;
+    };
 
 type TargetRef = { comboId: string | null; productId: string | null };
 
@@ -134,7 +160,12 @@ function plural(count: number, singular: string, pluralForm: string) {
 }
 
 function isOpenRow(row: EntitlementRow, now: number) {
-  return isAccessOpen(accessStateOf({ endsAt: row.ends_at, now, startsAt: row.starts_at, status: row.status }));
+  return isAccessRowOpen(row, now);
+}
+
+/** O mesmo produto duas vezes na mesma compra (no pacote e em "todas as formacoes", ou em dois codigos): fica o maior prazo. */
+function mergeTerm(terms: Map<string, AccessTerm | null>, productId: string, term: AccessTerm | null) {
+  terms.set(productId, terms.has(productId) ? longerAccessTerm(terms.get(productId) ?? null, term) : term);
 }
 
 async function resolveTarget(db: SalesDb, provider: SalesProvider, externalProductId: string | null): Promise<ResolvedTarget | null> {
@@ -149,36 +180,50 @@ async function resolveTarget(db: SalesDb, provider: SalesProvider, externalProdu
   }
 
   if (link.product_id) {
-    return { comboId: null, kind: "product", productId: link.product_id, productIds: [link.product_id] };
+    // Produto vendido sozinho: o prazo fica no proprio codigo de venda.
+    return {
+      allFormations: null,
+      comboId: null,
+      kind: "product",
+      productId: link.product_id,
+      productIds: [link.product_id],
+      terms: new Map([[link.product_id, accessTermOfSalesLink(link)]])
+    };
   }
 
-  const comboId = link.combo_id as string;
-  const [{ data: combo, error: comboError }, { data: items, error: itemsError }] = await Promise.all([
-    db.from("product_combos").select("id,name,status").eq("id", comboId).maybeSingle(),
-    db.from("product_combo_items").select("product_id,sort_order").eq("combo_id", comboId).order("sort_order", { ascending: true })
-  ]);
+  const combo = await fetchComboForSale(db, link.combo_id as string);
 
-  if (comboError) {
-    throw new Error(`Pacote da venda: ${comboError.message}`);
-  }
-
-  if (itemsError) {
-    throw new Error(`Produtos do pacote da venda: ${itemsError.message}`);
-  }
-
-  const row = combo as { id: string; name: string; status: string | null } | null;
-
-  if (!row) {
+  if (!combo) {
     return null;
   }
 
+  const terms = new Map<string, AccessTerm | null>();
+
+  for (const item of combo.items) {
+    mergeTerm(terms, item.productId, item.term);
+  }
+
+  // "Todas as formacoes": as publicadas agora entram como produtos desta venda, com o prazo do item; as que
+  // forem publicadas depois entram pela concessao (all-formations.ts). So formacoes: nenhum outro tipo.
+  let allFormations: AllFormationsTarget | null = null;
+
+  if (combo.allFormations) {
+    allFormations = { cohortName: combo.cohortName, formationIds: await fetchPublishedFormationIds(db), term: combo.allFormations.term };
+
+    for (const formationId of allFormations.formationIds) {
+      mergeTerm(terms, formationId, allFormations.term);
+    }
+  }
+
   return {
-    comboId: row.id,
+    allFormations,
+    comboId: combo.id,
     kind: "combo",
-    name: row.name,
+    name: combo.name,
     productId: null,
-    productIds: Array.from(new Set(((items ?? []) as { product_id: string }[]).map((item) => item.product_id))),
-    status: row.status ?? "draft"
+    productIds: [...terms.keys()],
+    status: combo.status,
+    terms
   };
 }
 
@@ -266,9 +311,45 @@ async function undoSale(db: SalesDb, input: ProcessSaleInput): Promise<SaleProce
     return ignored("O evento não informa qual produto foi vendido.");
   }
 
+  // A concessao "todas as formacoes" da compra (ou da assinatura) fecha antes: nenhuma formacao nova entra
+  // por ela daqui em diante. Os acessos que ela abriu sao decididos logo abaixo, pelos vinculos da venda.
+  const closedAllFormations = await closeAllFormationsUndoneBy(db, event);
+
   // Reembolso, chargeback e cancelamento decidem pelos vinculos da venda (sale_grants): os produtos
   // vendidos junto na mesma compra tem vinculo da mesma transacao e entram sozinhos.
-  return removeAccess(db, { ...input, target: await resolveTarget(db, event.provider, event.externalProductId) });
+  const result = await removeAccess(db, { ...input, target: await resolveTarget(db, event.provider, event.externalProductId) });
+
+  if (closedAllFormations === 0) {
+    return result;
+  }
+
+  const note = "O acesso a todas as formações desta compra foi encerrado: as próximas formações não entram mais por ela.";
+
+  return { ...result, detail: result.nothingToUndo ? note : `${result.detail} ${note}`, nothingToUndo: false };
+}
+
+/** Fecha as concessoes "todas as formacoes" que o evento desfaz. Banco sem a migracao 202611280001: nada a fechar. */
+async function closeAllFormationsUndoneBy(db: SalesDb, event: NormalizedSaleEvent): Promise<number> {
+  if (event.type === "purchase_approved" || event.type === "other") {
+    return 0;
+  }
+
+  const bySubscription = event.subscriptionCode && (event.type === "subscription_canceled" || !event.transactionId) ? event.subscriptionCode : null;
+
+  try {
+    return await closeAllFormationsGrantsOfSale(db, {
+      closedBy: CLOSED_BY_BY_TYPE[event.type],
+      provider: event.provider,
+      subscriptionCode: bySubscription,
+      transactionId: event.transactionId
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "PendingMigrationError") {
+      return 0;
+    }
+
+    throw error;
+  }
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -419,7 +500,9 @@ async function resolveLine(db: SalesDb, event: NormalizedSaleEvent, line: SaleLi
       : skippedLine(base, `O pacote ${target.name} está ${situation}: vendas dele não liberam acesso até ser ativado.`);
   }
 
-  if (target.productIds.length === 0) {
+  // O pacote so com "todas as formacoes" e nenhuma publicada ainda nao libera nada hoje, mas a compra vale:
+  // a concessao e gravada e as formacoes entram quando forem publicadas.
+  if (target.productIds.length === 0 && !target.allFormations) {
     return line.extra
       ? skippedLine(base, `O pacote ${target.kind === "combo" ? target.name : ""}, vendido junto, não tem produtos.`)
       : skippedLine(base, `O pacote ${target.kind === "combo" ? target.name : ""} não tem produtos.`);
@@ -428,7 +511,7 @@ async function resolveLine(db: SalesDb, event: NormalizedSaleEvent, line: SaleLi
   const contents = await fetchContentKinds(db as StudentsDb, target.productIds);
   const productIds = target.productIds.filter((id) => contents.some((content) => content.id === id));
 
-  if (productIds.length === 0) {
+  if (productIds.length === 0 && !target.allFormations) {
     return line.extra
       ? skippedLine(base, `O produto vendido junto ${code} está ligado a um produto que não existe mais no catálogo.`)
       : skippedLine(base, "O produto ligado a esse código não existe mais no catálogo.");
@@ -456,25 +539,20 @@ function withSaleNotes(result: SaleProcessingResult, input: { notes: string[]; r
  * Compra aprovada
  * ---------------------------------------------------------------------------------------------- */
 
-/**
- * O vinculo de UMA venda com UM acesso, a partir do acesso como estava antes dela (ou de nada, quando o
- * acesso nasce agora). Acesso fechado que a propria venda abriu numa tentativa anterior (reprocesso
- * depois de uma falha no meio) continua "aberto por ela", e nao "estendido".
- */
+/** O vinculo de UMA venda com UM acesso (sale_grants), a partir do plano da venda para ele (sale-access.ts). */
 function saleGrantFor(
   event: NormalizedSaleEvent,
-  input: { entitlementId: string; previous: EntitlementRow | null; now: number; productId: string; userId: string; webhookEventId: string | null }
+  input: { entitlementId: string; plan: SaleAccessPlan; productId: string; userId: string; webhookEventId: string | null }
 ): SaleGrantInsert {
-  const wasOpen = input.previous ? isOpenRow(input.previous, input.now) : false;
-  const ownedBySale = input.previous ? entitlementBelongsToSale(input.previous, event) : false;
-
   return {
     entitlementId: input.entitlementId,
-    opened: !wasOpen || ownedBySale,
-    previousEndsAt: wasOpen && !ownedBySale ? (input.previous?.ends_at ?? null) : null,
+    opened: input.plan.opened,
+    previousEndsAt: input.plan.previousEndsAt,
     productId: input.productId,
     provider: event.provider,
+    purchasedAt: input.plan.purchasedAt,
     subscriptionCode: event.subscriptionCode,
+    term: input.plan.term,
     transactionId: saleSourceEventId(event),
     userId: input.userId,
     webhookEventId: input.webhookEventId
@@ -511,6 +589,16 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
   const subscriptionProductIds = new Set(released.filter((item) => !item.extra).flatMap((item) => item.productIds));
   const withLineSubscription = (grant: SaleGrantInsert): SaleGrantInsert =>
     subscriptionProductIds.has(grant.productId) ? grant : { ...grant, subscriptionCode: null };
+  // O prazo de cada produto desta compra (do item do pacote, do codigo ou de "todas as formacoes").
+  const termByProduct = new Map<string, AccessTerm | null>();
+
+  for (const line of released) {
+    for (const [productId, term] of line.target.terms) {
+      mergeTerm(termByProduct, productId, term);
+    }
+  }
+
+  const allFormationsLines = released.filter((item) => item.target.allFormations !== null);
 
   if (!event.buyer.email) {
     throw new SaleProcessingError(`O evento ${event.rawType} veio sem um e-mail válido do comprador.`, base);
@@ -529,9 +617,27 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
 
   const account = await findAccountByEmail(studentsDb, email);
   const now = Date.now();
+  // A data da compra aprovada: o prazo de cada produto conta dela. A venda guardada liberada depois (produto
+  // licenciado) conta de agora, como o proprio acesso: quem comprou nao perde os dias em que ela ficou guardada.
+  const purchasedAt = input.release ? now : salePurchasedAt(event, now);
   // Retrato dos acessos ANTES da venda: diz se ela abriu ou so estendeu cada um (e que prazo havia).
   const before = account ? await fetchEntitlements(studentsDb, { userId: account.id }) : [];
   const beforeByTarget = new Map(before.map((row) => [row.target_id, row] as const));
+  // Os vinculos que esta mesma compra ja gravou (reprocesso, reenvio): quem ja contou nao soma de novo.
+  const grantsOfSale = account ? await fetchSaleGrantsByTransaction(db, event.provider, saleSourceEventId(event)) : [];
+  const sale = { provider: event.provider, transactionId: saleSourceEventId(event) };
+  const planFor = (productId: string) => {
+    const previous = beforeByTarget.get(productId) ?? null;
+
+    return planSaleAccess({
+      now,
+      previous,
+      purchasedAt,
+      sale,
+      saleGrant: previous ? grantsOfSale.find((candidate) => candidate.entitlement_id === previous.id) : null,
+      term: termByProduct.get(productId) ?? null
+    });
+  };
 
   // Confirmacao de compra anterior (fim da garantia): libera so o que o aluno nunca teve; nunca reabre
   // acesso revogado pela equipe ou suspenso por assinatura cancelada.
@@ -575,7 +681,6 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
       }
     }
 
-    const grantsOfSale = await fetchSaleGrantsByTransaction(db, event.provider, saleSourceEventId(event));
     const reopenable: string[] = [];
     const reasons = new Set<string>();
 
@@ -675,13 +780,17 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
     }
   }
 
+  // O plano de cada produto: o termino depois desta venda (a soma do prazo) e o que vai para o vinculo.
+  const plans = new Map(productIds.map((productId) => [productId, planFor(productId)] as const));
+
   // Acesso que ja existe (aberto ou fechado) ganha o vinculo ANTES da liberacao: se a liberacao falhar no
   // meio, o reprocesso encontra o vinculo com o prazo que havia (a mesma venda nao duplica o vinculo).
   if (account) {
     const existingGrants = productIds.flatMap((productId) => {
       const previous = beforeByTarget.get(productId);
+      const plan = plans.get(productId);
 
-      return previous ? [withLineSubscription(saleGrantFor(event, { entitlementId: previous.id, now, previous, productId, userId: account.id, webhookEventId }))] : [];
+      return previous && plan ? [withLineSubscription(saleGrantFor(event, { entitlementId: previous.id, plan, productId, userId: account.id, webhookEventId }))] : [];
     });
     await insertSaleGrants(db, existingGrants);
     // Reativacao da assinatura com a mesma transacao (Ticto: uncanceled): o vinculo que o cancelamento
@@ -707,6 +816,8 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
       phone,
       productIds,
       redirectTo: `${siteOrigin}/auth/callback?next=%2Falterar-senha&provider=email`,
+      // O termino de cada produto, com o prazo dele e a soma (`endsAt` acima nao vale para eles).
+      saleEndsAtByProduct: Object.fromEntries([...plans].map(([productId, plan]) => [productId, plan.endsAt])),
       siteOrigin,
       source: "webhook",
       sourceEventId: saleSourceEventId(event),
@@ -723,12 +834,38 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
   const after = await fetchEntitlements(studentsDb, { userId: result.id });
   const newGrants = result.grantedProductIds.flatMap((productId) => {
     const row = after.find((candidate) => candidate.target_id === productId);
+    const plan = plans.get(productId);
 
-    return row && !beforeByTarget.has(productId)
-      ? [withLineSubscription(saleGrantFor(event, { entitlementId: row.id, now, previous: null, productId, userId: result.id, webhookEventId }))]
+    return row && plan && !beforeByTarget.has(productId)
+      ? [withLineSubscription(saleGrantFor(event, { entitlementId: row.id, plan, productId, userId: result.id, webhookEventId }))]
       : [];
   });
   await insertSaleGrants(db, newGrants);
+
+  // "Todas as formacoes": a concessao que da as proximas formacoes a este aluno, com o prazo do item e a
+  // turma do pacote. A compra com parte guardada (produto licenciado) grava a concessao so na liberacao.
+  let allFormationsNote = "";
+
+  if (allFormationsLines.length > 0 && (!heldPart || input.release)) {
+    for (const line of allFormationsLines) {
+      const allFormations = line.target.allFormations as AllFormationsTarget;
+      const recorded = await recordAllFormationsGrant(db, {
+        cohortName: allFormations.cohortName,
+        comboId: line.target.comboId,
+        formationIds: allFormations.formationIds,
+        provider: event.provider,
+        purchasedAt,
+        reactivates: Boolean(event.reactivatesSubscription),
+        subscriptionCode: line.extra ? null : event.subscriptionCode,
+        term: allFormations.term,
+        transactionId: saleSourceEventId(event),
+        userId: result.id,
+        webhookEventId
+      });
+
+      allFormationsNote = ` ${ALL_FORMATIONS_LABEL}: ${recorded.endsAt ? `até ${formatAccessDate(recorded.endsAt)}` : "para sempre"}.`;
+    }
+  }
 
   // O mesmo evento ja tinha ficado guardado e agora passou pela regra de sempre (o reenvio ou o Reprocessar com a
   // licenca em dia): a venda guardada dele sai da lista como liberada. A liberacao pela tarefa do tick grava a dela.
@@ -739,7 +876,7 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
   const granted = result.grantedProductIds.length;
   const what = target.kind === "combo" ? `pacote ${target.name} (${plural(granted, "produto", "produtos")})` : plural(granted, "produto liberado", "produtos liberados");
   const accountNote = result.existingAccount ? "conta que já existia" : "conta nova";
-  const grantedDetail = `${what}; ${accountNote}.`;
+  const grantedDetail = `${what}; ${accountNote}.${allFormationsNote}`;
 
   return withSaleNotes(
     {
@@ -761,13 +898,7 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
 
 /** O acesso nasceu desta compra? (mesma plataforma; a transacao, ou a transacao com o sufixo do produto). */
 export function entitlementBelongsToSale(row: Pick<EntitlementRow, "source_event_id" | "source_provider">, event: NormalizedSaleEvent) {
-  if (row.source_provider !== event.provider) {
-    return false;
-  }
-
-  const sourceId = saleSourceEventId(event);
-
-  return row.source_event_id === sourceId || Boolean(row.source_event_id?.startsWith(`${sourceId}:`));
+  return entitlementBelongsToTransaction(row, { provider: event.provider, transactionId: saleSourceEventId(event) });
 }
 
 const CLOSED_BY_BY_TYPE = { chargeback: "chargeback", refund: "refund", subscription_canceled: "subscription_canceled" } as const;
@@ -879,11 +1010,12 @@ async function removeAccess(db: SalesDb, input: ProcessSaleInput & { target: Res
       closingTransactionIds,
       eventProvider: event.provider,
       grants: coversSale ? history : [legacyGrantFor(row, event), ...history],
+      rowEndsAt: row.ends_at,
       rowSourceProvider: row.source_provider
     });
 
     if (decision.kind === "restore_deadline") {
-      const alreadyBack = row.status === "active" && row.ends_at !== null && Date.parse(row.ends_at) === Date.parse(decision.endsAt);
+      const alreadyBack = row.status === "active" && sameAccessEnd(row.ends_at, decision.endsAt);
 
       if (alreadyBack) {
         kept.push(row.target_id);
@@ -891,7 +1023,8 @@ async function removeAccess(db: SalesDb, input: ProcessSaleInput & { target: Res
         continue;
       }
 
-      // A venda tinha estendido um acesso de outra origem: o prazo anterior volta, o acesso continua.
+      // A venda tinha estendido um acesso de outra origem, ou somado prazo a um acesso que outra compra
+      // sustenta: o termino de antes volta, o acesso continua.
       await restoreEntitlements({ ...context, snapshots: [{ endsAt: decision.endsAt, id: row.id, startsAt: row.starts_at, status: row.status }] }, studentsDb);
       restored.push(row.target_id);
       continue;
@@ -939,7 +1072,7 @@ async function removeAccess(db: SalesDb, input: ProcessSaleInput & { target: Res
   const verb = action === "revoke" ? "revogado" : "suspenso";
   const parts = [
     ...(changed.length > 0 ? [changed.length > 1 ? `acesso ${verb} em ${plural(changed.length, "produto", "produtos")}` : `acesso ${verb}`] : []),
-    ...(restored.length > 0 ? [`prazo anterior devolvido em ${plural(restored.length, "produto", "produtos")} (a venda só tinha estendido um acesso de outra origem)`] : []),
+    ...(restored.length > 0 ? [`prazo anterior devolvido em ${plural(restored.length, "produto", "produtos")} (a venda só tinha somado prazo a um acesso que continua)`] : []),
     ...(kept.length > 0 ? [`${plural(kept.length, "produto mantido", "produtos mantidos")} (${[...reasons].join("; ")})`] : [])
   ];
   const what = target?.kind === "combo" ? `pacote ${target.name}: ${parts.join("; ")}` : parts.join("; ");

@@ -142,10 +142,20 @@ test("excluir com desfazer e reordenar em lote", () => {
 test("pacote precisa de nome e de pelo menos um produto", () => {
   assert.equal(schemas.comboSchema.safeParse({ name: "Pacote IA", productIds: [] }).success, false);
   assert.deepEqual(schemas.comboSchema.parse({ name: " Pacote IA ", productIds: ["course-a-1"] }), {
+    allFormations: false,
+    allFormationsTerm: null,
     cohortName: "",
     description: "",
     name: "Pacote IA",
     productIds: ["course-a-1"],
+    productTerms: {},
     status: "draft"
   });
+  // O pacote so com "todas as formacoes" vale sem produto escolhido; o prazo e o mesmo campo dos itens.
+  assert.equal(schemas.comboSchema.safeParse({ allFormations: true, name: "Acesso total", productIds: [] }).success, true);
+  assert.deepEqual(schemas.comboSchema.parse({ name: "Black", productIds: ["course-a-1"], productTerms: { "course-a-1": { amount: 1, unit: "years" } } }).productTerms, {
+    "course-a-1": { amount: 1, unit: "years" }
+  });
+  assert.equal(schemas.comboSchema.safeParse({ name: "Black", productIds: ["course-a-1"], productTerms: { "course-a-1": { amount: 0, unit: "years" } } }).success, false);
+  assert.equal(schemas.comboSchema.safeParse({ name: "Black", productIds: ["course-a-1"], productTerms: { "course-a-1": { amount: 1, unit: "weeks" } } }).success, false);
 });

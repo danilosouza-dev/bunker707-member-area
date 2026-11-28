@@ -64,7 +64,13 @@ test("a area do aluno usa estas regras nos pontos certos", () => {
   assert.match(resolver, /itemsVisibleTo\(/);
   assert.match(resolver, /items = getPurchasedProducts\(database, accessPreviewMode, userAccessKeys\);/);
 
-  assert.match(block("export async function getContentPageData", "export async function"), /canOpenProductPage\(item, hasPurchaseAccess\(item, accessPreviewMode, userAccessKeys\)\)/);
+  // Desde 28/11/2026 (docs/05, "Prazo de acesso por curso"): quem teve o acesso e ele venceu continua vendo o produto
+  // oculto, fechado, com a data do termino (hasOrHadPurchaseAccess); para quem nunca teve, continua inexistente.
+  assert.match(block("export async function getContentPageData", "export async function"), /canOpenProductPage\(item, hasOrHadPurchaseAccess\(item, accessPreviewMode, userAccessKeys\)\)/);
+  assert.match(
+    block("function hasOrHadPurchaseAccess", "function hasPurchaseAccess"),
+    /return hasPurchaseAccess\(item, accessPreviewMode, userAccessKeys\) \|\| \(!accessPreviewMode && Boolean\(getAccessEndedAt\(item, userAccessKeys\)\)\);/
+  );
   assert.match(store, /\.\.\.\(row\.listing === "hidden" \? \{ listing: "hidden" as const \} : \{\}\)/);
   assert.doesNotMatch(store, /listing: (?:item|input)\.listing/, "o platform-store nunca grava listing: so o catalogo v2 (coluna propria)");
 });

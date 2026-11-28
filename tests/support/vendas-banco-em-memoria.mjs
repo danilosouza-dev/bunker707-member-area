@@ -14,6 +14,19 @@ import { randomUUID } from "node:crypto";
 // As datas sao texto ISO, comparadas como texto (o mesmo formato de toISOString).
 
 const PADROES = {
+  all_formations_grants: () => ({
+    closed_at: null,
+    closed_by: null,
+    cohort_name: null,
+    combo_id: null,
+    ends_at: null,
+    formation_ids: [],
+    status: "active",
+    subscription_code: null,
+    term_amount: null,
+    term_unit: null,
+    webhook_event_id: null
+  }),
   email_outbox: () => ({ attempts: 0, metadata: {}, status: "queued" }),
   entitlements: () => ({ ends_at: null, product_id: null, source_event_id: null }),
   held_sales: () => ({ attempts: 0, claimed_at: null, held_at: new Date().toISOString(), last_error: null, resolution: null, resolved_at: null, status: "held" }),
@@ -36,7 +49,16 @@ const PADROES = {
     warranty_ends_at: null,
     webhook_event_id: null
   }),
-  sale_grants: () => ({ closed_at: null, closed_by: null, previous_ends_at: null, subscription_code: null, webhook_event_id: null }),
+  sale_grants: () => ({
+    closed_at: null,
+    closed_by: null,
+    previous_ends_at: null,
+    purchased_at: null,
+    subscription_code: null,
+    term_amount: null,
+    term_unit: null,
+    webhook_event_id: null
+  }),
   webhook_events: () => ({
     anonymized_at: null,
     buyer_email: null,
@@ -56,6 +78,7 @@ const PADROES = {
 
 const UNICOS = {
   admin_roles: [["user_id"]],
+  all_formations_grants: [["provider", "transaction_id", "user_id"]],
   email_outbox: [["idempotency_key"]],
   entitlements: [["user_id", "source_event_id"]],
   held_sales: [["webhook_event_id"]],
