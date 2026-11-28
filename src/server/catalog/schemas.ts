@@ -7,6 +7,7 @@ import { externalProductIdSchema } from "../payments/schemas";
 import { extractYouTubePlaylistId } from "../../lib/youtube-course-import";
 import { detectLessonVideo } from "../../lib/video-detect";
 import { describeVideoFileLinkProblem } from "../../lib/video-file-link";
+import { CONTENT_NOTICE_KINDS, CONTENT_NOTICE_TEXT_MAX, type ContentNotice } from "../../lib/content-notice";
 import {
   CREATABLE_PRODUCT_FORMATS,
   MAX_LESSONS_PER_PASTE,
@@ -103,6 +104,22 @@ export const productAudienceSchema = z.enum(PRODUCT_AUDIENCES, { error: "Escolha
 export const productSituationSchema = z.enum(PRODUCT_SITUATIONS);
 export const productAccentSchema = z.enum(PRODUCT_ACCENT_ORDER as [ProductAccent, ...ProductAccent[]]);
 
+/**
+ * Aviso da liberação "sem data" (src/lib/content-notice.ts). O texto proprio so vale, e e obrigatorio, no tipo
+ * "custom"; nos outros dois o texto e fixo e o que vier em `text` e descartado.
+ */
+export const contentNoticeSchema = z
+  .object({
+    kind: z.enum(CONTENT_NOTICE_KINDS),
+    text: z.string().trim().max(CONTENT_NOTICE_TEXT_MAX, `Use no máximo ${CONTENT_NOTICE_TEXT_MAX} caracteres.`).optional()
+  })
+  .superRefine((value, context) => {
+    if (value.kind === "custom" && !value.text) {
+      context.addIssue({ code: "custom", message: "Escreva o texto do aviso.", path: ["text"] });
+    }
+  })
+  .transform((value): ContentNotice => (value.kind === "custom" ? { kind: "custom", text: value.text ?? "" } : { kind: value.kind }));
+
 export const releasePhraseSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("immediate") }),
   z.object({
@@ -111,7 +128,8 @@ export const releasePhraseSchema = z.discriminatedUnion("mode", [
     unit: z.enum(["dias", "horas"]).default("dias")
   }),
   z.object({ date: z.iso.datetime({ error: "Escolha uma data válida.", offset: true }), mode: z.literal("fixed_date") }),
-  z.object({ mode: z.literal("after_previous_lesson") })
+  z.object({ mode: z.literal("after_previous_lesson") }),
+  z.object({ mode: z.literal("no_date"), notice: contentNoticeSchema })
 ]);
 
 /* ------------------------------------------------------------------------------------------------

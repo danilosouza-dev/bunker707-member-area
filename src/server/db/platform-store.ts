@@ -1464,7 +1464,8 @@ function resolveMemberReleaseState(
       releaseRule
     });
 
-    return state.status === "released" || (state.status === "scheduled" && releaseRule.mode === "fixed_date")
+    // "Sem data" e data fixa nao dependem do acesso do aluno: valem tambem na previa e para o visitante.
+    return state.status === "released" || state.status === "no_date" || (state.status === "scheduled" && releaseRule.mode === "fixed_date")
       ? state
       : unknownMemberState;
   }
@@ -2380,7 +2381,10 @@ function resolveMemberLibraryRelease(
   now: number
 ): MemberLibraryRelease {
   const notice = getReleaseRuleNotice(releaseRule, entityLabel, releaseState, now);
-  return notice?.isLocked ? { isReleaseLocked: true, releaseLabel: notice.detail } : { isReleaseLocked: false };
+  // "Sem data": o que informa e o aviso da equipe ("Em gravação"), que vem no titulo; nos outros, a frase da data.
+  return notice?.isLocked
+    ? { isReleaseLocked: true, releaseLabel: notice.kind === "no_date" ? notice.title : notice.detail }
+    : { isReleaseLocked: false };
 }
 
 function getMemberLibraryAccess(

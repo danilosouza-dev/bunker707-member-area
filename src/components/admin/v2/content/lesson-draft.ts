@@ -39,6 +39,8 @@ function normalizeRelease(phrase: ReleasePhrase) {
       return `after_access:${phrase.amount}:${phrase.unit}`;
     case "fixed_date":
       return `fixed_date:${phrase.date}`;
+    case "no_date":
+      return `no_date:${phrase.notice.kind}:${phrase.notice.kind === "custom" ? phrase.notice.text.trim() : ""}`;
     default:
       return phrase.mode;
   }

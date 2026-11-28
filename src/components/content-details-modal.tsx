@@ -1,5 +1,6 @@
 "use client";
 
+import { ContentNoticePill } from "@/components/content-notice-pill";
 import { Bell, ChevronDown, ChevronUp, LockKeyhole, Play, ShoppingCart, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -290,6 +291,8 @@ function ModuleCard({
 }) {
   const completedLessons = getCompletedLessonsCount(module);
   const moduleProgress = getModuleProgress(module);
+  // Liberacao do modulo (data, dias depois do acesso ou "sem data"): o selo no canto diz por que ele esta fechado.
+  const releaseNotice = getReleaseRuleNotice(module.releaseRule, "modulo", module.releaseState);
   const lessonsLabel = module.lessons.length > 0
     ? formatCount(module.lessons.length, "aula", "aulas")
     : "Sem aulas";
@@ -314,6 +317,13 @@ function ModuleCard({
         />
         <div className="modal-vertical-card-overlay absolute inset-0" />
         <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black via-black/66 to-transparent" />
+        {releaseNotice?.isLocked ? (
+          <ContentNoticePill
+            className="absolute left-2 top-2 max-w-[calc(100%-1rem)]"
+            clockDependent={releaseNotice.isClockDependent}
+            label={releaseNotice.shortLabel}
+          />
+        ) : null}
         <div className="module-card-media-label absolute inset-x-0 bottom-0 p-3">
           <p className="text-[11px] font-bold uppercase tracking-normal text-zinc-300">
             {module.eyebrow}
@@ -377,6 +387,7 @@ function LessonPanel({
             accessPreviewMode
           );
           const lessonThumbnailUrl = getLessonThumbnailUrl(lesson);
+          const lessonRelease = getReleaseRuleNotice(lesson.releaseRule, "aula", lesson.releaseState);
 
           return (
             <li
@@ -413,7 +424,13 @@ function LessonPanel({
                     {lesson.description}
                   </span>
                 </span>
-                <span className="pt-1 text-xs font-semibold text-zinc-500">{lesson.duration}</span>
+                {lessonRelease?.isLocked ? (
+                  <span className="pt-0.5">
+                    <ContentNoticePill clockDependent={lessonRelease.isClockDependent} label={lessonRelease.shortLabel} />
+                  </span>
+                ) : (
+                  <span className="pt-1 text-xs font-semibold text-zinc-500">{lesson.duration}</span>
+                )}
               </Link>
             </li>
           );

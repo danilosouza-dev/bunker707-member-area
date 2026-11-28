@@ -276,7 +276,7 @@ export function ProductAccessForm({ access }: { access: ProductAccess }) {
       ) : null}
 
       <fieldset className="flex min-w-0 flex-col gap-2">
-        <FieldLegend>Liberação padrão das aulas</FieldLegend>
+        <FieldLegend>Liberação do produto</FieldLegend>
         <ReleasePhraseField
           allowPreviousLesson={false}
           disabled={readOnly}
@@ -286,7 +286,9 @@ export function ProductAccessForm({ access }: { access: ProductAccess }) {
           onChange={(value) => update("release", value)}
           value={draft.release}
         />
-        <p className="text-[13px] leading-5 text-[var(--text-secondary)]">Cada módulo e cada aula pode ter regra própria na aba Conteúdo.</p>
+        <p className="text-[13px] leading-5 text-[var(--text-secondary)]">
+          Vale para o produto inteiro. Cada módulo e cada aula pode ter regra própria na aba Conteúdo. Com “Sem data”, o produto pode ser publicado sem aulas.
+        </p>
       </fieldset>
 
       <div className="flex min-w-0 flex-col gap-2">

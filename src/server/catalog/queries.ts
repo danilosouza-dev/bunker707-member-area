@@ -5,6 +5,7 @@ import "server-only";
 // requirePageAdmin() na pagina; nao repete o guard. Excluidos (status 'deleted') nunca aparecem.
 
 import { cache } from "react";
+import { noDateNoticeLabel } from "@/lib/content-notice";
 import { normalizeLessonVideoConfig } from "@/lib/video-embed";
 import { PendingMigrationError, isMissingSchemaObjectError } from "@/server/db/pending-migration";
 import { fetchSalesLinksFor } from "@/server/payments/store";
@@ -459,6 +460,8 @@ export async function evaluateChecklistFor(row: ProductRow): Promise<PublishChec
 
   return evaluatePublishChecklist({
     audience: audienceFromColumns({ accessModel: row.access_model, listing: row.listing }),
+    // Produto "sem data" (Em breve, Em gravação...) vai ao ar fechado: nao precisa de aula publicada.
+    contentNoticeLabel: row.release_rule?.mode === "no_date" ? noDateNoticeLabel(row.release_rule.notice) : null,
     format,
     hasCover: Boolean(coverUrlOf(row.image)),
     publishedLessons: published.length,

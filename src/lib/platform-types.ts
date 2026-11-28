@@ -68,6 +68,8 @@ export type ReleaseRuleConfig = {
   delayValue?: string;
   fixedDate?: string;
   mode: ReleaseRuleMode;
+  /** Aviso do modo "no_date"; lido sempre por noDateNoticeLabel (src/lib/content-notice.ts). */
+  notice?: unknown;
   requirement?: string;
 };
 
@@ -381,7 +383,9 @@ export type ReleaseRuleMode =
   | "after_purchase"
   | "after_previous_lesson"
   | "fixed_date"
-  | "activity_required";
+  | "activity_required"
+  /** Sem data: fechado com um aviso ("Em breve", "Em gravação"...) ate a equipe mudar (src/lib/content-notice.ts). */
+  | "no_date";
 export type AdminSourceProvider = "Hotmart" | "Ticto" | "TikTok" | "Kiwify" | "Manual";
 export type AdminEntitlementStatus = "active" | "suspended" | "revoked" | "expired";
 export type AdminStudentRole = "Estudante" | "Professor" | "Mentor";

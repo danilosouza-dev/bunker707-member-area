@@ -1,5 +1,6 @@
 import type { ReleaseRuleConfig } from "./platform-types";
 import type { MemberReleaseState } from "./release-state";
+import { noDateNoticeLabel } from "./content-notice";
 import { formatMemberDate, formatMemberDateTime, formatMemberTime, getMemberDayDifference, toMemberTimestamp } from "./member-format";
 
 // Texto de liberacao mostrado ao aluno (lista de aulas, aviso sobre o video, cards e biblioteca).
@@ -22,6 +23,8 @@ export type ReleaseRuleNoticeKind =
   | "previous_lesson"
   /** Depende de atividade obrigatoria. */
   | "activity"
+  /** Fechado sem data, com o aviso da equipe ("Em breve", "Em gravação" ou o texto dela). */
+  | "no_date"
   /** Sem data calculavel (frase generica da regra). */
   | "generic";
 
@@ -187,6 +190,17 @@ function getActivityNotice(entityLabel: string, requirement?: string): ReleaseRu
   };
 }
 
+/** Sem data: o aviso da equipe e o titulo e o selo; nao ha data para dizer. */
+function getNoDateNotice(label: string): ReleaseRuleNotice {
+  return {
+    detail: "Ainda sem data de liberação.",
+    isLocked: true,
+    kind: "no_date",
+    shortLabel: label,
+    title: label
+  };
+}
+
 /** Frase da regra sem dado do aluno (previa, visitante, sem compra). */
 function getStaticReleaseRuleNotice(
   releaseRule: ReleaseRuleConfig,
@@ -195,6 +209,10 @@ function getStaticReleaseRuleNotice(
 ): ReleaseRuleNotice | null {
   if (releaseRule.mode === "immediate") {
     return null;
+  }
+
+  if (releaseRule.mode === "no_date") {
+    return getNoDateNotice(noDateNoticeLabel(releaseRule.notice));
   }
 
   if (releaseRule.mode === "fixed_date") {
@@ -276,6 +294,10 @@ export function getReleaseRuleNotice(
     return getActivityNotice(entityLabel, releaseState.requirement ?? releaseRule?.requirement);
   }
 
+  if (releaseState?.status === "no_date") {
+    return getNoDateNotice(releaseState.label);
+  }
+
   if (!releaseRule) {
     return null;
   }
@@ -287,6 +309,7 @@ const noticePriority: Record<ReleaseRuleNoticeKind, number> = {
   activity: 4,
   due: 0,
   generic: 2,
+  no_date: 5,
   previous_lesson: 3,
   scheduled: 1
 };

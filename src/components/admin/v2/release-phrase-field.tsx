@@ -8,11 +8,14 @@ import {
   type ReleaseEntity,
   type ReleasePhrase
 } from "@/server/catalog/model";
+import { DEFAULT_CONTENT_NOTICE } from "@/lib/content-notice";
 import { cn } from "@/lib/utils";
+import { ContentNoticeField } from "./content-notice-field";
 import { AdminField, PillGroup, adminInputClass, fieldDescribedBy } from "./form";
 
 // "Liberação em frases" (docs/17 §1.3): o produtor escolhe o modo e so ve o campo que o modo usa.
-// Mesmo componente no modulo, na aula e na liberacao padrao do produto (aba Acesso e venda).
+// Mesmo componente no modulo, na aula e na liberacao do produto (aba Acesso e venda). "Sem data" (docs/17
+// §1.6.5a) fecha o item com um aviso no lugar da data: Em breve, Em gravação ou um texto proprio.
 
 type ReleaseMode = ReleasePhrase["mode"];
 
@@ -20,7 +23,8 @@ const modeLabels: Record<ReleaseMode, string> = {
   after_access: "Dias depois do acesso",
   after_previous_lesson: "Depois da aula anterior",
   fixed_date: "Em uma data",
-  immediate: "Na hora"
+  immediate: "Na hora",
+  no_date: "Sem data"
 };
 
 type ReleasePhraseFieldProps = {
@@ -52,6 +56,8 @@ function defaultPhraseFor(mode: ReleaseMode, current: ReleasePhrase): ReleasePhr
     }
     case "after_previous_lesson":
       return { mode: "after_previous_lesson" };
+    case "no_date":
+      return current.mode === "no_date" ? current : { mode: "no_date", notice: DEFAULT_CONTENT_NOTICE };
     default:
       return { mode: "immediate" };
   }
@@ -69,8 +75,8 @@ export function ReleasePhraseField({
 }: ReleasePhraseFieldProps) {
   const showPreviousLesson = allowPreviousLesson ?? entity === "aula";
   const modes: ReleaseMode[] = showPreviousLesson
-    ? ["immediate", "after_access", "fixed_date", "after_previous_lesson"]
-    : ["immediate", "after_access", "fixed_date"];
+    ? ["immediate", "after_access", "fixed_date", "after_previous_lesson", "no_date"]
+    : ["immediate", "after_access", "fixed_date", "no_date"];
   const preview = describeReleaseForStudent(value, entity);
 
   return (
@@ -124,6 +130,16 @@ export function ReleasePhraseField({
             value={releaseIsoToDateInput(value.date)}
           />
         </AdminField>
+      ) : null}
+
+      {value.mode === "no_date" ? (
+        <ContentNoticeField
+          disabled={disabled}
+          error={error}
+          id={`${id}-aviso`}
+          onChange={(notice) => onChange({ mode: "no_date", notice })}
+          value={value.notice}
+        />
       ) : null}
 
       <p aria-live="polite" className="text-[13px] leading-5 text-[var(--text-secondary)]">

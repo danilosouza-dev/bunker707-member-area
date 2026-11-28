@@ -1,5 +1,6 @@
 import type { ReleaseRuleConfig } from "@/lib/platform-types";
 import type { MemberReleaseState } from "@/lib/release-state";
+import { noDateNoticeLabel } from "../../lib/content-notice";
 import { formatMemberTime } from "../../lib/member-format";
 
 // Regra de liberacao (conteudo, modulo, aula) para um aluno. Fonte unica da conta:
@@ -120,6 +121,9 @@ export function resolveReleaseState({
   releaseRule
 }: ReleasePolicyInput): MemberReleaseState {
   if (!releaseRule || releaseRule.mode === "immediate") return releasedState;
+
+  // Sem data: fechado com o aviso da equipe, para qualquer aluno, ate a regra mudar.
+  if (releaseRule.mode === "no_date") return { label: noDateNoticeLabel(releaseRule.notice), status: "no_date" };
 
   if (releaseRule.mode === "fixed_date") {
     const fixedDate = parseDate(releaseRule.fixedDate);
