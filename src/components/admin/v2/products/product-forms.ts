@@ -176,6 +176,10 @@ export function sameReleasePhrase(left: ReleasePhrase, right: ReleasePhrase) {
       return right.mode === "after_access" && left.amount === right.amount && left.unit === right.unit;
     case "fixed_date":
       return right.mode === "fixed_date" && new Date(left.date).getTime() === new Date(right.date).getTime();
+    case "no_date":
+      return right.mode === "no_date"
+        && left.notice.kind === right.notice.kind
+        && (left.notice.kind !== "custom" || (right.notice.kind === "custom" && left.notice.text.trim() === right.notice.text.trim()));
     default:
       return true;
   }

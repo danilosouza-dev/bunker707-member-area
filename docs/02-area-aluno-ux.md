@@ -211,6 +211,8 @@ A fileira `Produtos a venda`/`Vitrine` mostra somente produtos vendaveis aos qua
 
 Uma fileira como `Em breve na Bunker707` pode mostrar proximos cursos, formacoes, bootcamps, novidades e listas de espera para criar expectativa sem liberar acesso.
 
+Produto, modulo ou aula no ar antes de o conteudo ficar pronto (28/11/2026, `docs/17` §1.6.5a): a equipe escolhe a liberacao `Sem data` com o aviso `Em breve`, `Em gravação` ou um texto proprio. O aluno ve o aviso onde veria a data da liberacao (card do produto, selo do card do modulo, linha da aula e sobre o player) e nao abre aquele item; o resto do que ele tem continua aberto.
+
 Regra de produto da vitrine:
 
 - a vitrine mostra apenas produtos vendaveis: formacoes, bootcamps e cursos avulsos;

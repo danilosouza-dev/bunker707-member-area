@@ -18,6 +18,7 @@
 // - Campos legados continuam preenchidos por derivacao no servidor enquanto a area do aluno os le:
 //   is_locked, status (ContentStatus) e purchase_label.
 
+import { DEFAULT_CONTENT_NOTICE, contentNoticeLabel, normalizeContentNotice, type ContentNotice } from "../../lib/content-notice";
 import type {
   CommerceScope,
   ContentAccessModel,
@@ -387,7 +388,9 @@ export type ReleasePhrase =
   | { mode: "immediate" }
   | { amount: number; mode: "after_access"; unit: "dias" | "horas" }
   | { date: string; mode: "fixed_date" }
-  | { mode: "after_previous_lesson" };
+  | { mode: "after_previous_lesson" }
+  /** Sem data: fechado com um aviso ("Em breve", "Em gravação" ou um texto proprio) ate a equipe mudar. */
+  | { mode: "no_date"; notice: ContentNotice };
 
 /** Regra gravada -> frase. "after_enrollment" e "after_purchase" viram uma coisa so: "depois de ganhar acesso". */
 export function releaseRuleToPhrase(rule: ReleaseRuleConfig | null | undefined): ReleasePhrase {
@@ -413,6 +416,10 @@ export function releaseRuleToPhrase(rule: ReleaseRuleConfig | null | undefined):
     return { mode: "after_previous_lesson" };
   }
 
+  if (rule.mode === "no_date") {
+    return { mode: "no_date", notice: normalizeContentNotice(rule.notice) ?? DEFAULT_CONTENT_NOTICE };
+  }
+
   // activity_required nunca foi liberado para o aluno (release-policy.ts); tratamos como imediato no
   // editor e o servidor so regrava se o produtor mudar a frase.
   return { mode: "immediate" };
@@ -432,6 +439,8 @@ export function releasePhraseToRule(phrase: ReleasePhrase): ReleaseRuleConfig | 
       return { fixedDate: phrase.date, mode: "fixed_date" };
     case "after_previous_lesson":
       return { mode: "after_previous_lesson" };
+    case "no_date":
+      return { mode: "no_date", notice: phrase.notice };
     default:
       return null;
   }
@@ -461,6 +470,8 @@ export function describeReleasePhrase(phrase: ReleasePhrase) {
       return `Libera em ${formatShortDate(phrase.date)}`;
     case "after_previous_lesson":
       return "Libera depois da aula anterior";
+    case "no_date":
+      return `Sem data · ${contentNoticeLabel(phrase.notice)}`;
     default:
       return "Libera na hora";
   }
@@ -484,6 +495,8 @@ export function describeReleaseForStudent(phrase: ReleasePhrase, entity: Release
       return `O aluno verá ${subject} a partir de ${formatShortDate(phrase.date)}.`;
     case "after_previous_lesson":
       return `O aluno verá ${subject} depois de concluir a aula anterior.`;
+    case "no_date":
+      return `O aluno não abre ${subject} e lê “${contentNoticeLabel(phrase.notice)}” até você trocar a liberação.`;
     default:
       return `O aluno verá ${subject} assim que ganhar acesso.`;
   }
@@ -521,6 +534,8 @@ export type PublishChecklistItem = {
 
 export type PublishChecklistInput = {
   audience: ProductAudience;
+  /** Aviso da liberação "sem data" do produto (src/lib/content-notice.ts); vazio = o produto tem outra liberação. */
+  contentNoticeLabel?: string | null;
   format: ProductFormat;
   hasCover: boolean;
   /** Aulas publicadas e nao excluidas do produto (para Formação: somadas dos cursos incluidos). */
@@ -538,9 +553,12 @@ export type PublishChecklist = {
 /**
  * Bloqueiam: sem capa (o card do aluno e a capa) e zero aulas publicadas ("Publique pelo menos uma aula").
  * Avisam sem bloquear: aula publicada sem video e produto fechado sem link de compra.
+ * Com a liberação do produto "sem data" (Em breve, Em gravação...), zero aulas deixa de bloquear e vira aviso: o
+ * produto vai ao ar fechado e o aluno le o aviso no card.
  */
 export function evaluatePublishChecklist(input: PublishChecklistInput): PublishChecklist {
   const isFormation = input.format === "formacao";
+  const noticeLabel = input.contentNoticeLabel?.trim() || null;
   const items: PublishChecklistItem[] = [
     input.hasCover
       ? { id: "cover", label: "Capa", state: "ok" }
@@ -552,14 +570,21 @@ export function evaluatePublishChecklist(input: PublishChecklistInput): PublishC
           label: "Pelo menos 1 aula publicada",
           state: "ok"
         }
-      : {
-          detail: isFormation
-            ? "Publique pelo menos uma aula em um curso desta formação."
-            : "Publique pelo menos uma aula.",
-          id: "lessons",
-          label: "Pelo menos 1 aula publicada",
-          state: "blocker"
-        },
+      : noticeLabel
+        ? {
+            detail: `Sem aulas publicadas: o produto vai ao ar fechado, com o aviso “${noticeLabel}”.`,
+            id: "lessons",
+            label: "Pelo menos 1 aula publicada",
+            state: "warning"
+          }
+        : {
+            detail: isFormation
+              ? "Publique pelo menos uma aula em um curso desta formação, ou deixe a formação “Sem data” em Acesso e venda › Liberação."
+              : "Publique pelo menos uma aula, ou deixe o produto “Sem data” em Acesso e venda › Liberação.",
+            id: "lessons",
+            label: "Pelo menos 1 aula publicada",
+            state: "blocker"
+          },
     input.publishedLessonsWithoutVideo > 0
       ? {
           detail: `${input.publishedLessonsWithoutVideo} ${input.publishedLessonsWithoutVideo === 1 ? "aula publicada está" : "aulas publicadas estão"} sem vídeo.`,

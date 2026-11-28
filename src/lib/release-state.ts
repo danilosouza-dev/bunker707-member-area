@@ -21,6 +21,11 @@ export type MemberReleaseState =
   /** Depende de uma atividade obrigatoria que ainda nao tem como ser comprovada. */
   | { requirement?: string; status: "waiting_activity" }
   /**
+   * Fechado sem data, com o aviso da equipe em `label` ("Em breve", "Em gravação" ou o texto dela). Vale para
+   * todo mundo, com ou sem acesso, ate a equipe trocar a liberacao.
+   */
+  | { label: string; status: "no_date" }
+  /**
    * Sem acesso real para calcular (previa do produtor, conteudo gratuito sem compra, visitante, acesso
    * so pelo cadastro antigo). A interface cai na frase generica da regra e continua bloqueada.
    */
@@ -39,6 +44,7 @@ export function isMemberReleaseState(value: unknown): value is MemberReleaseStat
     status === "scheduled" ||
     status === "waiting_previous_lesson" ||
     status === "waiting_activity" ||
+    status === "no_date" ||
     status === "unknown"
   );
 }

@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cardActionClassName } from "@/components/card-action-style";
+import { ContentNoticePill } from "@/components/content-notice-pill";
 import { useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { usePlatformLogoImage } from "@/components/platform-branding";
 import {
@@ -13,7 +14,7 @@ import {
   getCarouselMetrics
 } from "@/components/carousel-navigation";
 import { withAccessPreviewParam } from "@/lib/access-preview";
-import { getReleaseRuleNotice } from "@/lib/release-rules";
+import { getReleaseRuleNotice, type ReleaseRuleNotice } from "@/lib/release-rules";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { cssImageUrl } from "@/lib/css-url";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
@@ -44,10 +45,17 @@ type InternalPosterCardProps = {
   lockedTitle?: string;
   meta?: string;
   progress?: number;
+  /** Selo de liberacao no canto do card ("Liberação em 08/01", "Em breve"...); so quando a liberacao fecha o card. */
+  releaseLabel?: { clockDependent?: boolean; text: string };
   showAction?: boolean;
   showProgress?: boolean;
   title: string;
 };
+
+/** O selo do card a partir do aviso de liberacao (so quando ele fecha o card). */
+function releaseLabelOf(notice: ReleaseRuleNotice | null | undefined) {
+  return notice?.isLocked ? { clockDependent: notice.isClockDependent, text: notice.shortLabel } : undefined;
+}
 
 function ProgressBar({ value }: { value: number }) {
   return (
@@ -70,6 +78,7 @@ function InternalPosterCard({
   lockedTitle,
   meta,
   progress = 0,
+  releaseLabel,
   showAction = true,
   showProgress = true,
   title
@@ -150,8 +159,16 @@ function InternalPosterCard({
               </p>
             ) : null}
           </div>
+          {/* Selo de liberacao: visivel sem passar o mouse (titulo e botao so aparecem no hover); no lugar da logo. */}
+          {releaseLabel ? (
+            <ContentNoticePill
+              className="pointer-events-none absolute left-2 top-2 z-30 max-w-[calc(100%-3.75rem)] sm:left-3.5 sm:top-3.5 lg:left-4 lg:top-4 lg:max-w-[calc(100%-5.25rem)]"
+              clockDependent={releaseLabel.clockDependent}
+              label={releaseLabel.text}
+            />
+          ) : null}
           {/* Logo da escola dentro da superficie (ver VerticalCoverCard). */}
-          {logoImage ? (
+          {logoImage && !releaseLabel ? (
             <div className="home-cover-card-logo pointer-events-none absolute left-3 top-3 z-30 w-[56%] max-w-[11rem] opacity-0 sm:left-3.5 sm:top-3.5 lg:left-4 lg:top-4">
               <Image
                 alt=""
@@ -335,6 +352,7 @@ export function ContentStructureSection({
                 lockedDetail={lockedDetail}
                 lockedTitle={item.isLocked ? "Acesso pendente" : releaseNotice?.title}
                 meta={course.durationLabel ?? course.lessons}
+                releaseLabel={releaseLabelOf(item.isLocked || course.isLocked ? null : releaseNotice)}
                 progress={course.progress}
                 showAction={showInternalCardActions}
                 showProgress={false}
@@ -380,6 +398,7 @@ export function ContentStructureSection({
                 lockedDetail={lockedDetail}
                 lockedTitle={lockedTitle}
                 meta={module.meta}
+                releaseLabel={releaseLabelOf(item.isLocked ? null : releaseNotice)}
                 progress={module.progress}
                 showAction={showInternalCardActions && !isLocked && hasLessons}
                 title={module.title}
