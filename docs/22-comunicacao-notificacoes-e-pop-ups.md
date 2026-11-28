@@ -18,6 +18,8 @@ Este documento registra o que foi construído, as regras fixas, as decisões e o
 
 > **Atualização (23/10/2026): Comunicação v3b-2 "Pop-ups: hora marcada ao vivo, primeiro acesso, curso concluído, relatório e players de fora"** (`docs/29`, migração `202610260001`). Com **Começa: Em uma data**, o pop-up abre na hora também para quem já está parado numa das páginas (a **hora marcada ao vivo**, com alguns segundos de diferença entre os alunos); dois momentos novos, **No primeiro acesso** (`A primeira vez na área` ou `A primeira vez com estes produtos`, decidido no recálculo do segmento) e **Ao concluir um curso**; o **relatório do pop-up** na página dele (onde apareceu, por página e por produto, em que momento, como fecharam e quantas vezes cada aluno viu); e a página da aula passa a ler o player do **Bunny**, do **Vimeo** e do **Mux** (a aula conclui sozinha no fim do vídeo e o pop-up espera o vídeo parar em todo player que a página lê). As faixas do recálculo dos pop-ups viram em :07, :22, :37 e :52. As seções 1.3, 2.4, 4.3 e 6 foram ajustadas; o desenho completo e as decisões D1–D20 estão no `docs/29`.
 
+> **Atualização (28/11/2026): vencimento do acesso** (seção 3.1, sem migração). A regra **Acesso terminando** passou a se chamar **Acesso perto de vencer** (`o acesso vence em até N dias`) e ganhou a irmã **Acesso vencido** (`o acesso venceu há até N dias`), as duas com atalhos de 7, 30 e 90 dias, para um produto ou para qualquer um, nos segmentos (avisos, pop-ups, "Quem entra") e em todo lugar dos fluxos (Condição, "Só para quem…", Objetivo). Acesso sem prazo nunca entra em "perto de vencer"; acesso removido por reembolso ou suspenso não conta como vencido; quem renovou sai das duas. A seção 3.1 traz a receita dos avisos "faltando 90, 30 e 7 dias" e o que fica para depois (data de término e nome do produto no texto).
+
 ---
 
 ## Resumo em uma página
@@ -141,7 +143,8 @@ Cada regra pode ser combinada com **Todas as regras** (E) ou **Qualquer regra** 
 | Progresso nas aulas | concluiu pelo menos / no máximo X% das aulas, de um produto ou de tudo o que tem | aulas publicadas concluídas ÷ aulas publicadas, arredondado para baixo; quem não tem aula para medir não entra |
 | Comentários | comentou pelo menos N vezes / no máximo N / não comentou / está entre os N que mais comentaram, nos últimos 7, 30 ou 90 dias ou desde sempre | comentários e respostas aprovados do aluno (equipe fora, RPC `communication_comment_counts`, lida em páginas de 1.000 porque o PostgREST corta o resultado em 1.000 linhas sem avisar); o ranking só conta quem comentou na janela e empata pela ordem fixa do id |
 | Tempo de acesso | ganhou acesso há menos de / há mais de X dias, a um produto ou a qualquer um | início do acesso aberto (`entitlements.starts_at`, que é a compra ou a liberação manual); com produto, o acesso dele ou o da plataforma |
-| Acesso terminando | termina em até X dias, de um produto ou de qualquer um | fim do acesso aberto; acesso sem fim não entra |
+| Acesso perto de vencer (era "Acesso terminando" até 28/11/2026) | o acesso vence em até X dias, de um produto ou de qualquer um; atalhos de 7, 30 e 90 dias | a data de término do acesso aberto (`entitlements.ends_at`); acesso sem prazo nunca entra; com mais de um acesso aberto ao mesmo produto (ou a plataforma inteira aberta) vale o que termina por último (seção 3.1) |
+| Acesso vencido (28/11/2026) | o acesso venceu há até X dias, de um produto ou de qualquer um; atalhos de 7, 30 e 90 dias | acesso que acabou pelo prazo (ativo ou marcado como expirado, com a data de término no passado) e o aluno continua sem acesso aberto ao produto; revogado (reembolso ou tirado pela equipe) e suspenso não contam; quem renovou sai (seção 3.1) |
 | Último estudo | estudou nos últimos X dias / não estuda há X dias ou nunca estudou | último progresso gravado |
 | Entrada na plataforma | nunca entrou / entrou nos últimos X dias / não entra há X dias | último login (`profiles.last_sign_in_at`) |
 | Ritmo | Estudando, Em risco, Inativo, Nunca começou, Concluiu | mesma regra da lista de Alunos (docs/17 §1.11) |
@@ -156,6 +159,51 @@ Segmentos salvos em Alunos viram regras (todas juntas): produto, ritmo, turma, "
 
 Notificação usa o segmento do momento do envio (acima de 500 sem aprovação, volta para aprovação, seção 2.3). Pop-up é recalculado enquanto está no ar (a cada 15 minutos pelo job, e na hora ao publicar, retomar ou mudar o segmento): quem passa a se encaixar começa a ver; quem deixa de se encaixar para de ver. O que o aluno já fez (viu, clicou, Não mostrar de novo, Lembrar depois) nunca é apagado enquanto o pop-up existe, nem pela retenção de 24 meses (seção 4.6).
 
+
+### 3.1 Vencimento do acesso (28/11/2026)
+
+Pedido do produtor: vender cursos com prazo (1 ano, 2 anos, vitalício) e avisar o aluno antes de o acesso acabar, do jeito de cada produto ("faltando 3 meses, 1 mês, 7 dias", no sino e em pop-up). O prazo é o `ends_at` de cada acesso (`entitlements`; nulo = sem prazo). Esta entrega só **lê** essa data: quem grava o prazo é a venda (tarefa à parte) ou a equipe, na ficha do aluno.
+
+**As duas regras** (tipos `access_ending`, que já existia, e `access_expired`, novo; sem migração):
+
+| Regra | Linha no construtor | Quem entra | Quem nunca entra |
+|---|---|---|---|
+| **Acesso perto de vencer** | `Acesso a [qualquer produto ▾] vence em até [30] dias` + atalhos `7 dias` `30 dias` `90 dias` | quem tem acesso aberto com data de término de agora até N dias (N × 24 h, o último dia conta) | acesso sem prazo; acesso já vencido, revogado ou suspenso; quem tem outro acesso aberto ao mesmo produto que termina depois da janela (renovou) ou sem prazo; quem tem a plataforma inteira aberta sem prazo; a equipe |
+| **Acesso vencido** | `Acesso a [qualquer produto ▾] venceu há até [30] dias` + os mesmos atalhos | quem teve um acesso que acabou pelo prazo há no máximo N dias e continua sem nenhum acesso aberto ao produto | acesso removido por reembolso (revogado) ou tirado pela equipe; assinatura cancelada (suspenso); quem renovou ou ganhou a plataforma inteira; acesso marcado como expirado sem data de término (não há quando contar); a equipe |
+
+- **Um produto ou qualquer um.** Com um produto, vale o acesso dele e o da plataforma inteira (quem só tem a plataforma, com prazo, "vence" em todo produto; quem tinha só a plataforma e ela venceu está "vencido" em todo produto). Com "qualquer produto", basta um produto do aluno estar na situação.
+- **Vale o que termina por último.** Um aluno com dois acessos abertos ao mesmo produto (o antigo acabando e a renovação) não está "perto de vencer". Antes desta entrega a regra olhava só o primeiro acesso encontrado e podia avisar quem já tinha renovado.
+- **Dias** de 1 a 3.650, inteiros. Os atalhos só preenchem o campo.
+- **Frases:** `Alunos que têm acesso a Formação Gestor de Clone que vence em até 30 dias` e `Alunos que estão com o acesso a Formação Gestor de Clone vencido há até 7 dias` (sem produto: `têm acesso que vence em até…`, `estão com o acesso vencido há até…`).
+- **Dicas na tela:** `Só entra quem tem data de término. Acesso sem prazo nunca entra. Com mais de um acesso ao mesmo produto (ou à plataforma inteira), vale o que termina por último.` e `Só entra quem continua sem acesso ao produto: quem renovou sai. Acesso removido por reembolso ou suspenso não conta como vencido.`
+- **Por dentro:** os fatos de cada aluno ganharam `endedAccesses` (os acessos que acabaram pelo prazo, `endedAccessFactsOf`), das mesmas linhas de `entitlements` já lidas: nenhuma leitura nova na prévia, no envio, no recálculo do pop-up, na entrada do fluxo nem no lote do motor (a RPC `communication_flow_batch_facts` já devolvia todos os acessos, abertos ou não). O "Quem pode" da live (`docs/30` §1.6) também aceita as duas; na âncora dele, "Acesso vencido" vale como verdadeiro (é de quem está sem o produto) e "Acesso perto de vencer" continua exigindo o acesso aberto.
+
+**Onde usar cada uma:**
+
+| Quero | Como |
+|---|---|
+| Pop-up para quem está a 30 dias do fim | **Novo aviso → Pop-up**, Para quem: `Acesso perto de vencer`, 30 dias, o produto. O segmento é recalculado a cada 15 minutos (:07, :22, :37, :52, `docs/29`): o aluno começa a ver quando entra na janela e para de ver quando renova ou vence. Quantas vezes aparece é o "Quantas vezes" do pop-up (`docs/25`) |
+| Notificação no sino, uma vez, quando faltarem 30 dias | **Fluxos → Novo fluxo → Começar do zero**, Quem entra: `Acesso perto de vencer`, 30 dias, com o modo **Só quem entrar no segmento a partir de agora**, e uma Notificação. Cada aluno entra quando cruza os 30 dias (conferido a cada 15 minutos, :00, :15, :30, :45) e passa pelo fluxo uma vez só |
+| "Faltando 90, 30 e 7 dias", cada uma com o seu texto | três fluxos pequenos como o de cima (90, 30 e 7 dias), um por aviso. Com **Só quem entrar no segmento a partir de agora**, quem já está dentro da janela ao ativar fica de fora daquele fluxo (não recebe "faltam 90 dias" quem tem 5) e entra nos seguintes quando cruzar cada marca |
+| Tudo num fluxo só | Quem entra `vence em até 90 dias` → Notificação → **Esperar 60 dias** → Notificação com **Só para quem…** `vence em até 30 dias` → **Esperar 23 dias** → Notificação com **Só para quem…** `vence em até 7 dias`. Quem renovou no meio não combina com o "Só para quem…" e para ali. O limite de espera (60 dias, `docs/23` §2.10) cabe exatamente entre 90 e 30 |
+| Recuperar quem deixou vencer | pop-up ou fluxo com `Acesso vencido`, 7 ou 30 dias; quem compra de novo sai do segmento na faixa seguinte |
+| Aviso avulso agora para quem vence este mês | **Novo aviso → Notificação**, Para quem: `Acesso perto de vencer`, 30 dias. Sai uma vez, para quem está no segmento na hora do envio |
+
+**Limites que continuam valendo** (nada mudou neles):
+
+- **Ninguém recebe a mesma notificação duas vezes.** A entrada do fluxo só inclui quem ainda não tem passagem (`Cada aluno passa por este fluxo uma vez só.`), cada passo roda uma vez por aluno e a notificação tem chave única por aluno (`docs/23` §4.4). O tick roda de minuto em minuto e a faixa de 15 minutos confere o segmento, mas nada é reenviado.
+- **Uma passagem por fluxo vale também no ano seguinte.** O aluno que renovou e volta a ficar perto de vencer **não** entra de novo no mesmo fluxo. Para um novo ciclo, duplicar o fluxo e ativar a cópia com **Só quem entrar no segmento a partir de agora** (e encerrar o antigo). O pop-up não tem essa trava: vale o segmento de agora. Entrar de novo num fluxo a cada ciclo fica para depois (pede mudar as chaves das passagens no banco).
+- **3 por dia.** As notificações de fluxos seguem o limite de 3 por aluno por dia de São Paulo, com 1 hora entre elas (`docs/23` §2.10). Um aluno com vários produtos vencendo junto pode receber uma no dia seguinte.
+- **Acima de 500 alunos** no segmento, ativar pede dono ou administrador, como em todo fluxo e aviso.
+- **Quem compra um acesso curto** (por exemplo 30 dias) já nasce dentro de "vence em até 90 dias" e entra no fluxo na hora da compra. Para evitar, juntar a regra **Tempo de acesso** `há mais de 7 dias` no "Quem entra".
+
+**Texto com a data e o nome do produto:** a Comunicação não tem variáveis de texto (nem o nome do aluno): o título e o texto saem como foram escritos. Por isso a data de término e o nome do produto **não** entram no texto nesta entrega. Hoje o caminho é um fluxo ou pop-up por produto, com o nome escrito no texto, e frases que não dependem do dia ("Seu acesso termina em menos de 30 dias"). Próximo passo, quando for a hora: variáveis de texto na notificação e no pop-up (`{primeiro nome}`, `{produto}`, `{data de término}`), resolvidas por aluno na leitura do sino e no `show` do pop-up, com prévia no editor e texto de reserva quando faltar o dado.
+
+**Fora desta entrega:** e-mail e WhatsApp (os fluxos só mandam para o sino, seção 6); gravar o prazo nas vendas; mostrar o prazo ao aluno fora da Comunicação; um modelo pronto de fluxo de vencimento em **Novo fluxo**.
+
+**Voltar para a imagem anterior (rollback):** `access_expired` é um tipo novo, e o app de antes avalia um tipo que não conhece como falso (como as regras de 30/10/2026, acima): o pop-up e o "Quem entra" com ela ficam sem ninguém, a Condição manda todos pelo **Não** e o "Só para quem…" para quem chega. Pausar antes os fluxos e os pop-ups que usam **Acesso vencido**. **Acesso perto de vencer** continua funcionando na imagem anterior, com a conta antiga (o primeiro acesso encontrado) e o nome antigo.
+
+**Testes:** `tests/comunicacao-vencimento-do-acesso.test.mjs` (17): quem entra e quem não entra em cada regra a partir das linhas de acesso (sem prazo, dentro e fora da janela, já vencido, reembolso, suspenso, renovado, plataforma inteira, equipe), a validação e a normalização dos campos, as frases, o construtor, a entrada do fluxo só com quem ainda não passou (o tick seguinte não repete), o modo "só quem entrar a partir de agora", o "Só para quem…" e a Condição sobre os fatos do lote do motor. `tests/comunicacao-regras-lives-tela.test.mjs` ganhou as duas linhas desenhadas (frase, atalhos, dica, nos dois modos). **Não conferido em banco de verdade nesta entrega:** os testes de integração e ponta a ponta não rodaram (este checkout não tem `.env.local`); as garantias de "uma vez por aluno" no banco são as da v2, cobertas por `tests/integration/fluxos.test.mjs`.
 ---
 
 ## 4. Como funciona por dentro

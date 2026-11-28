@@ -60,6 +60,7 @@ import { pageKeyOfHref, pageKeyOfTarget } from "@/server/member-area/page-visit-
 import { previewAudience, resolveAudienceUserIds, type AudienceSamplePerson } from "./audience";
 import {
   accessFactsOf,
+  endedAccessFactsOf,
   loadAudienceFacts,
   loadWebinarFacts,
   messageFactOf,
@@ -2503,6 +2504,7 @@ export async function previewFollowUpAudience(input: PreviewFollowUpAudienceInpu
               comments: ZERO_COMMENTS,
               completedByContent: {},
               completedLessons: 0,
+              endedAccesses: endedAccessFactsOf(accesses.get(userId) ?? [], nowMs),
               lastSignInAt: null,
               lastStudiedAt: null,
               pace: "never_started",

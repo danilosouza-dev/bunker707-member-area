@@ -224,3 +224,41 @@ test("Participação em lives com uma acao do follow-up: sem 'qualquer live', 'E
     ["Participou", "Não participou", "Garantiu vaga", "Não garantiu vaga"]
   );
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * Vencimento do acesso (docs/22 §3, 28/11/2026)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Os atalhos de dias da linha, com qual esta marcado. */
+const atalhosDe = (html) => Array.from(html.matchAll(/<button aria-pressed="(true|false)"[^>]*>(\d+) dias<\/button>/g), ([, pressed, days]) => [Number(days), pressed === "true"]);
+
+test("Acesso perto de vencer: 'Acesso a [produto] vence em até [N] dias', os atalhos 7, 30 e 90 e a dica, no segmento e no fluxo", () => {
+  for (const mode of ["segment", "flow"]) {
+    const html = desenhar(todas({ days: 30, productId: null, type: "access_ending" }), { mode });
+    const texto = textoDe(html);
+
+    assert.match(texto, /Acesso perto de vencer Acesso a qualquer produto vence em até dias 7 dias 30 dias 90 dias/, mode);
+    assert.match(html, /aria-label="Dias"[^>]*value="30"/, "o campo traz os dias");
+    assert.deepEqual(atalhosDe(html), [[7, false], [30, true], [90, false]], "o atalho dos 30 dias marcado");
+    assert.ok(texto.includes(model.ACCESS_ENDING_HINT), mode);
+    semPalavrasProibidas(texto);
+  }
+
+  const comProduto = desenhar(todas({ days: 45, productId: PRODUTOS[0].id, type: "access_ending" }));
+  assert.ok(textoDe(comProduto).includes(`Acesso a ${PRODUTOS[0].title} vence em até`), "o produto escolhido aparece na frase");
+  assert.deepEqual(atalhosDe(comProduto), [[7, false], [30, false], [90, false]], "outro numero: nenhum atalho marcado");
+  assert.match(textoDe(desenhar(todas({ days: 1, productId: null, type: "access_ending" }))), /vence em até dia 7 dias/, "1 dia no singular");
+});
+
+test("Acesso vencido: 'Acesso a [produto] venceu há até [N] dias', os mesmos atalhos e a dica de quem nao conta", () => {
+  for (const mode of ["segment", "flow"]) {
+    const html = desenhar(todas({ days: 7, productId: null, type: "access_expired" }), { mode });
+    const texto = textoDe(html);
+
+    assert.match(texto, /Acesso vencido Acesso a qualquer produto venceu há até dias 7 dias 30 dias 90 dias/, mode);
+    assert.deepEqual(atalhosDe(html), [[7, true], [30, false], [90, false]]);
+    assert.ok(texto.includes(model.ACCESS_EXPIRED_HINT), mode);
+    assert.match(texto, /reembolso/, "a dica diz que o removido por reembolso nao conta");
+    semPalavrasProibidas(texto);
+  }
+});
