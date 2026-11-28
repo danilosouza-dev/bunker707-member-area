@@ -10,6 +10,7 @@ import { saveHomeHero } from "@/server/member-area/home-hero-actions";
 import {
   DEFAULT_HOME_HERO_DRAFT,
   DEFAULT_HOME_HERO_IMAGE,
+  HERO_IMAGE_SIZES,
   HERO_TEXT_LIMITS,
   autoShowFilledFields,
   heroFieldErrorsFrom,
@@ -18,10 +19,12 @@ import {
   previewHeroFromDraft,
   rebaseHeroDraft,
   validateHomeHeroDraft,
+  type HeroImageSizeField,
   type HomeHeroDraft,
   type HomeHeroDraftErrors,
   type HomeHeroDraftField
 } from "@/server/member-area/home-hero-model";
+import type { MemberAreaUploadSlot } from "@/server/member-area/schemas";
 import type { HomeHeroEditorData } from "@/server/member-area/home-hero-queries";
 import { ErrorBanner } from "../../error-banner";
 import { AdminField, PillGroup, adminInputClass, fieldDescribedBy } from "../../form";
@@ -31,7 +34,6 @@ import { SaveBar } from "../../save-bar";
 import { AdminSwitch, SectionCard } from "../../settings/kit";
 import { adminCard } from "../../styles";
 import { adminToast } from "../../toast";
-import type { PreviewDevice } from "../preview-frame";
 import { CtaField } from "./cta-field";
 import { GLOW_COLOR_PRESETS, GlowColorPicker, HeroTextField } from "./fields";
 import { HeroPreview } from "./hero-preview";
@@ -40,13 +42,17 @@ import { HeroPreview } from "./hero-preview";
 // destaque", que grava platform_settings.hero pela Server Action saveHomeHero com a versao lida (409 se
 // mudou em outra tela). Imagens: recorte WebP no navegador, envio logo depois do recorte
 // (uploadMemberAreaImage, slot "hero") e so a URL no rascunho. A previa desenha o HeroSection real.
+//
+// Capas por tamanho de tela: alem da imagem principal (1920 × 720, telas grandes), o produtor pode enviar a mesma
+// arte ajustada para notebook, tablet e celular (HERO_IMAGE_SIZES). Cada uma e opcional; a previa troca de "tela"
+// para mostrar qual capa cada tamanho desenha.
 
 type HeroEditorProps = {
   canEdit: boolean;
   data: HomeHeroEditorData;
 };
 
-type ImageSlotField = "image" | "poster";
+type ImageSlotField = "image" | "poster" | HeroImageSizeField;
 type Failure = { message: string; status: number };
 
 const MEDIA_OPTIONS = [
@@ -54,10 +60,37 @@ const MEDIA_OPTIONS = [
   { label: "Vídeo", value: "video" }
 ] as const;
 
-const DEVICE_OPTIONS = [
-  { label: "Computador", value: "desktop" },
-  { label: "Celular", value: "mobile" }
-] as const satisfies readonly { label: string; value: PreviewDevice }[];
+/** "Telas" da previa: uma por tamanho de capa, com uma largura tipica de cada faixa. */
+const PREVIEW_SCREENS = [
+  { label: "Tela grande", value: "wide", width: 1920 },
+  { label: "Notebook", value: "notebook", width: 1280 },
+  { label: "Tablet", value: "tablet", width: 768 },
+  { label: "Celular", value: "mobile", width: 390 }
+] as const;
+
+type PreviewScreen = (typeof PREVIEW_SCREENS)[number]["value"];
+
+/** Medida de recorte e de envio de cada campo de imagem (a capa do video tem a medida da imagem principal). */
+const UPLOAD_SLOT: Record<ImageSlotField, MemberAreaUploadSlot> = {
+  image: "hero",
+  imageMobile: "heroMobile",
+  imageNotebook: "heroNotebook",
+  imageTablet: "heroTablet",
+  poster: "hero"
+};
+
+/** Campos das capas por tamanho de tela, da tela maior para a menor. */
+const SIZE_FIELDS = [...HERO_IMAGE_SIZES].reverse();
+
+const SIZE_TEXT: Record<(typeof HERO_IMAGE_SIZES)[number]["key"], { hint: string; id: string; label: string }> = {
+  mobile: { hint: "Celulares: telas de até 639 px de largura.", id: "destaque-capa-celular", label: "Capa de celular" },
+  notebook: {
+    hint: "Notebooks e monitores menores: telas de 1200 a 1535 px de largura.",
+    id: "destaque-capa-notebook",
+    label: "Capa de notebook"
+  },
+  tablet: { hint: "Tablets, em pé ou deitados: telas de 640 a 1199 px de largura.", id: "destaque-capa-tablet", label: "Capa de tablet" }
+};
 
 const VIDEO_LINK_HINT = "Use um link direto de vídeo, como o do Bunny. O vídeo toca sem som, em repetição.";
 const UNDO_OUTDATED = "Não foi possível desfazer: já existe uma publicação mais nova do destaque.";
@@ -71,6 +104,9 @@ const FIELD_FOCUS: Record<HomeHeroDraftField, string> = {
   description: "#destaque-descricao",
   enabled: "#destaque-ligado",
   image: "[aria-labelledby='destaque-imagem-label']",
+  imageMobile: "[aria-labelledby='destaque-capa-celular-label']",
+  imageNotebook: "[aria-labelledby='destaque-capa-notebook-label']",
+  imageTablet: "[aria-labelledby='destaque-capa-tablet-label']",
   glowColor: "[name='destaque-luz']",
   mediaType: "[name='destaque-midia']",
   poster: "[aria-labelledby='destaque-capa-label']",
@@ -82,7 +118,7 @@ const FIELD_FOCUS: Record<HomeHeroDraftField, string> = {
   videoUrl: "#destaque-video"
 };
 
-const FIELD_ORDER: HomeHeroDraftField[] = ["image", "videoUrl", "poster", "glowColor", "badge", "title", "description", "ctaLabel", "ctaHref"];
+const FIELD_ORDER: HomeHeroDraftField[] = ["image", "imageNotebook", "imageTablet", "imageMobile", "videoUrl", "poster", "glowColor", "badge", "title", "description", "ctaLabel", "ctaHref"];
 
 type GlowMode = "auto" | "custom";
 const GLOW_OPTIONS: ReadonlyArray<{ label: string; value: GlowMode }> = [
@@ -97,7 +133,7 @@ function omitKey<Value>(record: Partial<Record<ImageSlotField, Value>>, key: Ima
 }
 
 function imagePatch(field: ImageSlotField, value: string | null): Partial<HomeHeroDraft> {
-  return field === "image" ? { image: value } : { poster: value };
+  return { [field]: value };
 }
 
 /** Campos com problema no que esta publicado (ex.: link antigo gravado pelo admin antigo). */
@@ -141,7 +177,7 @@ export function HeroEditor({ canEdit, data }: HeroEditorProps) {
   const [submitted, setSubmitted] = useState(false);
   const [uploads, setUploads] = useState<Partial<Record<ImageSlotField, string>>>({});
   const [uploadErrors, setUploadErrors] = useState<Partial<Record<ImageSlotField, string>>>({});
-  const [device, setDevice] = useState<PreviewDevice>("desktop");
+  const [screen, setScreen] = useState<PreviewScreen>("notebook");
   // Remonta o campo do botao quando o rascunho e trocado de uma vez (descartar, padrao, publicar).
   const [resetKey, setResetKey] = useState(0);
   // Ultima versao recebida do servidor. "Recarregar" (depois de um 409) traz outra: a tela segue o
@@ -245,13 +281,13 @@ export function HeroEditor({ canEdit, data }: HeroEditorProps) {
       return;
     }
 
-    setUploads((current) => ({ ...omitKey(current, field), ...(field === "image" ? { image: value } : { poster: value }) }));
-    const result = await uploadMemberAreaImage({ image: value, slot: "hero" });
+    setUploads((current) => ({ ...omitKey(current, field), [field]: value }));
+    const result = await uploadMemberAreaImage({ image: value, slot: UPLOAD_SLOT[field] });
     setUploads((current) => omitKey(current, field));
 
     if (!result.ok) {
       const message = result.fieldErrors?.image?.[0] ?? result.error;
-      setUploadErrors((current) => ({ ...current, ...(field === "image" ? { image: message } : { poster: message }) }));
+      setUploadErrors((current) => ({ ...current, [field]: message }));
       return;
     }
 
@@ -349,6 +385,7 @@ export function HeroEditor({ canEdit, data }: HeroEditorProps) {
   const conflict = failure?.status === 409;
   // Erro fora da barra de salvar (conflito, desfazer que falhou ou sem nada para publicar).
   const bannerFailure = failure && (conflict || !dirty) ? failure : null;
+  const previewScreen = PREVIEW_SCREENS.find((option) => option.value === screen) ?? PREVIEW_SCREENS[1];
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
@@ -488,10 +525,46 @@ export function HeroEditor({ canEdit, data }: HeroEditorProps) {
 
               <p className="flex items-start gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-2)] px-3 py-2.5 text-[13px] leading-5 text-[var(--text-secondary)]">
                 <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-                No celular a imagem é cortada nas laterais; deixe o assunto principal no centro.
+                {draft.mediaType === "image"
+                  ? "Em telas menores esta imagem é cortada nas laterais. Para escolher o que aparece em cada tela, envie as capas logo abaixo."
+                  : "No celular o vídeo é cortado nas laterais; deixe o assunto principal no centro."}
               </p>
             </div>
           </SectionCard>
+
+          {draft.mediaType === "image" ? (
+            <SectionCard
+              description="Opcional. A imagem acima vale para telas grandes; aqui entra a mesma arte ajustada para telas menores."
+              title="Capas por tamanho de tela"
+            >
+              <div className="flex min-w-0 flex-col gap-5">
+                {SIZE_FIELDS.map((size) => {
+                  const copy = SIZE_TEXT[size.key];
+
+                  return (
+                    <div className="flex min-w-0 flex-col gap-1.5" key={size.field}>
+                      <ImageField
+                        error={uploadErrors[size.field] ?? errorFor(size.field)}
+                        id={copy.id}
+                        label={copy.label}
+                        onChange={(value) => void changeImage(size.field, value)}
+                        optional
+                        pending={Boolean(uploads[size.field])}
+                        readOnly={!canEdit}
+                        slot={size.slot}
+                        value={uploads[size.field] ?? draft[size.field]}
+                      />
+                      <p className="text-xs leading-5 text-[var(--text-secondary)]">{copy.hint}</p>
+                    </div>
+                  );
+                })}
+                <p className="flex items-start gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-2)] px-3 py-2.5 text-[13px] leading-5 text-[var(--text-secondary)]">
+                  <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                  Tela sem capa própria usa a do tamanho maior mais próximo. Sem nenhuma capa aqui, todas as telas usam a imagem do destaque.
+                </p>
+              </div>
+            </SectionCard>
+          ) : null}
 
           <SectionCard description="A cor que aparece atrás do destaque e some no cinza da página, como na Netflix." title="Luz de fundo">
             <div className="flex min-w-0 flex-col gap-4">
@@ -595,9 +668,14 @@ export function HeroEditor({ canEdit, data }: HeroEditorProps) {
                 {dirty ? "Rascunho: os alunos só veem depois de publicar." : "É o que os alunos veem agora."}
               </p>
             </div>
-            <PillGroup ariaLabel="Aparelho da prévia" name="destaque-previa-aparelho" onChange={setDevice} options={DEVICE_OPTIONS} value={device} />
+            <PillGroup ariaLabel="Tamanho de tela da prévia" name="destaque-previa-aparelho" onChange={setScreen} options={PREVIEW_SCREENS} value={screen} />
           </div>
-          <HeroPreview device={device} hero={previewHero} logoImage={data.logoImage} maxWidth={device === "mobile" ? 300 : undefined} />
+          <HeroPreview
+            hero={previewHero}
+            logoImage={data.logoImage}
+            maxWidth={screen === "mobile" ? 300 : screen === "tablet" ? 460 : undefined}
+            screen={previewScreen}
+          />
           {!isHeroVisible(previewHero) ? (
             <p className="text-[13px] leading-5 text-[var(--text-secondary)]">
               {draft.enabled ? "Sem imagem ou vídeo válido, o destaque não aparece e a home começa nas fileiras." : "Destaque desligado: a home começa direto nas fileiras."}

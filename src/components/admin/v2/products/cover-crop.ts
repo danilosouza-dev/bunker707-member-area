@@ -6,7 +6,7 @@
 // o desenho no canvas fica em image-crop-dialog.tsx. As mesmas medidas valem no servidor
 // (IMAGE_UPLOAD_SPECS em src/server/catalog/webp.ts); o teste confere que as duas listas batem.
 
-export type ImageSlot = "cover" | "hero" | "loginSide" | "loginBackground" | "notice";
+export type ImageSlot = "cover" | "hero" | "heroNotebook" | "heroTablet" | "heroMobile" | "loginSide" | "loginBackground" | "notice";
 
 export type CropSpec = {
   /** Nome no texto da tela ("capa", "imagem de destaque"). */
@@ -57,6 +57,41 @@ export const IMAGE_SPECS: Record<ImageSlot, CropSpec> = {
     outputHeight: 720,
     outputWidth: 1920,
     ratioLabel: "8:3"
+  },
+  // Capas do destaque da home por tamanho de tela (Area de membros > Destaque). Proporcoes perto da caixa do
+  // destaque em cada faixa de largura: celular em pe (9:16), tablet quase quadrado (5:4) e notebook (2:1).
+  heroMobile: {
+    label: "capa de celular",
+    maxBytes: MAX_IMAGE_BYTES,
+    maxDataUrlLength: MAX_IMAGE_DATA_URL_LENGTH,
+    minHeight: 960,
+    minWidth: 540,
+    orientation: "portrait",
+    outputHeight: 1280,
+    outputWidth: 720,
+    ratioLabel: "9:16"
+  },
+  heroNotebook: {
+    label: "capa de notebook",
+    maxBytes: MAX_IMAGE_BYTES,
+    maxDataUrlLength: MAX_IMAGE_DATA_URL_LENGTH,
+    minHeight: 540,
+    minWidth: 1080,
+    orientation: "landscape",
+    outputHeight: 720,
+    outputWidth: 1440,
+    ratioLabel: "2:1"
+  },
+  heroTablet: {
+    label: "capa de tablet",
+    maxBytes: MAX_IMAGE_BYTES,
+    maxDataUrlLength: MAX_IMAGE_DATA_URL_LENGTH,
+    minHeight: 720,
+    minWidth: 900,
+    orientation: "landscape",
+    outputHeight: 960,
+    outputWidth: 1200,
+    ratioLabel: "5:4"
   },
   loginBackground: {
     label: "imagem de fundo",

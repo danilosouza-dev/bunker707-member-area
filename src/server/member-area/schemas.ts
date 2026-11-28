@@ -35,12 +35,15 @@ export const memberAreaImageRefSchema = z
   .refine((value) => isLocalDefaultImage(value) || imageLinkSchema.safeParse(value).success, "Use uma imagem enviada aqui ou um link que comece com https://, sem espaços, aspas nem parênteses.");
 
 /** Slots que passam por uploadMemberAreaImage (a capa de modulo grava direto em course_modules). */
-export const MEMBER_AREA_UPLOAD_SLOTS = ["hero", "loginSide", "loginBackground"] as const satisfies readonly ImageUploadSlot[];
+export const MEMBER_AREA_UPLOAD_SLOTS = ["hero", "heroNotebook", "heroTablet", "heroMobile", "loginSide", "loginBackground"] as const satisfies readonly ImageUploadSlot[];
 export type MemberAreaUploadSlot = (typeof MEMBER_AREA_UPLOAD_SLOTS)[number];
 
 /** Pasta do Storage (bucket content-assets) de cada slot. O nome do arquivo e o hash do conteudo. */
 export const MEMBER_AREA_UPLOAD_FOLDERS: Record<MemberAreaUploadSlot, string> = {
   hero: "platform/home-hero",
+  heroMobile: "platform/home-hero",
+  heroNotebook: "platform/home-hero",
+  heroTablet: "platform/home-hero",
   loginBackground: "platform/login-background",
   loginSide: "platform/login-side"
 };
@@ -53,6 +56,9 @@ const webpDataUrlPattern = /^data:image\/webp;base64,[A-Za-z0-9+/=]+$/;
  */
 export const MEMBER_AREA_UPLOAD_MAX_LENGTH: Record<MemberAreaUploadSlot, number> = {
   hero: 300_000,
+  heroMobile: 300_000,
+  heroNotebook: 300_000,
+  heroTablet: 300_000,
   loginBackground: 560_000,
   loginSide: 560_000
 };

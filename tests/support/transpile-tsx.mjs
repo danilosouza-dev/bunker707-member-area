@@ -17,7 +17,7 @@ const ts = require("typescript");
 
 const STUBS = {
   "next/image": `import { createElement } from "react";
-export default function Image({ fill, priority, sizes, unoptimized, style, ...props }) {
+export default function Image({ fill, preload, priority, sizes, unoptimized, style, ...props }) {
   return createElement("img", { ...props, "data-next-image": "", style });
 }`,
   "next/link": `import { createElement } from "react";

@@ -7,6 +7,7 @@
 // sobrevivem a uma troca de logo). Formato gravado = HomeHeroConfig (src/lib/platform-types.ts):
 // - `image`: a imagem (mediaType "image") ou o link do video (mediaType "video"), como sempre foi;
 // - `poster`: capa do video (so com video);
+// - `images`: { notebook, tablet, mobile }, as capas por tamanho de tela (so com imagem; cada uma opcional);
 // - `glowColor`: cor da luz de fundo atras do destaque (#rrggbb; ausente = automatica, a cor da imagem);
 // - `cta`: { href, label, target } e `visibility.cta`;
 // - texto escondido continua guardado (desligar "Mostrar título" nao apaga o titulo);
@@ -40,6 +41,22 @@ export {
 export const DEFAULT_HOME_HERO_IMAGE = "/hero/bunker-707-red-front-hero.png";
 
 export const HERO_TEXT_LIMITS = { badge: 40, ctaLabel: 32, description: 240, title: 90 } as const;
+
+/**
+ * Capas por tamanho de tela, da menor para a maior. `maxWidth` e a maior largura de janela (px) que usa a capa;
+ * acima de 1535 px vale a imagem principal (1920 × 720). Tela sem capa propria usa a do tamanho maior mais
+ * proximo que existir. A capa de tablet vai ate 1199 px para pegar o iPad grande em pe (1032 px) e os iPads deitados
+ * (1024 a 1194 px): nessas larguras a caixa do destaque e quase quadrada e a capa de notebook (2:1) perdia o texto nas
+ * laterais. `field` e o campo do rascunho, `key` a chave gravada em `hero.images` e `slot` a medida
+ * do recorte e do envio (IMAGE_SPECS / IMAGE_UPLOAD_SPECS).
+ */
+export const HERO_IMAGE_SIZES = [
+  { field: "imageMobile", key: "mobile", label: "Celular", maxWidth: 639, slot: "heroMobile" },
+  { field: "imageTablet", key: "tablet", label: "Tablet", maxWidth: 1199, slot: "heroTablet" },
+  { field: "imageNotebook", key: "notebook", label: "Notebook", maxWidth: 1535, slot: "heroNotebook" }
+] as const;
+
+export type HeroImageSizeField = (typeof HERO_IMAGE_SIZES)[number]["field"];
 
 const HERO_PURPOSES = new Set<HomeHeroConfig["purpose"]>(["school-brand", "editorial-highlight", "content-highlight"]);
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
@@ -94,6 +111,9 @@ export const homeHeroDraftSchema = z
     enabled: z.boolean(),
     glowColor: heroGlowColorSchema.nullable(),
     image: memberAreaImageRefSchema.nullable(),
+    imageMobile: memberAreaImageRefSchema.nullable(),
+    imageNotebook: memberAreaImageRefSchema.nullable(),
+    imageTablet: memberAreaImageRefSchema.nullable(),
     mediaType: z.enum(["image", "video"], { error: "Escolha imagem ou vídeo." }),
     poster: memberAreaImageRefSchema.nullable(),
     showBadge: z.boolean(),
@@ -166,6 +186,9 @@ export const DEFAULT_HOME_HERO_DRAFT: HomeHeroDraft = Object.freeze({
   enabled: true,
   glowColor: null,
   image: DEFAULT_HOME_HERO_IMAGE,
+  imageMobile: null,
+  imageNotebook: null,
+  imageTablet: null,
   mediaType: "image",
   poster: null,
   showBadge: false,
@@ -261,7 +284,7 @@ function mediaTypeOf(raw: Record<string, unknown>, source: string): HomeHeroConf
 
 /**
  * Remove o que nao vale para o modo escolhido antes de gravar: com imagem nao ha link de video nem
- * capa; com video, `image` e o proprio link. "Mostrar" sem texto vira desligado (nao ha o que
+ * capa; com video, `image` e o proprio link e nao ha capas por tamanho de tela. "Mostrar" sem texto vira desligado (nao ha o que
  * mostrar) e "Abrir em" volta ao padrao quando o botao nao tem nada.
  */
 export function normalizeHeroDraft(draft: HomeHeroDraft): HomeHeroDraft {
@@ -273,6 +296,9 @@ export function normalizeHeroDraft(draft: HomeHeroDraft): HomeHeroDraft {
     ctaTarget: hasCta ? draft.ctaTarget : "same_tab",
     glowColor: hexColor(draft.glowColor),
     image: video ? null : draft.image,
+    imageMobile: video ? null : draft.imageMobile,
+    imageNotebook: video ? null : draft.imageNotebook,
+    imageTablet: video ? null : draft.imageTablet,
     poster: video ? draft.poster : null,
     showBadge: draft.showBadge && Boolean(draft.badge),
     showCta: draft.showCta && Boolean(draft.ctaLabel) && Boolean(draft.ctaHref),
@@ -304,6 +330,8 @@ export function heroDraftFromStored(raw: unknown): HomeHeroDraft {
   const ctaTarget: HeroCtaTarget =
     cta && (cta.target === "same_tab" || cta.target === "new_tab") ? cta.target : defaultCtaTarget(ctaHref);
   const shown = (key: string, fallback: boolean) => flag(visibility[key]) ?? fallback;
+  const images = mediaType === "image" && isRecord(raw.images) ? raw.images : {};
+  const sized = (key: string) => text(images[key]) || null;
 
   return {
     badge,
@@ -314,6 +342,9 @@ export function heroDraftFromStored(raw: unknown): HomeHeroDraft {
     enabled: raw.enabled !== false,
     glowColor: hexColor(raw.glowColor),
     image: mediaType === "image" && source ? source : null,
+    imageMobile: sized("mobile"),
+    imageNotebook: sized("notebook"),
+    imageTablet: sized("tablet"),
     mediaType,
     poster: mediaType === "video" && text(raw.poster) ? text(raw.poster) : null,
     showBadge: shown("badge", Boolean(badge)) && Boolean(badge),
@@ -362,6 +393,22 @@ export function buildStoredHero(raw: unknown, draft: HomeHeroDraft): HomeHeroCon
     stored.glowColor = next.glowColor;
   } else {
     delete stored.glowColor;
+  }
+
+  const images: Record<string, string> = {};
+
+  for (const size of HERO_IMAGE_SIZES) {
+    const value = next.mediaType === "image" ? next[size.field] : null;
+
+    if (value) {
+      images[size.key] = value;
+    }
+  }
+
+  if (Object.keys(images).length > 0) {
+    stored.images = images;
+  } else {
+    delete stored.images;
   }
 
   if (next.ctaHref || next.ctaLabel) {
@@ -457,6 +504,22 @@ export function resolveHomeHero(raw: unknown): HomeHeroConfig {
     hero.poster = poster;
   }
 
+  if (mediaType === "image" && image && isRecord(raw.images)) {
+    const images: NonNullable<HomeHeroConfig["images"]> = {};
+
+    for (const size of HERO_IMAGE_SIZES) {
+      const value = text(raw.images[size.key]);
+
+      if (isDrawableMedia(value, "image")) {
+        images[size.key] = value;
+      }
+    }
+
+    if (Object.keys(images).length > 0) {
+      hero.images = images;
+    }
+  }
+
   if (isRecord(raw.cta)) {
     const href = typeof raw.cta.href === "string" ? raw.cta.href.trim() : "";
     const label = text(raw.cta.label).slice(0, 80);
@@ -473,6 +536,36 @@ export function resolveHomeHero(raw: unknown): HomeHeroConfig {
   return hero;
 }
 
+export type HeroImageSource = { maxWidth: number; src: string };
+
+/**
+ * Capas menores que a principal que este destaque tem, da menor tela para a maior. A home vira cada uma num
+ * `<source media="(max-width: N px)">`, nessa ordem: o navegador usa a primeira que serve, entao a tela sem capa
+ * propria cai na do tamanho maior mais proximo e, sem nenhuma, na imagem principal.
+ */
+export function heroImageSources(hero: Pick<HomeHeroConfig, "images" | "mediaType">): HeroImageSource[] {
+  if (hero.mediaType !== "image" || !hero.images) {
+    return [];
+  }
+
+  const sources: HeroImageSource[] = [];
+
+  for (const size of HERO_IMAGE_SIZES) {
+    const src = hero.images[size.key];
+
+    if (src) {
+      sources.push({ maxWidth: size.maxWidth, src });
+    }
+  }
+
+  return sources;
+}
+
+/** A capa que uma tela de `width` px desenha (mesma regra do navegador com os `<source>` de heroImageSources). */
+export function heroImageForWidth(hero: Pick<HomeHeroConfig, "image" | "images" | "mediaType">, width: number) {
+  return heroImageSources(hero).find((source) => width <= source.maxWidth)?.src ?? hero.image;
+}
+
 /** Mesma regra da home (src/app/page.tsx): o destaque aparece ligado e com imagem ou video. */
 export function isHeroVisible(hero: Pick<HomeHeroConfig, "enabled" | "image">) {
   return hero.enabled !== false && Boolean(hero.image);
@@ -484,11 +577,14 @@ export function isHeroVisible(hero: Pick<HomeHeroConfig, "enabled" | "image">) {
  */
 export function previewHeroFromDraft(
   draft: HomeHeroDraft,
-  pending: Partial<Record<"image" | "poster", string>> = {}
+  pending: Partial<Record<"image" | "poster" | HeroImageSizeField, string>> = {}
 ): HomeHeroConfig {
   const withPending: HomeHeroDraft = {
     ...draft,
     image: pending.image ?? draft.image,
+    imageMobile: pending.imageMobile ?? draft.imageMobile,
+    imageNotebook: pending.imageNotebook ?? draft.imageNotebook,
+    imageTablet: pending.imageTablet ?? draft.imageTablet,
     poster: pending.poster ?? draft.poster
   };
 

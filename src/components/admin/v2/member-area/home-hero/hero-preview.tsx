@@ -7,9 +7,10 @@ import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import type { HomeHeroConfig } from "@/lib/platform-types";
 import { cn } from "@/lib/utils";
 import { isHeroVisible } from "@/server/member-area/home-hero-model";
-import { PREVIEW_DEVICES, PreviewFrame, type PreviewDevice } from "../preview-frame";
+import { PreviewFrame } from "../preview-frame";
 
-// Previa do destaque: o HeroSection REAL da home do aluno numa "tela" de 1280 ou 390 px (PreviewFrame),
+// Previa do destaque: o HeroSection REAL da home do aluno numa "tela" de 1920, 1280, 768 ou 390 px (PreviewFrame;
+// cada largura desenha a capa daquele tamanho de tela, como a home faz pela janela do aluno),
 // com o topo da area do aluno (logo da Marca) e, no lugar das fileiras, uma faixa honesta dizendo onde
 // elas comecam, sobrepondo 96 px como na home (-mt-24). Nada de cards inventados.
 
@@ -17,11 +18,12 @@ import { PREVIEW_DEVICES, PreviewFrame, type PreviewDevice } from "../preview-fr
 export const HERO_PREVIEW_SCREEN_HEIGHT = 760;
 
 type HeroPreviewProps = {
-  device: PreviewDevice;
   hero: HomeHeroConfig;
   logoImage: string | null;
   /** Largura maxima da moldura na tela (px). */
   maxWidth?: number;
+  /** A "tela" da previa: nome (ex.: "Tablet") e largura em px. */
+  screen: { label: string; width: number };
 };
 
 /** Topo da area do aluno (AppShell) so com o que muda por escola: a logo. Os icones sao a moldura. */
@@ -86,20 +88,21 @@ function RowsStart({ overlap }: { overlap: boolean }) {
   );
 }
 
-export function HeroPreview({ device, hero, logoImage, maxWidth }: HeroPreviewProps) {
+export function HeroPreview({ hero, logoImage, maxWidth, screen }: HeroPreviewProps) {
   const visible = isHeroVisible(hero);
-  const label = PREVIEW_DEVICES[device].label.toLowerCase();
 
   return (
     <PreviewFrame
-      ariaLabel={`Prévia do topo da home no ${label}`}
-      device={device}
+      ariaLabel={`Prévia do topo da home: ${screen.label.toLowerCase()}`}
+      device={screen.width < 640 ? "mobile" : "desktop"}
       maxWidth={maxWidth}
       screenHeight={HERO_PREVIEW_SCREEN_HEIGHT}
+      screenLabel={screen.label}
+      screenWidth={screen.width}
     >
       <div className="relative min-h-full bg-[#141414] text-white">
         <StudentTopBar logoImage={logoImage} />
-        <HeroSection hero={hero} preview />
+        <HeroSection hero={hero} preview previewWidth={screen.width} />
         <RowsStart overlap={visible} />
       </div>
     </PreviewFrame>
