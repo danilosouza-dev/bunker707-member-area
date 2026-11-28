@@ -61,10 +61,15 @@ type PreviewFrameProps = {
   maxWidth?: number;
   /** Altura da "tela" em px quando o conteudo nao ocupa a tela cheia (ex.: so o destaque da home). */
   screenHeight?: number;
+  /** Nome da "tela" na legenda quando ela nao e uma das duas de PREVIEW_DEVICES (ex.: "Tablet" no destaque). */
+  screenLabel?: string;
+  /** Largura da "tela" em px quando ela nao e uma das duas de PREVIEW_DEVICES (ex.: 768 ou 1920 no destaque). */
+  screenWidth?: number;
 };
 
-export function PreviewFrame({ ariaLabel, children, className, device, maxWidth, screenHeight }: PreviewFrameProps) {
-  const spec = PREVIEW_DEVICES[device];
+export function PreviewFrame({ ariaLabel, children, className, device, maxWidth, screenHeight, screenLabel, screenWidth }: PreviewFrameProps) {
+  const base = PREVIEW_DEVICES[device];
+  const spec = { height: base.height, label: screenLabel ?? base.label, width: screenWidth ?? base.width };
   const height = screenHeight ?? spec.height;
   const outer = useRef<HTMLDivElement>(null);
   const [available, setAvailable] = useState<number | null>(null);

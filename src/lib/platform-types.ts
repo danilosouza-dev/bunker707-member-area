@@ -215,6 +215,12 @@ export type HomeHeroConfig = {
   glowColor?: string;
   /** Imagem (mediaType "image") ou link do video (mediaType "video"). */
   image: string;
+  /**
+   * Capas por tamanho de tela (so com mediaType "image"): a home troca `image` por uma destas conforme a largura
+   * da janela (HERO_IMAGE_SIZES em src/server/member-area/home-hero-model.ts). Tela sem capa propria usa a do
+   * tamanho maior mais proximo; sem nenhuma, `image` vale para todas.
+   */
+  images?: { mobile?: string; notebook?: string; tablet?: string };
   mediaType: "image" | "video";
   /** Capa do video: aparece enquanto carrega e para quem prefere menos movimento. */
   poster?: string;

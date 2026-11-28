@@ -251,9 +251,25 @@ A primeira fileira deve invadir a hero apenas o suficiente para criar continuida
 
 Degrades editoriais coloridos na hero, como vermelho, laranja ou outras cores de campanha, nao devem ficar hardcoded na home. O padrao da interface deve ser neutro e escuro; cor, intensidade de overlay e efeitos visuais da hero devem ser configuraveis futuramente no dashboard da escola.
 
+Capas por tamanho de tela (desde 27/11/2026): a home desenha o destaque com altura quase fixa (ate 680 px) e largura da janela, entao uma imagem so e cortada nas laterais em telas menores, e uma capa com texto dentro da arte perde o texto no celular. Por isso o destaque aceita, alem da imagem principal, tres capas opcionais da mesma arte, enviadas em Area de membros > Destaque > Capas por tamanho de tela:
+
+| Capa | Largura da janela | Medida | Proporcao |
+| --- | --- | --- | --- |
+| Imagem do destaque (principal) | a partir de 1536 px | 1920 × 720 | 8:3 |
+| Notebook | 1200 a 1535 px | 1440 × 720 | 2:1 |
+| Tablet | 640 a 1199 px | 1200 × 960 | 5:4 |
+| Celular | ate 639 px | 720 × 1280 | 9:16 |
+
+A capa de tablet vai ate 1199 px porque o iPad grande em pe (1032 px) e os iPads deitados (1024 a 1194 px) desenham o destaque quase quadrado, e a capa de notebook perdia o texto nas laterais (teste do produtor em 27/11/2026). Tela sem capa propria usa a do tamanho maior mais proximo que existir (o celular sem capa de celular usa a de tablet, depois a de notebook, depois a principal); sem nenhuma, a imagem principal vale para todas, como antes. O navegador baixa so a capa que serve para a janela. So vale para imagem: com video, o video e a capa dele continuam unicos. 
+
+Capa inteira (desde 27/11/2026): com pelo menos uma capa por tamanho de tela, a caixa do destaque deixa a altura quase fixa e fica com a altura que a proporcao da capa pede naquela largura (largura da caixa dividida pela proporcao), ate a altura maxima do estilo (680 px no discreto; no arredondado, o mesmo limite de sempre, que mostra o comeco da primeira fileira em telas baixas). Assim a home nunca corta as laterais da arte, e a capa pode ir de borda a borda; quando a altura maxima limita (telas muito largas ou muito baixas), o corte e so em cima e embaixo, entao o texto da arte fica a uns 80 px dessas bordas. Sem nenhuma capa por tamanho de tela, o destaque continua com a altura de sempre e a imagem principal cortada nas laterais em telas menores. A regra mora em `src/app/globals.css` (`[data-hero-fit="full"]`) e a previa do admin faz a mesma conta pela largura da moldura.
+
+Imagem sem escurecimento (desde 27/11/2026): sem selo, titulo, descricao nem botao por cima, o destaque mostra a imagem como foi enviada, sem o degrade lateral e sem escurecer o alto. Os dois so aparecem quando ha texto ou botao por cima. O esfumacado de baixo do estilo discreto continua, porque a primeira fileira sobe sobre o fim do destaque; no estilo arredondado a capa aparece limpa ate a borda.
+
 Conteudo configuravel do hero:
 
 - midia de fundo: imagem, video ou capa;
+- capas por tamanho de tela (notebook, tablet e celular), opcionais, so com imagem;
 - selo/label opcional;
 - titulo;
 - descricao curta;

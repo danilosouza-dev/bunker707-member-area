@@ -232,6 +232,39 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
   width: calc((100% - (var(--member-row-cols-wide) - 1) * var(--member-row-gap)) / var(--member-row-cols-wide));
 }
 
+/*
+ * Destaque com capas por tamanho de tela (Area de membros > Destaque): a caixa deixa a altura quase fixa e toma a
+ * proporcao da capa que a tela desenha, ate a altura maxima do estilo. As laterais da arte nunca sao cortadas; quando
+ * a altura maxima limita, o corte e so em cima e embaixo. As larguras e proporcoes sao as de HERO_IMAGE_SIZES
+ * (src/server/member-area/home-hero-model.ts); tests/destaque-capas-css.guard.test.mjs confere que batem. As regras
+ * vao da tela maior para a menor: a tela sem capa propria fica com a proporcao da capa maior mais proxima, a mesma que
+ * o <picture> escolhe.
+ */
+/* A altura sai da largura da caixa (a janela menos os recuos) dividida pela proporcao. Nao e `aspect-ratio` com
+   `max-height`: nessa dupla o navegador estreita a caixa para manter a proporcao e a capa deixava de ir ate a borda. */
+[data-hero-fit="full"] {
+  --member-hero-capa-ratio: calc(8 / 3);
+  min-height: min(var(--member-hero-min-h), calc((100vw - 2 * var(--member-hero-inset)) / var(--member-hero-capa-ratio)));
+}
+
+@media (max-width: 1535px) {
+  [data-hero-fit="full"][data-capa-notebook] {
+    --member-hero-capa-ratio: calc(2 / 1);
+  }
+}
+
+@media (max-width: 1199px) {
+  [data-hero-fit="full"][data-capa-tablet] {
+    --member-hero-capa-ratio: calc(5 / 4);
+  }
+}
+
+@media (max-width: 639px) {
+  [data-hero-fit="full"][data-capa-mobile] {
+    --member-hero-capa-ratio: calc(9 / 16);
+  }
+}
+
 /* Luz de fundo do destaque (HeroGlow): a cor da imagem (ou a escolhida em Destaque), forte do meio do
    destaque para cima, enfraquecendo dali para baixo e esfumacando 72 px alem da base do banner
    (--member-hero-glow-extend), sem chegar nos cards da primeira fileira (que comecam ~80 px abaixo). No

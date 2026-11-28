@@ -6,11 +6,25 @@ import { withAccessPreviewParam, type AccessPreviewMode } from "@/lib/access-pre
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import type { HomeHeroConfig } from "@/lib/platform-types";
 import { isSafeHeroCtaHref } from "@/server/member-area/home-hero-links";
+import { heroImageForWidth, heroImageSources, heroPreviewHeightForWidth, heroShowsWholeCover } from "@/server/member-area/home-hero-model";
 
 // Destaque do topo da home do aluno (editado em Area de membros > Destaque).
 // Responde por container query (`@container` na section + `@min-[...]:`) e nao pela janela, para a
 // previa do admin (PreviewFrame, uma "tela" de 1280 ou 390 px reduzida) desenhar igual a home real;
 // na home o container tem a largura da janela, entao o resultado e o mesmo de `sm:`/`lg:`.
+//
+// Capas por tamanho de tela (Destaque > Capas por tamanho de tela): a imagem principal (1920 × 720) vale para as
+// telas grandes e cada capa menor entra como um `<source media="(max-width: N px)">` do mesmo `<picture>`; o
+// navegador baixa so a que serve para a janela. Na previa do admin a janela e a do admin, entao a capa e escolhida
+// pela largura da "tela" da moldura (`previewWidth`).
+//
+// Capa inteira: com capas por tamanho de tela, a caixa fica com a altura que a proporcao da capa pede naquela largura
+// (`data-hero-fit` e `data-capa-*`, regras em globals.css), ate a altura maxima do estilo; as laterais nunca sao
+// cortadas. Na previa a altura vem da largura da moldura.
+//
+// Sem selo, titulo, descricao nem botao por cima, a imagem aparece como foi enviada: o escurecimento lateral e o
+// do alto so existem para dar leitura ao texto (docs/02, Hero). O esfumacado de baixo do estilo discreto continua,
+// porque a primeira fileira sobe sobre o fim do destaque.
 
 type HeroSectionProps = {
   /** Modo "ver como" da home: mantem o modo nos links internos do botao. */
@@ -18,6 +32,8 @@ type HeroSectionProps = {
   hero: HomeHeroConfig;
   /** Previa do admin: sem preload nem prioridade de imagem, botao sem link (a moldura ja e inert). */
   preview?: boolean;
+  /** Previa do admin: largura da "tela" da moldura (px); escolhe a capa daquele tamanho de tela. */
+  previewWidth?: number;
 };
 
 const ctaClass =
@@ -73,7 +89,7 @@ function HeroCta({
   );
 }
 
-export function HeroSection({ accessPreviewMode, hero, preview = false }: HeroSectionProps) {
+export function HeroSection({ accessPreviewMode, hero, preview = false, previewWidth }: HeroSectionProps) {
   if (hero.enabled === false || !hero.image) {
     return null;
   }
@@ -86,15 +102,28 @@ export function HeroSection({ accessPreviewMode, hero, preview = false }: HeroSe
   const cta = hero.cta && hero.cta.label && isSafeHeroCtaHref(hero.cta.href) ? hero.cta : null;
   const showCta = Boolean(cta) && (hero.visibility?.cta ?? true);
   const hasContent = showBadge || showTitle || showDescription || showCta;
-  // Prévia do admin pode trazer rascunho em data:/blob:; isso não vai para o <head>.
-  const preloadHeroImage = !preview && !/^(?:data|blob):/i.test(hero.image);
+  // Na home o navegador escolhe a capa pela janela (<source>); na previa, a moldura diz a largura.
+  const sources = preview ? [] : heroImageSources(hero);
+  const image = preview && previewWidth ? heroImageForWidth(hero, previewWidth) : hero.image;
+  // Prévia do admin pode trazer rascunho em data:/blob:; isso não vai para o <head>. Com capas por tamanho de
+  // tela tambem nao ha preload: ele baixaria a imagem grande no celular, que desenha outra.
+  const preloadHeroImage = !preview && sources.length === 0 && !/^(?:data|blob):/i.test(hero.image);
   const poster = hero.mediaType === "video" && hero.poster ? hero.poster : null;
+  const wholeCover = heroShowsWholeCover(hero);
+  const previewHeight = preview && previewWidth ? heroPreviewHeightForWidth(hero, previewWidth) : null;
 
   return (
     // flow-root: a margem de cima do destaque fica dentro do bloco, entao a luz comeca no topo da pagina.
     <div className="relative flow-root">
       <HeroGlow color={hero.glowColor} src={hero.mediaType === "video" ? poster : hero.image} />
-      <section className="@container relative z-[1] min-h-[var(--member-hero-min-h)] overflow-hidden rounded-[var(--member-hero-radius)] mx-[var(--member-hero-inset)] mt-[var(--member-hero-top)]">
+      <section
+        className="@container relative z-[1] min-h-[var(--member-hero-min-h)] overflow-hidden rounded-[var(--member-hero-radius)] mx-[var(--member-hero-inset)] mt-[var(--member-hero-top)]"
+        data-capa-mobile={wholeCover && hero.images?.mobile ? "" : undefined}
+        data-capa-notebook={wholeCover && hero.images?.notebook ? "" : undefined}
+        data-capa-tablet={wholeCover && hero.images?.tablet ? "" : undefined}
+        data-hero-fit={wholeCover ? "full" : undefined}
+        style={previewHeight ? { minHeight: previewHeight } : undefined}
+      >
       {hero.mediaType === "video" ? (
         <>
           <video
@@ -121,20 +150,30 @@ export function HeroSection({ accessPreviewMode, hero, preview = false }: HeroSe
           ) : null}
         </>
       ) : (
-        <Image
-          alt=""
-          className="object-cover object-center"
-          fetchPriority={preview ? undefined : "high"}
-          fill
-          preload={preloadHeroImage}
-          sizes="100vw"
-          src={hero.image}
-          unoptimized={!canOptimizeImageSrc(hero.image)}
-        />
+        <picture>
+          {sources.map((source) => (
+            <source key={source.maxWidth} media={`(max-width: ${source.maxWidth}px)`} srcSet={source.src} />
+          ))}
+          <Image
+            alt=""
+            className="object-cover object-center"
+            fetchPriority={preview ? undefined : "high"}
+            fill
+            // Sem preload (capas por tamanho de tela) o next/image cairia em "lazy" e a capa do topo chegaria atrasada.
+            loading={preview || preloadHeroImage ? undefined : "eager"}
+            preload={preloadHeroImage}
+            sizes="100vw"
+            src={image}
+            unoptimized={!canOptimizeImageSrc(image)}
+          />
+        </picture>
       )}
-      <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/35 to-black/15" />
-      {/* Esfumacado inferior: some no modo arredondado (--member-hero-fade: 0), a capa vai limpa ate a borda. */}
-      <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-black/5 to-black/35 opacity-[var(--member-hero-fade)]" />
+      {/* Escurecimento lateral: so com texto ou botao por cima, para dar leitura. */}
+      {hasContent ? <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/35 to-black/15" /> : null}
+      {/* Esfumacado inferior: some no modo arredondado (--member-hero-fade: 0), a capa vai limpa ate a borda. Sem texto por cima, o alto tambem fica limpo. */}
+      <div
+        className={`absolute inset-0 bg-gradient-to-t from-[#141414] ${hasContent ? "via-black/5 to-black/35" : "via-transparent to-transparent"} opacity-[var(--member-hero-fade)]`}
+      />
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-80 bg-gradient-to-b from-transparent via-[#141414]/85 to-[#141414] opacity-[var(--member-hero-fade)]" />
       {hasContent ? (
         <div className="relative z-10 flex min-h-[var(--member-hero-min-h)] max-w-6xl flex-col justify-center px-5 pb-[var(--member-hero-content-pb)] pt-28 @min-[640px]:px-8 @min-[1024px]:px-12">
