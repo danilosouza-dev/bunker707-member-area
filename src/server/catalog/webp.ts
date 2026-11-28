@@ -7,8 +7,11 @@
 // da Na tela (webinarios, docs/30 §2.4) usa tambem webpIsAnimated: WebP animado e recusado.
 
 export type ProductImageSlot = "cover" | "hero";
-/** Slots aceitos pelo servidor: os do produto, os da Area de membros (login) e a imagem dos avisos (Comunicacao). */
-export type ImageUploadSlot = ProductImageSlot | "loginSide" | "loginBackground" | "notice";
+/**
+ * Slots aceitos pelo servidor: os do produto, os da Area de membros (login e as capas do destaque da home por tamanho
+ * de tela: notebook, tablet e celular) e a imagem dos avisos (Comunicacao).
+ */
+export type ImageUploadSlot = ProductImageSlot | "heroNotebook" | "heroTablet" | "heroMobile" | "loginSide" | "loginBackground" | "notice";
 
 /** width × height = saida do recorte; minWidth = menor origem aceita (o cliente nunca amplia, entao a imagem pode chegar menor). */
 export type ImageUploadSpec = { height: number; label: string; maxBytes: number; minWidth: number; width: number };
@@ -21,6 +24,10 @@ export const MAX_LARGE_IMAGE_BYTES = 420_000;
 export const IMAGE_UPLOAD_SPECS: Record<ImageUploadSlot, ImageUploadSpec> = {
   cover: { height: 1080, label: "thumbnail do card", maxBytes: MAX_PRODUCT_IMAGE_BYTES, minWidth: 284, width: 720 },
   hero: { height: 720, label: "imagem de topo", maxBytes: MAX_PRODUCT_IMAGE_BYTES, minWidth: 1440, width: 1920 },
+  // Capas do destaque da home por tamanho de tela (Area de membros > Destaque): a home escolhe pela largura da janela.
+  heroMobile: { height: 1280, label: "capa de celular", maxBytes: MAX_PRODUCT_IMAGE_BYTES, minWidth: 540, width: 720 },
+  heroNotebook: { height: 720, label: "capa de notebook", maxBytes: MAX_PRODUCT_IMAGE_BYTES, minWidth: 1080, width: 1440 },
+  heroTablet: { height: 960, label: "capa de tablet", maxBytes: MAX_PRODUCT_IMAGE_BYTES, minWidth: 900, width: 1200 },
   loginBackground: { height: 1080, label: "imagem de fundo", maxBytes: MAX_LARGE_IMAGE_BYTES, minWidth: 1280, width: 1920 },
   loginSide: { height: 1500, label: "imagem lateral", maxBytes: MAX_LARGE_IMAGE_BYTES, minWidth: 800, width: 1200 },
   // Imagem 16:9 da notificacao e do pop-up (docs/22): 1280×720, mesmo peso das imagens grandes do login.

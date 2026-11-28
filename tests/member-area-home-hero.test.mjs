@@ -637,3 +637,134 @@ test("luz de fundo: automática por padrão; cor escolhida vai e volta do gravad
   assert.match(fields, /type="color"/, "qualquer cor pelo seletor do navegador");
   assert.match(fields, /aria-label="Cores prontas"/);
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * Capas por tamanho de tela e imagem sem escurecimento
+ * ---------------------------------------------------------------------------------------------- */
+
+const NOTEBOOK = `${STORAGE}/notebook.webp`;
+const TABLET = `${STORAGE}/tablet.webp`;
+const MOBILE = `${STORAGE}/celular.webp`;
+
+test("capas por tamanho de tela: vão e voltam do gravado, só com imagem, e a home recebe só as que consegue desenhar", () => {
+  assert.deepEqual(
+    [model.DEFAULT_HOME_HERO_DRAFT.imageNotebook, model.DEFAULT_HOME_HERO_DRAFT.imageTablet, model.DEFAULT_HOME_HERO_DRAFT.imageMobile],
+    [null, null, null],
+    "sem capa própria por padrão"
+  );
+
+  const full = draft({ image: IMAGE, imageMobile: MOBILE, imageNotebook: NOTEBOOK, imageTablet: TABLET });
+  assert.deepEqual(model.validateHomeHeroDraft(full), {});
+
+  const stored = model.buildStoredHero(undefined, full);
+  assert.deepEqual(stored.images, { mobile: MOBILE, notebook: NOTEBOOK, tablet: TABLET });
+  assert.equal(stored.image, IMAGE, "a imagem principal continua em `image`");
+  assert.equal(model.isHeroDraftEqual(model.heroDraftFromStored(stored), full), true, "ida e volta sem perder nada");
+  assert.deepEqual(model.resolveHomeHero(stored).images, { mobile: MOBILE, notebook: NOTEBOOK, tablet: TABLET });
+
+  // Só uma capa: as outras chaves não são gravadas.
+  assert.deepEqual(model.buildStoredHero(undefined, draft({ image: IMAGE, imageMobile: MOBILE })).images, { mobile: MOBILE });
+  // Tirar todas apaga a chave gravada; destaque antigo (sem `images`) sai igual.
+  assert.equal(model.buildStoredHero(stored, draft({ image: IMAGE })).images, undefined);
+  assert.equal(model.buildStoredHero(LEGACY_HERO, model.heroDraftFromStored(LEGACY_HERO)).images, undefined);
+  assert.equal(model.resolveHomeHero(LEGACY_HERO).images, undefined);
+
+  // Com vídeo não há capas por tamanho de tela.
+  const video = draft({ imageMobile: MOBILE, mediaType: "video", poster: POSTER, videoUrl: VIDEO });
+  assert.equal(model.buildStoredHero(stored, video).images, undefined);
+  assert.equal(model.resolveHomeHero({ ...stored, image: VIDEO, mediaType: "video", poster: POSTER }).images, undefined);
+  assert.equal(model.heroDraftFromStored({ ...stored, image: VIDEO, mediaType: "video" }).imageMobile, null);
+
+  // Lixo gravado à mão não chega à home; link que não é imagem enviada nem https é recusado ao publicar.
+  assert.deepEqual(model.resolveHomeHero({ ...stored, images: { mobile: "javascript:alert(1)", notebook: 12, tablet: TABLET } }).images, { tablet: TABLET });
+  assert.equal(model.resolveHomeHero({ ...stored, images: "nada" }).images, undefined);
+  assert.ok(model.validateHomeHeroDraft(draft({ image: IMAGE, imageMobile: "data:image/webp;base64,AAAA" })).imageMobile, "a capa sobe antes; só o link chega aqui");
+
+  // A prévia mostra a capa recém-recortada enquanto ela sobe.
+  const pending = "data:image/webp;base64,AAAA";
+  assert.equal(model.previewHeroFromDraft(draft({ image: IMAGE }), { imageMobile: pending }).images.mobile, pending);
+
+  // Recarregar depois de um 409 também preserva a capa que o produtor trocou.
+  const before = draft({ image: IMAGE });
+  assert.equal(model.rebaseHeroDraft(before, { ...before, imageTablet: TABLET }, { ...before, title: "Outro" }).imageTablet, TABLET);
+});
+
+test("cada largura de tela desenha a capa do seu tamanho ou a do tamanho maior mais próximo", () => {
+  assert.deepEqual(
+    model.HERO_IMAGE_SIZES.map((size) => [size.key, size.maxWidth, size.slot]),
+    [
+      ["mobile", 639, "heroMobile"],
+      ["tablet", 1199, "heroTablet"],
+      ["notebook", 1535, "heroNotebook"]
+    ],
+    "da menor tela para a maior: é a ordem dos <source>"
+  );
+
+  const all = model.resolveHomeHero({ image: IMAGE, images: { mobile: MOBILE, notebook: NOTEBOOK, tablet: TABLET }, mediaType: "image" });
+  assert.deepEqual(model.heroImageSources(all), [
+    { maxWidth: 639, src: MOBILE },
+    { maxWidth: 1199, src: TABLET },
+    { maxWidth: 1535, src: NOTEBOOK }
+  ]);
+  assert.deepEqual(
+    [390, 639, 640, 768, 1032, 1199, 1200, 1280, 1535, 1536, 1920].map((width) => model.heroImageForWidth(all, width)),
+    [MOBILE, MOBILE, TABLET, TABLET, TABLET, TABLET, NOTEBOOK, NOTEBOOK, NOTEBOOK, IMAGE, IMAGE],
+    "o iPad grande em pé (1032 px) e os iPads deitados usam a capa de tablet"
+  );
+
+  // Sem capa de celular nem de notebook: o celular usa a de tablet e o notebook, a principal.
+  const onlyTablet = model.resolveHomeHero({ image: IMAGE, images: { tablet: TABLET }, mediaType: "image" });
+  assert.deepEqual([390, 768, 1280, 1920].map((width) => model.heroImageForWidth(onlyTablet, width)), [TABLET, TABLET, IMAGE, IMAGE]);
+
+  // Sem nenhuma, a imagem principal vale para todas as telas (como sempre foi).
+  const none = model.resolveHomeHero(LEGACY_HERO);
+  assert.deepEqual(model.heroImageSources(none), []);
+  assert.equal(model.heroImageForWidth(none, 390), LEGACY_HERO.image);
+});
+
+test("medidas das capas: celular 720×1280, tablet 1200×960 e notebook 1440×720, iguais no recorte e no servidor", async () => {
+  const crop = await import("../src/components/admin/v2/products/cover-crop.ts");
+  const webp = await import("../src/server/catalog/webp.ts");
+  const schemas = await import("../src/server/member-area/schemas.ts");
+  const expected = { heroMobile: [720, 1280, "9:16"], heroNotebook: [1440, 720, "2:1"], heroTablet: [1200, 960, "5:4"] };
+
+  for (const [slot, [width, height, ratio]] of Object.entries(expected)) {
+    assert.deepEqual([crop.IMAGE_SPECS[slot].outputWidth, crop.IMAGE_SPECS[slot].outputHeight, crop.IMAGE_SPECS[slot].ratioLabel], [width, height, ratio], slot);
+    assert.deepEqual([webp.IMAGE_UPLOAD_SPECS[slot].width, webp.IMAGE_UPLOAD_SPECS[slot].height], [width, height], slot);
+    assert.equal(crop.IMAGE_SPECS[slot].minWidth * height, crop.IMAGE_SPECS[slot].minHeight * width, `${slot}: a menor origem tem a proporção da saída`);
+    assert.ok(schemas.MEMBER_AREA_UPLOAD_SLOTS.includes(slot), `${slot} passa pelo envio da Área de membros`);
+    assert.equal(schemas.MEMBER_AREA_UPLOAD_FOLDERS[slot], "platform/home-hero");
+  }
+
+  for (const size of model.HERO_IMAGE_SIZES) {
+    assert.ok(size.slot in expected, `${size.key} usa uma das medidas novas`);
+  }
+});
+
+test("saveHomeHero: publica as capas por tamanho de tela, a home passa a recebê-las e tirar uma capa apaga só ela", async () => {
+  const db = createSettingsDb(baseRows());
+  actionStubs.db = db;
+  actionStubs.invalidations = [];
+  sessionWithRole("owner");
+
+  const saved = await saveHomeHero({ expectedUpdatedAt: OLD, hero: { ...PUBLISHABLE, imageMobile: MOBILE, imageTablet: TABLET } });
+  assert.equal(saved.ok, true, JSON.stringify(saved));
+  assert.deepEqual([saved.data.hero.imageMobile, saved.data.hero.imageTablet, saved.data.hero.imageNotebook], [MOBILE, TABLET, null]);
+  assert.deepEqual(db.rows[0].value.images, { mobile: MOBILE, tablet: TABLET });
+  assert.equal(db.rows[0].value.image, IMAGE, "a imagem principal não muda");
+  assert.deepEqual(model.heroImageSources(model.resolveHomeHero(db.rows[0].value)), [
+    { maxWidth: 639, src: MOBILE },
+    { maxWidth: 1199, src: TABLET }
+  ]);
+
+  const removed = await saveHomeHero({ expectedUpdatedAt: saved.data.updatedAt, hero: { ...saved.data.hero, imageMobile: null } });
+  assert.equal(removed.ok, true, JSON.stringify(removed));
+  assert.deepEqual(db.rows[0].value.images, { tablet: TABLET });
+
+  // Link que não é imagem enviada nem https volta como erro do campo, sem gravar.
+  const refused = await saveHomeHero({ expectedUpdatedAt: removed.data.updatedAt, hero: { ...removed.data.hero, imageNotebook: "javascript:alert(1)" } });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.status, 400);
+  assert.ok(model.heroFieldErrorsFrom(refused.fieldErrors).imageNotebook, "o erro cai no campo da capa de notebook");
+  assert.deepEqual(db.rows[0].value.images, { tablet: TABLET });
+});
