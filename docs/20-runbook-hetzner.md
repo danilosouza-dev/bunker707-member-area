@@ -1304,6 +1304,8 @@ restauracao inteira a partir do R2 da certo pensar em cancelar o Storage Box.
   `RESTIC_REPOSITORY_R2` e as chaves do `.env`; num servidor sem `.env`, exportar `RESTIC_REPOSITORY=s3:https://<conta>.r2.cloudflarestorage.com/bunker707-backups/hetzner/restic`,
   `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` e a senha (ou `RESTIC_PASSWORD_FILE` com a de recuperacao). A sala:
   com as mesmas variaveis, `restic restore latest --tag bunker707-meet --target /` devolve o `.env` ao lugar.
+- **Ensaiado** (27/11/2026): a area de membros inteira restaurada do R2 num servidor novo deu certo (§10.3.1). O
+  Mautic e a sala ainda nao. Cancelar o Storage Box continua decisao do produtor.
 - **Custo**: o R2 cobra so o que fica guardado acima de 10 GB por mes (US$ 0,015/GB) e nao cobra a saida. Em
   27/11/2026 o backup inteiro tinha menos de 0,5 GB.
 
@@ -1812,9 +1814,42 @@ Detalhe que o ensaio pegou (17/10): a imagem do Supabase define privilegios padr
 
 ### 10.3 Teste de restauracao
 
-Backup que nunca foi restaurado nao e backup. A rotina e: uma vez por trimestre (e depois de toda mudanca no stack), um servidor temporario na Hetzner (pode ser um CX22 por uma hora), restauracao completa e smoke, depois apagar. O ensaio em disco local do 17/10/2026 esta registrado no fim desta secao; o primeiro ensaio num servidor de verdade fica para quando o servidor existir.
+Backup que nunca foi restaurado nao e backup. A rotina e: uma vez por trimestre (e depois de toda mudanca no stack), e antes do lancamento, um servidor temporario na Hetzner, restauracao completa e conferencia, depois apagar. Servidor pago: so com o ok do produtor no chat. O primeiro ensaio num servidor de verdade foi em 27/11/2026 (10.3.1).
 
 Ensaio local de 17/10/2026 (restic em `/tmp/bunker707-restic-local`, stack do item 4): ver "Resultado do ensaio de backup e restore" ao final deste documento.
+
+#### 10.3.1 Ensaio num servidor novo, pelo R2 (27/11/2026)
+
+**Deu certo.** A area de membros inteira foi reconstruida a partir da segunda copia (§8E), num servidor vazio, com o `restore.sh` de verdade. O servidor `bunker707-teste` (CX23 em Falkenstein, EUR 0,0104/h) viveu uns 25 minutos: custo abaixo de EUR 0,01. Nenhum codigo novo: so etapas que ja existem, uma por vez, da `main` (`829cb0b`).
+
+| Passo | Etapa | O que faz |
+|---|---|---|
+| 1 | `teste-plano`, depois `teste-criar` com `CONFIRMADO=sim TESTE_PRECO_MAX=<preco>` | o servidor vazio (Ubuntu 24.04) com o firewall `bunker707-teste-fw` |
+| 2 | `exec-membros` com `MEMBROS_NAME=bunker707-teste DEPLOY_USER=root REMOTE_DIR=/root` | `git clone` publico no commit da `main`, o `bootstrap.sh` da producao (`SEM_SUPABASE_CLI=1`) e um par RSA de transferencia em `/etc/bunker707`; imprime so a chave publica |
+| 3 | `backup-membros`, depois `exec-membros` na producao | um backup novo nos dois destinos; o `envelope.sh encrypt` com a chave publica do teste (o endereco do repositorio do R2, a senha e as chaves dele) e o `docker save` da `APP_IMAGE` enviado ao R2 por `curl --aws-sigv4` (o pacote do GHCR e privado: o servidor de teste nao consegue baixar) |
+| 4 | `exec-membros` no teste (`DEPLOY_USER=deploy REMOTE_DIR=/opt/bunker707`) | decifrar, `docker load`, a **cerca**, o Caddy com certificado proprio, `restore.sh --snapshot latest --yes --sem-fumaca` e as tarefas do `pg_cron` desligadas |
+| 5 | `exec-membros` no teste e na producao, depois `teste-apagar` com `CONFIRMAR=apagar` | a conferencia (abaixo), o objeto da imagem apagado do R2 e o servidor, o firewall e o DNS apagados |
+
+**O que impede a copia de mexer na producao:**
+
+- **A cerca**, antes do `restore.sh`: `iptables -I DOCKER-USER 1 -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN` e `iptables -I DOCKER-USER 2 -o <placa da rota padrao> -j DROP` (e o mesmo no `ip6tables`). Nenhum container sai para a internet: nem e-mail pelo Resend, nem webhook, nem chamada a Bunny. A conferencia tenta sair de dentro do app e confirma o bloqueio. O `restic` roda no host e continua saindo.
+- **O certificado**: um Caddyfile com `local_certs` e `NODE_TLS_REJECT_UNAUTHORIZED=0` no app, por `BUNKER707_COMPOSE_OVERRIDE` (o `compose()` do `infra/scripts/lib.sh`), para o Caddy nao pedir certificado da Lets Encrypt para os enderecos da producao.
+- **Sem o smoke**: o `smoke.sh` testa os enderecos publicos, ou seja, a producao. A conferencia usa `curl -k --resolve <host>:443:127.0.0.1`, de dentro do servidor de teste.
+- **As tarefas agendadas**: `update cron.job set active=false` logo depois do restore (as 5: `bunker707-jobs-tick`, `jobs-history-prune`, `personal-data-prune`, `communication-prune` e `webinar-prune`).
+- **O DNS** da producao nao muda.
+
+**O que foi conferido:**
+
+- O `pg_restore` sem nenhum aviso; 15 contas no Auth; a ultima migracao `202611190001`, a mesma da producao.
+- Todos os servicos saudaveis, menos o `functions`, que fica `unhealthy` sem internet (esperado com a cerca).
+- `/api/health` 200 com `sha-829cb0b`; `/login` 200; `/` sem login 307 para `/login?next=%2F`; o `/auth/v1/health` 200; um arquivo publico do Storage 200.
+- Os 12 objetos do `storage.objects` com arquivo no disco; 13 arquivos dos dois lados.
+- Login de verdade, sem e-mail: `generate_link` do tipo `magiclink` pela API administrativa do Auth e `/auth/v1/verify` com o `token_hash`; com o cookie `sb-<primeiro rotulo do SUPABASE_PUBLIC_HOST>-auth-token`, o Inicio e o Minhas compras abrem (200).
+- 136 de 141 tabelas com a mesma contagem da producao. As 5 diferencas sao esperadas: `auth.audit_log_entries`, `auth.mfa_amr_claims`, `auth.refresh_tokens` e `auth.sessions` sao o proprio login do teste, e `public.job_runs` e o tick da producao no minuto entre o backup e a contagem.
+
+**O que nao foi ensaiado:** o Mautic (`restic-mautic`) e o `.env` da sala (`restic-meet`); a copia aberta num navegador de fora (so `curl` de dentro do servidor); o conteudo de curso, porque em 27/11/2026 a producao ainda nao tinha cursos, aulas nem acessos (so as contas da equipe). Repetir antes do lancamento, com conteudo e alunos, conferindo tambem os titulos de conteudo na pagina Inicio.
+
+**Armadilha:** o script de um passo nunca vai pela entrada padrao (`echo <base64> | base64 -d | bash`): o `compose exec` e o `psql` do `restore.sh` leem o resto do script da entrada, e o `bash` termina em silencio, com sucesso, sem rodar as linhas seguintes. Gravar o script num arquivo e rodar `bash arquivo < /dev/null`. E o `infra/scripts/lib.sh` liga `set -euo pipefail` quando e carregado: numa conferencia, uma consulta sem resultado para o script.
 
 ---
 
